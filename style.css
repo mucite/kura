@@ -172,7 +172,7 @@ body {
 .hero-content {
     position: relative;
     text-align: center;
-    padding: 6rem 2rem 8rem 2rem;
+    padding: 6rem 2rem 10rem 2rem;
     max-width: 900px;
 }
 
@@ -217,75 +217,137 @@ body {
     margin-right: auto;
 }
 
-.hero-buttons {
-    display: flex;
-    gap: 1.25rem;
-    justify-content: center;
-    margin-bottom: 3rem;
-    flex-wrap: wrap;
+/* HERO CTA - TRIAL FIRST (Primary Conversion Path) */
+.download-section-hero {
     animation: fadeInUp 0.8s ease-out 0.6s both;
+    margin-bottom: 2.5rem;
 }
 
-.hero-buttons .btn {
-    padding: 1.1rem 2.75rem;
-    font-size: 1.05rem;
-    font-weight: 600;
+.download-title {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: white;
+    margin-bottom: 0.75rem;
+    text-align: center;
 }
 
-.download-links {
+.download-subtitle {
+    color: #94a3b8;
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    font-weight: 500;
+}
+
+.download-buttons-large {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.download-btn-large {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 1.5rem;
-    margin-bottom: 4rem;
-    margin-top: 2rem;
-    animation: fadeInUp 0.8s ease-out 0.7s both;
-    flex-wrap: wrap;
-    padding: 1.5rem;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: var(--radius-xl);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    max-width: 600px;
-    margin-left: auto;
-    margin-right: auto;
-}
-
-.download-text {
-    color: #cbd5e1;
-    font-size: 0.95rem;
+    justify-content: space-between;
+    gap: 1.25rem;
+    padding: 1.5rem 2rem;
+    background: white;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 1rem;
+    color: var(--dark);
+    text-decoration: none;
     font-weight: 600;
+    transition: all 0.3s ease;
+    min-width: 280px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 
-.download-link {
+.download-btn-large:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+    border-color: var(--primary);
+}
+
+.download-btn-large > i:first-child {
+    font-size: 2.5rem;
+    color: var(--primary);
+}
+
+.download-icon-right {
+    font-size: 1.25rem;
+    color: var(--accent);
+    opacity: 0.7;
+    transition: all 0.3s ease;
+}
+
+.download-btn-large:hover .download-icon-right {
+    opacity: 1;
+    transform: translateX(3px);
+}
+
+.download-btn-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.download-btn-text strong {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--dark);
+}
+
+.download-btn-text small {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    font-weight: 500;
+}
+
+/* SECONDARY CTA - BUY OPTION (For Convinced Users) */
+.hero-buy-option {
+    animation: fadeInUp 0.8s ease-out 0.8s both;
+    text-align: center;
+    margin-top: 2.5rem;
+    padding-top: 2.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.buy-option-text {
+    color: #94a3b8;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.btn-buy-direct {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.85rem 2rem;
+    background: rgba(99, 102, 241, 0.15);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(99, 102, 241, 0.3);
+    border-radius: 0.75rem;
     color: rgba(255, 255, 255, 0.95);
     text-decoration: none;
     font-weight: 600;
     font-size: 0.95rem;
-    padding: 0.65rem 1.25rem;
-    border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.12);
-    border: 1px solid rgba(255, 255, 255, 0.25);
     transition: all 0.3s ease;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.6rem;
 }
 
-.download-link:hover {
-    background: rgba(255, 255, 255, 0.22);
+.btn-buy-direct:hover {
+    background: rgba(99, 102, 241, 0.25);
+    border-color: rgba(99, 102, 241, 0.5);
     transform: translateY(-2px);
-    border-color: rgba(255, 255, 255, 0.4);
-    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.15);
 }
 
-.download-link i {
-    font-size: 1.1rem;
-}
-
-.download-separator {
-    color: #64748b;
+.btn-buy-direct i {
     font-size: 1rem;
-    margin: 0 0.25rem;
 }
 
 .trust-badges {
@@ -316,10 +378,11 @@ body {
 
 /* Stats - FLAT DESIGN */
 .stats-section {
-    margin-top: -100px;
+    margin-top: -60px;
     z-index: 10;
     position: relative;
     padding-bottom: 4rem;
+    padding-top: 4rem;
 }
 
 .stats-grid {
@@ -949,11 +1012,27 @@ c/* COMPLIANCE - FLAT DESIGN */
     gap: 1.25rem;
     justify-content: center;
     flex-wrap: wrap;
+    margin-bottom: 2rem;
 }
 
-.cta .btn {
+.cta .btn-cta-large {
     padding: 1.5rem 3.5rem;
-    font-size: 1.1rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+    background: white;
+    color: var(--primary);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.cta .btn-cta-large:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
+}
+
+.cta-note {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.95rem;
+    font-weight: 500;
 }
 
 /* FOOTER */
@@ -1191,15 +1270,33 @@ c/* COMPLIANCE - FLAT DESIGN */
         padding: 0.5rem 1rem;
     }
 
-    .hero-buttons {
+    .download-buttons-large {
         flex-direction: column;
-        width: 100%;
         gap: 1rem;
+        width: 100%;
     }
 
-    .btn-large {
+    .download-btn-large {
         width: 100%;
-        padding: 1.25rem 2rem;
+        min-width: unset;
+    }
+
+    .download-title {
+        font-size: 1.5rem;
+    }
+
+    .download-subtitle {
+        font-size: 0.85rem;
+    }
+
+    .hero-buy-option {
+        margin-top: 2rem;
+        padding-top: 2rem;
+    }
+
+    .btn-buy-direct {
+        width: 100%;
+        justify-content: center;
     }
 
     .trust-badges {

@@ -1,0 +1,11 @@
+# Vercel Ignore - Exclude unnecessary files
+
+# Documentation (not needed in production)
+README.md
+SEO_GUIDE.md
+*.md
+
+# Git
+.git
+.gitignore
+

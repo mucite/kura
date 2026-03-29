@@ -1,22 +1,8 @@
 {
   "version": 2,
   "name": "kura-medical",
-  "builds": [
-    {
-      "src": "website/**",
-      "use": "@vercel/static"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/website/$1"
-    },
-    {
-      "src": "/",
-      "dest": "/website/index.html"
-    }
-  ],
+  "cleanUrls": true,
+  "trailingSlash": false,
   "headers": [
     {
       "source": "/(.*)",
@@ -36,18 +22,12 @@
         {
           "key": "Referrer-Policy",
           "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
         }
       ]
-    }
-  ],
-  "rewrites": [
-    {
-      "source": "/sitemap.xml",
-      "destination": "/website/sitemap.xml"
-    },
-    {
-      "source": "/robots.txt",
-      "destination": "/website/robots.txt"
     }
   ]
 }

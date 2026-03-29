@@ -4,5 +4,5 @@ Allow: /
 Disallow: /admin/
 Disallow: /private/
 
-Sitemap: https://kura-medical.de/sitemap.xml
+Sitemap: https://www.kura-medical.de/sitemap.xml
 

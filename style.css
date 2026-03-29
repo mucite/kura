@@ -314,7 +314,7 @@ body {
     font-size: 1.3rem;
 }
 
-/* Stats */
+/* Stats - FLAT DESIGN */
 .stats-section {
     margin-top: -100px;
     z-index: 10;
@@ -331,25 +331,21 @@ body {
 .stat-card {
     background: white;
     padding: 2.5rem 2rem;
-    border-radius: var(--radius-2xl);
-    box-shadow: var(--shadow-2xl);
+    border-radius: 1rem;
+    border: 2px solid #e2e8f0;
     text-align: center;
-    transition: all 0.4s ease;
-    border: 1px solid var(--border);
+    transition: all 0.3s ease;
 }
 
 .stat-card:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.2);
+    transform: translateY(-5px);
     border-color: var(--primary);
 }
 
 .stat-number {
     font-size: 3rem;
     font-weight: 900;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--primary);
     margin-bottom: 0.5rem;
 }
 
@@ -365,14 +361,14 @@ body {
     color: var(--text-light);
 }
 
-/* BUTTONS */
+/* BUTTONS - FLAT DESIGN */
 .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
     padding: 1rem 2rem;
-    border-radius: var(--radius-lg);
+    border-radius: 0.75rem;
     text-decoration: none;
     font-weight: 600;
     transition: all 0.3s ease;
@@ -383,8 +379,6 @@ body {
 .btn-large {
     padding: 1.5rem 2.75rem;
     font-size: 1.05rem;
-    flex-direction: column;
-    gap: 0.25rem;
     min-width: 240px;
 }
 
@@ -392,31 +386,25 @@ body {
     font-size: 1.5rem;
 }
 
-.btn-subtext {
-    font-size: 0.75rem;
-    font-weight: 400;
-    opacity: 0.9;
-}
-
 .btn-primary {
-    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+    background: var(--accent);
     color: white;
-    box-shadow: 0 8px 24px rgba(244, 63, 94, 0.4);
 }
 
 .btn-primary:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 12px 32px rgba(244, 63, 94, 0.5);
+    background: var(--accent-dark);
+    transform: translateY(-2px);
 }
 
 .btn-secondary {
     background: white;
     color: var(--primary);
-    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+    border-color: white;
 }
 
 .btn-secondary:hover {
-    transform: translateY(-3px);
+    background: #f8fafc;
+    transform: translateY(-2px);
 }
 
 .btn-outline {
@@ -454,9 +442,9 @@ body {
     border-radius: var(--radius-full);
 }
 
-/* FEATURES */
+/* FEATURES - FLAT DESIGN */
 .features {
-    background: var(--bg-soft);
+    background: #f8fafc;
 }
 
 .features-grid {
@@ -468,52 +456,33 @@ body {
 
 .feature-card {
     background: white;
-    border-radius: var(--radius-2xl);
-    padding: 3rem;
-    box-shadow: var(--shadow-md);
-    border: 1px solid var(--border);
-    transition: all 0.5s ease;
+    border-radius: 1rem;
+    padding: 2.5rem;
+    border: 2px solid #e2e8f0;
+    transition: all 0.3s ease;
     position: relative;
-    overflow: hidden;
-}
-
-.feature-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 5px;
-    background: linear-gradient(90deg, var(--primary) 0%, var(--primary-light) 100%);
-    transform: scaleX(0);
-    transition: transform 0.4s ease;
-}
-
-.feature-card:hover::before {
-    transform: scaleX(1);
 }
 
 .feature-card:hover {
-    transform: translateY(-10px);
-    box-shadow: var(--shadow-2xl);
+    transform: translateY(-5px);
     border-color: var(--primary);
 }
 
 .feature-icon {
-    font-size: 3.5rem;
-    margin-bottom: 1.75rem;
-    filter: grayscale(30%);
-    transition: all 0.4s ease;
+    font-size: 3rem;
+    margin-bottom: 1.5rem;
+    color: var(--primary);
+    transition: all 0.3s ease;
 }
 
 .feature-card:hover .feature-icon {
-    filter: grayscale(0%);
-    transform: scale(1.15) rotate(5deg);
+    color: var(--primary-dark);
+    transform: scale(1.1);
 }
 
 .feature-card h3 {
-    font-size: 1.5rem;
-    margin-bottom: 1.25rem;
+    font-size: 1.4rem;
+    margin-bottom: 1rem;
     font-weight: 700;
 }
 
@@ -522,55 +491,97 @@ body {
     color: var(--text-light);
 }
 
-/* WORKFLOW */
+/* WORKFLOW - CLEAN FLAT DESIGN (No Icons) */
 .workflow {
-    background: white;
+    background: #ffffff;
+    position: relative;
+}
+
+.workflow .container {
+    position: relative;
 }
 
 .workflow-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 2.5rem;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
     margin-top: 4rem;
+    position: relative;
 }
 
 .workflow-step {
     text-align: center;
+    position: relative;
+    padding: 3rem 2rem;
+    background: #f8fafc;
+    border-radius: 0.75rem;
+    border: 2px solid #e2e8f0;
+    transition: all 0.3s ease;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
 }
 
+.workflow-step:hover {
+    border-color: var(--primary);
+    background: #ffffff;
+    transform: translateY(-3px);
+}
+
+/* Simple arrow between steps */
+.workflow-step:not(:last-child)::after {
+    content: '→';
+    position: absolute;
+    right: -1.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 2rem;
+    color: #cbd5e1;
+    z-index: 2;
+    font-weight: 300;
+}
+
+/* Clean flat step number */
 .step-number {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 70px;
-    height: 70px;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    width: 60px;
+    height: 60px;
+    background: var(--primary);
     color: white;
-    border-radius: var(--radius-full);
-    font-weight: 800;
+    border-radius: 0.75rem;
+    font-weight: 700;
     font-size: 1.75rem;
-    margin-bottom: 1.75rem;
-    box-shadow: 0 10px 25px rgba(99, 102, 241, 0.4);
+    margin-bottom: 1.5rem;
     transition: all 0.3s ease;
 }
 
 .workflow-step:hover .step-number {
-    transform: scale(1.15) rotate(5deg);
+    background: var(--primary-dark);
+    transform: scale(1.05);
 }
 
+/* Remove icon styles - no longer needed */
 .step-icon {
-    font-size: 4rem;
-    margin: 1.25rem 0;
+    display: none;
 }
 
 .workflow-step h3 {
-    font-size: 1.3rem;
+    font-size: 1.4rem;
     margin-bottom: 1rem;
     font-weight: 700;
+    color: var(--dark);
+    line-height: 1.3;
 }
 
 .workflow-step p {
     color: var(--text-light);
+    line-height: 1.7;
+    font-size: 1rem;
+    max-width: 250px;
 }
 
 /* COMPARISON */
@@ -616,7 +627,7 @@ body {
     background: var(--bg-soft);
 }
 
-/* COMPLIANCE */
+c/* COMPLIANCE - FLAT DESIGN */
 .compliance {
     background: white;
 }
@@ -629,36 +640,35 @@ body {
 }
 
 .compliance-card {
-    background: var(--bg-soft);
-    border-radius: var(--radius-2xl);
-    padding: 3rem;
+    background: #f8fafc;
+    border-radius: 1rem;
+    padding: 2.5rem;
     text-align: center;
-    border: 2px solid var(--border);
+    border: 2px solid #e2e8f0;
     transition: all 0.3s ease;
 }
 
 .compliance-card:hover {
     border-color: var(--primary);
     background: white;
-    box-shadow: var(--shadow-2xl);
-    transform: translateY(-8px);
+    transform: translateY(-5px);
 }
 
 .compliance-icon {
-    font-size: 4rem;
-    margin-bottom: 1.75rem;
+    font-size: 3.5rem;
+    margin-bottom: 1.5rem;
     color: var(--primary);
 }
 
 .compliance-card h3 {
-    font-size: 1.4rem;
-    margin-bottom: 1.25rem;
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
     font-weight: 700;
 }
 
-/* PRICING */
+/* PRICING - FLAT DESIGN */
 .pricing {
-    background: var(--bg-soft);
+    background: #f8fafc;
 }
 
 .pricing-grid {
@@ -673,64 +683,44 @@ body {
 
 .pricing-card {
     background: white;
-    border: 2px solid var(--border);
-    border-radius: var(--radius-2xl);
-    padding: 3.5rem 3rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 1rem;
+    padding: 3rem 2.5rem;
     text-align: center;
-    transition: all 0.5s ease;
+    transition: all 0.3s ease;
     position: relative;
 }
 
-.pricing-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 5px;
-    background: linear-gradient(90deg, var(--primary) 0%, var(--primary-light) 100%);
-    transform: scaleX(0);
-    transition: transform 0.4s ease;
-}
-
-.pricing-card:hover::before {
-    transform: scaleX(1);
-}
-
 .pricing-card:hover {
-    transform: translateY(-12px);
-    box-shadow: var(--shadow-2xl);
+    transform: translateY(-5px);
     border-color: var(--primary);
 }
 
 .pricing-card.featured {
     border-color: var(--accent);
-    background: linear-gradient(135deg, rgba(244, 63, 94, 0.03) 0%, rgba(99, 102, 241, 0.03) 100%);
-    box-shadow: 0 25px 50px rgba(244, 63, 94, 0.2);
-    transform: scale(1.08);
+    border-width: 3px;
 }
 
-
 .pricing-card.featured:hover {
-    transform: scale(1.1) translateY(-12px);
+    transform: translateY(-5px);
 }
 
 .featured-badge {
     position: absolute;
     top: 1.5rem;
     right: 1.5rem;
-    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+    background: var(--accent);
     color: white;
-    padding: 0.5rem 1.25rem;
-    border-radius: var(--radius-full);
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
     font-size: 0.7rem;
-    font-weight: 800;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.05em;
 }
 
 .pricing-card h3 {
-    font-size: 1.6rem;
+    font-size: 1.5rem;
     margin-bottom: 1rem;
     font-weight: 700;
 }
@@ -740,33 +730,31 @@ body {
 }
 
 .price {
-    font-size: 4rem;
+    font-size: 3.5rem;
     font-weight: 900;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin: 1.75rem 0;
+    color: var(--primary);
+    margin: 1.5rem 0;
 }
 
 .pricing-card.featured .price {
-    color: var(--primary);
+    color: var(--accent);
 }
 
 .price-duration {
     color: var(--text-light);
-    margin-bottom: 2.5rem;
+    margin-bottom: 2rem;
 }
 
 .pricing-features {
     list-style: none;
     text-align: left;
-    margin: 2.5rem 0;
+    margin: 2rem 0;
 }
 
 .pricing-features li {
     padding: 1rem 0;
     color: var(--text);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid #f1f5f9;
     display: flex;
     align-items: center;
     gap: 1rem;
@@ -781,7 +769,7 @@ body {
     content: "✓";
     color: var(--success);
     font-weight: 800;
-    font-size: 1.4rem;
+    font-size: 1.2rem;
 }
 
 .pricing-card .btn {
@@ -1022,6 +1010,60 @@ body {
     margin: 0.75rem 0;
 }
 
+/* SEO CONTENT SECTION - FLAT DESIGN */
+.seo-content {
+    background: #ffffff;
+    padding: 5rem 2rem;
+}
+
+.seo-content h2 {
+    font-size: 2.5rem;
+    margin-bottom: 3rem;
+    text-align: center;
+}
+
+.seo-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2.5rem;
+    margin-top: 3rem;
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.seo-block {
+    background: #f8fafc;
+    padding: 2.5rem;
+    border-radius: 1rem;
+    border: 2px solid #e2e8f0;
+    transition: all 0.3s ease;
+}
+
+.seo-block:hover {
+    border-color: var(--primary);
+    background: #ffffff;
+    transform: translateY(-3px);
+}
+
+.seo-block h3 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--dark);
+    margin-bottom: 1rem;
+}
+
+.seo-block p {
+    color: var(--text-light);
+    line-height: 1.8;
+    font-size: 1rem;
+}
+
+.seo-block strong {
+    color: var(--primary);
+    font-weight: 600;
+}
+
 /* ANIMATIONS */
 @keyframes fadeInUp {
     from {
@@ -1077,6 +1119,34 @@ body {
     }
     .workflow-grid {
         grid-template-columns: repeat(2, 1fr);
+        gap: 2rem;
+    }
+
+    .workflow-grid::before {
+        display: none;
+    }
+
+    .workflow-step:not(:last-child)::after {
+        display: none;
+    }
+
+    /* Vertical arrows for 2-column layout */
+    .workflow-step:nth-child(1)::after,
+    .workflow-step:nth-child(2)::after {
+        content: '↓';
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        top: auto;
+        bottom: -2rem;
+        font-size: 2rem;
+        color: #cbd5e1;
+        display: block;
+    }
+
+    .workflow-step:nth-child(3)::after,
+    .workflow-step:nth-child(4)::after {
+        display: none;
     }
 }
 
@@ -1177,9 +1247,47 @@ body {
     .pricing-grid,
     .faq-grid,
     .testimonials-grid,
-    .compliance-grid {
+    .compliance-grid,
+    .seo-grid {
         grid-template-columns: 1fr;
         gap: 1.5rem;
+    }
+
+    .workflow-step {
+        padding: 2.5rem 1.5rem;
+        min-height: 180px;
+    }
+
+    .workflow-step:not(:last-child)::after {
+        content: '↓';
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        top: auto;
+        bottom: -2rem;
+        font-size: 2rem;
+        color: #cbd5e1;
+        display: block;
+    }
+
+    .workflow-step:last-child::after {
+        display: none;
+    }
+
+    .step-number {
+        width: 50px;
+        height: 50px;
+        font-size: 1.5rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .workflow-step h3 {
+        font-size: 1.2rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .workflow-step p {
+        font-size: 0.95rem;
     }
 
     .feature-card,
@@ -1257,4 +1365,3 @@ a:focus-visible {
     outline: 3px solid var(--primary);
     outline-offset: 3px;
 }
-

@@ -1,0 +1,8 @@
+# Kura Medical - robots.txt
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /private/
+
+Sitemap: https://kura-medical.de/sitemap.xml
+

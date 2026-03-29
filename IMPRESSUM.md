@@ -16,7 +16,7 @@
 Deutschland
 
 **Kontakt:**  
-E-Mail: support@kura-medical.de  
+E-Mail: github.com/mucite/kura/issues  
 Web: https://github.com/mucite/kura
 
 ---
@@ -71,6 +71,12 @@ Kura Medical unterstützt die Einhaltung von:
 - § 84 Abs. 6/7 SGB V (Dokumentations- und Abrechnungsstandards)
 - DSGVO (Datenschutz-Grundverordnung)
 - ICD-10 German Medical Coding Standards
+
+---
+
+## Navigation
+
+[← Zurück zur Startseite](/) | [Datenschutz](/PRIVACY.md) | [AGB](/TERMS.md)
 
 ---
 

@@ -19,7 +19,7 @@ website/
 ## 🏢 Legal Information
 
 **Address:** Windsteiner Weg 26, Berlin, Deutschland  
-**Email:** support@kura-medical.de
+**Email:** github.com/mucite/kura/issues
 
 All legal pages are properly configured and linked in the footer.
 

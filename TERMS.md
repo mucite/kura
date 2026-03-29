@@ -20,7 +20,7 @@ Diese Nutzungsbedingungen gelten für die Nutzung der Software **Kura Medical** 
 - Keine Kreditkarte erforderlich
 
 ### 2.2 Kura Pro (Abonnement)
-- **Monatliche Zahlung: 39€**
+- **Monatliche Zahlung: 49€**
 - Unbegrenzte Befunde
 - Hardware-gebundene Lizenz
 - Jederzeit kündbar
@@ -84,7 +84,7 @@ Kura Medical ist ein **Dokumentationswerkzeug**. Die Software:
 - Manuelle Installation
 
 ### 6.2 Support
-- E-Mail: support@kura-medical.de
+- E-Mail: github.com/mucite/kura/issues
 - GitHub: https://github.com/mucite/kura
 - Discord: https://discord.gg/kura-medical
 
@@ -169,8 +169,14 @@ Es gilt deutsches Recht.
 ## Kontakt
 
 **Kura Medical**  
-E-Mail: support@kura-medical.de  
+E-Mail: github.com/mucite/kura/issues  
 Web: https://github.com/mucite/kura
+
+---
+
+## Navigation
+
+[← Zurück zur Startseite](/) | [Datenschutz](/PRIVACY.md) | [Impressum](/IMPRESSUM.md)
 
 ---
 

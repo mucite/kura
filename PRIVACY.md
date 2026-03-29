@@ -10,7 +10,7 @@
 **Kura Medical**  
 Windsteiner Weg 26  
 Berlin, Deutschland  
-E-Mail: support@kura-medical.de
+E-Mail: github.com/mucite/kura/issues
 
 ---
 
@@ -68,7 +68,7 @@ Nach der DSGVO haben Sie folgende Rechte:
 - **Datenübertragbarkeit** (Art. 20 DSGVO)
 - **Widerspruch** (Art. 21 DSGVO)
 
-**Kontakt:** support@kura-medical.de
+**Kontakt:** github.com/mucite/kura/issues
 
 ---
 
@@ -97,7 +97,13 @@ Wir behalten uns vor, diese Datenschutzerklärung zu aktualisieren. Aktuelle Ver
 ## 8. Kontakt
 
 Bei Fragen zur Datenverarbeitung:  
-**E-Mail:** support@kura-medical.de
+**E-Mail:** github.com/mucite/kura/issues
+
+---
+
+## Navigation
+
+[← Zurück zur Startseite](/) | [AGB](/TERMS.md) | [Impressum](/IMPRESSUM.md)
 
 ---
 

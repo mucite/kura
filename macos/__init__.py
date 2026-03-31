@@ -1,0 +1,2 @@
+# macOS version of Kura
+

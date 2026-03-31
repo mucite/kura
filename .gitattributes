@@ -1,0 +1,13 @@
+# .gitattributes for Git LFS
+# Track large model files with Git Large File Storage
+
+# Model files
+models/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+models/**/*.bin filter=lfs diff=lfs merge=lfs -text
+models/**/*.gguf filter=lfs diff=lfs merge=lfs -text
+models/**/*.onnx filter=lfs diff=lfs merge=lfs -text
+
+# Exclude JSON config files from LFS (keep as regular git)
+models/**/*.json !filter !diff !merge text
+models/**/tokenizer.json !filter !diff !merge text
+

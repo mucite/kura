@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# Code signing — NEVER commit private keys
+*.pfx
+*.p12
+
+# Audio files
+*.wav
+*.mp3
+*.m4a
+
+# Build artifacts
+*.app
+*.dmg
+*.exe
+*.spec
+
+# Reports and Archives
+archive/
+reports/
+
+# MacOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Models (large files)
+models/*/model.safetensors
+models/*/tokenizer.json
+website/
+models/*/weights.safetensors
+models/*/*.bin
+
+# Temporary files
+*.log
+*.tmp
+**/*.md
+

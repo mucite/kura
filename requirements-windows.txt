@@ -1,0 +1,32 @@
+# Kura v2026 — Windows Requirements
+# 100% local, DSGVO-safe, no cloud services
+
+# === Core ===
+python-dotenv==1.0.0
+
+# === GUI ===
+PySimpleGUI>=5.0.8
+
+# === Audio (recording via sounddevice — no ffmpeg required) ===
+sounddevice==0.4.6
+numpy>=1.26.0
+
+# === Document Generation ===
+fpdf2>=2.7.8
+
+# === Network (license + config sync) ===
+requests>=2.31.0
+
+# === System Monitoring ===
+psutil>=5.9.0
+
+# === AI/ML — Speech-to-Text (CPU, local) ===
+faster-whisper>=0.10.0
+
+# === AI/ML — LLM (GGUF, CPU-only, no GPU required) ===
+# Note: for CUDA acceleration use:
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+llama-cpp-python>=0.2.0
+
+# === Build/Packaging ===
+pyinstaller>=6.10.0

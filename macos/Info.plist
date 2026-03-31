@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Bundle Information -->
+    <key>CFBundleName</key>
+    <string>Kura Medical</string>
+    <key>CFBundleDisplayName</key>
+    <string>Kura</string>
+    <key>CFBundleIdentifier</key>
+    <string>de.kura-medical.kura</string>
+    <key>CFBundleVersion</key>
+    <string>2026.1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2026.1</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+
+    <!-- Icon -->
+    <key>CFBundleIconFile</key>
+    <string>stethoscope.icns</string>
+
+    <!-- High Resolution Display Support -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- Microphone Permission (REQUIRED for recording) -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Kura benötigt Zugriff auf das Mikrofon, um Ihre Therapiesitzungen aufzuzeichnen und SOAP-Befunde zu erstellen. Alle Aufnahmen werden lokal verarbeitet und automatisch gelöscht (DSGVO-konform).</string>
+
+    <!-- Speech Recognition (for transcription) -->
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Kura verwendet Spracherkennung, um Ihre Therapiesitzungen in SOAP-Befunde umzuwandeln. Die Verarbeitung erfolgt 100% lokal auf Ihrem Mac.</string>
+
+    <!-- Background Audio (if needed) -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
+
+    <!-- LSUIElement: Hide from Dock (Menu bar app only) -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- Document Types -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>PDF Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.adobe.pdf</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- Copyright -->
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 Kura Medical. All rights reserved.</string>
+
+    <!-- Minimum System Version -->
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+</dict>
+</plist>
+

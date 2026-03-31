@@ -260,8 +260,12 @@ class KuraApp:
             billing_line = f"POSITION: {res.get('billing_suggestion', '?')}"
             audit_block = warning_str
 
+        profile_label = res.get("profile_label", "")
+        profile_line = f"PROFIL: {profile_label}\n" if profile_label else ""
+
         # SOAP first — immediately visible; billing + tick-box audit below
         initial_text = (
+            f"{profile_line}"
             f"S: {soap.get('S', '')}\n\n"
             f"O: {soap.get('O', '')}\n\n"
             f"A: {soap.get('A', '')}\n\n"
@@ -465,10 +469,21 @@ class KuraApp:
             sg.popup_error("KI-Engine nicht geladen.")
             return
         try:
-            self.engine.config.sync_remote_config()
-            sg.popup_ok(f"Konfiguration aktualisiert (v{self.engine.config.version})", title="Update")
+            cfg = self.engine.config
+            override_path = cfg.local_override_path
+            first_time = not os.path.exists(override_path)
+            cfg.create_override_template()
+            if first_time:
+                sg.popup_ok(
+                    f"Konfigurationsdatei erstellt:\n{override_path}\n\n"
+                    "Bearbeiten Sie nur die Werte, die Sie anpassen möchten.\n"
+                    "Alle anderen Werte werden weiterhin aus der Kura-Cloud geladen.\n"
+                    "Diese Datei wird NICHT an Kura Medical übertragen.",
+                    title="Lokale Konfiguration"
+                )
+            os.startfile(override_path)
         except Exception as e:
-            sg.popup_error(f"Konfiguration konnte nicht geladen werden:\n{e}")
+            sg.popup_error(f"Konfiguration konnte nicht geöffnet werden:\n{e}")
 
     # ── Main window & event loop ──────────────────────────────────────────────
 
@@ -541,9 +556,11 @@ class KuraApp:
                 br = res.get("billing_result")
                 billing_line = br.format_billing_line() if br else res.get("billing_suggestion", "")
                 audit_status = f"AUDIT: {br.audit_status}" if br else ""
+                profile_label = res.get("profile_label", "")
                 summary = (
                     f"ICD-10: {res.get('icd10')}  |  {billing_line}\n"
-                    f"{audit_status}\n\n"
+                    f"{audit_status}\n"
+                    f"PROFIL: {profile_label}\n\n"
                     f"S: {soap.get('S')}\n\nO: {soap.get('O')}\n\n"
                     f"A: {soap.get('A')}\n\nP: {soap.get('P')}"
                 )

@@ -177,6 +177,26 @@ class KuraApp(rumps.App):
         os.makedirs(_kura_data_dir, exist_ok=True)
         self.temp_audio = os.path.join(_kura_data_dir, "session.wav")
         self.last_report = None
+
+        # ── Microphone ownership ──────────────────────────────────────────────
+        # ffmpeg is started in its own process group (os.setsid) so we can
+        # kill it atomically. A PID file lets the next launch clean up after
+        # a SIGKILL / force-quit where atexit/SIGTERM handlers never ran.
+        self._ffmpeg_pid_file = os.path.join(_kura_data_dir, "ffmpeg.pid")
+        self._kill_stale_ffmpeg()
+
+        # atexit fires on normal exit and SIGTERM (not SIGKILL — that's what
+        # the PID file covers on next launch).
+        import atexit, signal as _signal
+        atexit.register(self._kill_stale_ffmpeg)
+
+        _orig_sigterm = _signal.getsignal(_signal.SIGTERM)
+        def _sigterm(signum, frame):
+            self._kill_stale_ffmpeg()
+            if callable(_orig_sigterm):
+                _orig_sigterm(signum, frame)
+            sys.exit(0)
+        _signal.signal(_signal.SIGTERM, _sigterm)
         # --- NEW: Timer State ---
         self.seconds_elapsed = 0
         self.timer = rumps.Timer(self.update_timer, 1)  # Ticks every 1 second
@@ -231,6 +251,44 @@ class KuraApp(rumps.App):
     def _set_recording_state(self, recording: bool):
         self._item_start.set_callback(None if recording else self.start)
         self._item_stop.set_callback(self.stop if recording else None)
+
+    def _kill_stale_ffmpeg(self):
+        """
+        Kill any ffmpeg process we own, using the process group so that even
+        child processes of ffmpeg (e.g. codec helpers) are taken down.
+        Also handles PID-file recovery after a SIGKILL / force-quit.
+        """
+        import signal as _signal
+
+        # 1. Live process object from this session
+        proc = getattr(self, 'proc', None)
+        if proc is not None and proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), _signal.SIGTERM)
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            self.proc = None
+
+        # 2. PID file left by a previous crash / force-quit
+        pid_file = getattr(self, '_ffmpeg_pid_file', None)
+        if pid_file and os.path.exists(pid_file):
+            try:
+                with open(pid_file) as f:
+                    old_pid = int(f.read().strip())
+                try:
+                    os.killpg(os.getpgid(old_pid), _signal.SIGTERM)
+                except ProcessLookupError:
+                    pass  # already gone — that's fine
+            except Exception:
+                pass
+            try:
+                os.remove(pid_file)
+            except Exception:
+                pass
 
     def check_for_ai_result(self, _):
         """Drains the UI queue and opens the review window on the main thread."""
@@ -716,11 +774,6 @@ class KuraApp(rumps.App):
                 )
                 return
 
-            try:
-                subprocess.run(['pkill', '-f', 'ffmpeg.*avfoundation'], capture_output=True)
-            except Exception:
-                pass
-
             self.seconds_elapsed = 0
             self.timer.start()
             self.recording = True
@@ -728,15 +781,22 @@ class KuraApp(rumps.App):
 
             try:
                 # Record as 16kHz mono PCM — exactly what Whisper needs.
-                # Avfoundation default is 44.1kHz stereo; if we let mlx_whisper
-                # do the resampling internally it can crash the Metal pipeline.
+                # os.setsid puts ffmpeg in its own process group so we can
+                # kill it atomically (os.killpg) even after a crash.
                 self.proc = subprocess.Popen(
                     [self._ffmpeg_path(), '-y',
                      '-f', 'avfoundation', '-i', ':0',
                      '-ar', '16000', '-ac', '1', '-acodec', 'pcm_s16le',
                      self.temp_audio],
-                    stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    preexec_fn=os.setsid,
                 )
+                # Write PID so next launch can clean up after SIGKILL / force-quit
+                try:
+                    with open(self._ffmpeg_pid_file, 'w') as _f:
+                        _f.write(str(self.proc.pid))
+                except Exception:
+                    pass
                 rumps.notification("Kura", "Aufnahme gestartet", f"Patient: {self.patient_name}")
             except Exception as e:
                 self.recording = False
@@ -753,9 +813,13 @@ class KuraApp(rumps.App):
         self.recording = False
         self._set_recording_state(False)
 
-        if hasattr(self, 'proc'):
-            self.proc.terminate()
-            self.proc.wait()
+        self._kill_stale_ffmpeg()
+        # PID file no longer needed — recording ended cleanly
+        try:
+            if os.path.exists(self._ffmpeg_pid_file):
+                os.remove(self._ffmpeg_pid_file)
+        except Exception:
+            pass
 
         if self.seconds_elapsed < 10:
             rumps.alert("Aufnahme zu kurz",

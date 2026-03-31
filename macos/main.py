@@ -125,7 +125,8 @@ if "HF_TOKEN" not in os.environ:
 
 # --- App version (must match Gist version when releasing) ---
 APP_VERSION = "2026.3.2"
-_RELEASES_URL = "https://github.com/mucite/kura/releases"
+_VERSION_URL  = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/version.json"
+_DOWNLOAD_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/Kura_macOS_v2026.dmg"
 
 
 # --- Main App ---
@@ -493,11 +494,7 @@ class KuraApp(rumps.App):
         def _run():
             try:
                 import requests as _req
-                r = _req.get(
-                    "https://gist.githubusercontent.com/mucite/"
-                    "6994897471e0676bbbdd2468002c24fc/raw/physio_config_2026.json",
-                    timeout=6,
-                )
+                r = _req.get(_VERSION_URL, timeout=6)
                 if r.status_code != 200:
                     self._on_main(lambda: self._item_update.set_callback(self.check_for_update))
                     return
@@ -540,7 +537,7 @@ class KuraApp(rumps.App):
             ),
             ok="Herunterladen"
         )
-        subprocess.Popen(["open", _RELEASES_URL])
+        subprocess.Popen(["open", _DOWNLOAD_URL])
 
     @staticmethod
     def _version_gt(a: str, b: str) -> bool:

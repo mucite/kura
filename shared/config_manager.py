@@ -14,6 +14,7 @@ _GIST_URL = (
     "6994897471e0676bbbdd2468002c24fc/raw/physio_config_2026.json"
 )
 
+
 _FALLBACK = {
     "version": "2026.0.0",
     "billing_codes": {"MT": "20701", "KG": "20501", "KPE": "21101"},

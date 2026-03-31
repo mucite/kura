@@ -168,12 +168,14 @@ _HMK: dict[str, dict] = {
         "docs": ["ROM Sprunggelenk (DF/PF)", "Schmerz (VAS)", "Gangbild"],
     },
     "EX6": {
-        "desc": "Hand/Handgelenk/Ellbogen – Arthrose, Karpaltunnel, Epikondylitis",
+        "desc": "Hand/Handgelenk/Ellbogen – Arthrose, Fraktur-Reha, Karpaltunnel, Epikondylitis",
         "heilmittel": "KG", "position": "20501",
         "name": "Krankengymnastik Einzelbehandlung",
         "duration": 20, "regelfall": 6, "langfristig": False,
         "optional_mt": True,
-        "icd": ["M19.0", "M65", "G54.2", "M77.0", "M77.1", "M79.2"],
+        "icd": ["M19.0", "M65", "G54.2", "M77.0", "M77.1", "M79.2",
+                "S52", "S62", "S60", "S61", "S63", "S64", "S68",  # wrist/hand fractures & trauma
+                "T92"],  # sequelae of upper limb injuries
         "docs": ["ROM Hand/Ellbogen (Neutral-Null)", "Griffstärke (kg)", "Schmerz (VAS)"],
     },
 
@@ -459,7 +461,14 @@ _DOC_CHECKERS: dict = {
     "Segmentbefund (L/S)":             lambda t: any(k in t for k in ["segmentbefund", "l1", "l2", "l3", "l4", "l5", "s1", "lws"]),
     "Behandeltes Segment":             lambda t: bool(re.search(
         r'\b(?:segment(?:befund)?|[Cc]\d/[Cc]\d|[Cc]\d/[Tt]h?\d|[Ll]\d/[Ll]\d|[Ll]\d/[Ss]\d|'
-        r'L4/L5|L5/S1|C5/C6|C6/C7|BWS|ISG)\b', t)),
+        r'L4/L5|L5/S1|C5/C6|C6/C7|BWS|ISG|'
+        # Extremity joint names also satisfy the §125 segment documentation requirement
+        r'radiokarpal(?:gelenk)?|handgelenk|handwurzel|mcp|pip|dip|metakarpal|'
+        r'glenohumer(?:al)?|schultergelenk|akromioklavikular|'
+        r'kniegelenk|tibiofemorales?\s+gelenk|patellofemoral|'
+        r'sprunggelenk|osg|usg|talokalkanear|'
+        r'h[üu]ftgelenk|koxofemoral|'
+        r'ellbogengelenk|humeroradiares?\s+gelenk|humeroulnar)\b', t, re.I)),
     "Blasen-/Mastdarmfunktion":        lambda t: bool(re.search(
         r'blasen|mastdarm|harninkontinenz|stuhlinkontinenz|miktion|defäkation|'
         r'blasen.?mastdarm|kontinenz', t, re.I)),
@@ -730,6 +739,10 @@ class _GKVEngine:
             return "WS1a"
         if any(k in text for k in ["copd", "asthma", "atemweg"]):
             return "AT1"
+        if any(k in text for k in ["handgelenk", "handwurzel", "radiusfraktur", "radius",
+                                    "finger", "fingergelenk", "metakarpal", "phalanx",
+                                    "ellbogen", "karpaltunnel", "ulna"]):
+            return "EX6"
         if any(k in text for k in ["manuelle therapie", " mt ", "traktion", "gleitmobilisation"]):
             return "WS1b"
         return "WS1b"

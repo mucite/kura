@@ -360,7 +360,7 @@ class KuraEngine:
             ],
         },
         "MT": {
-            "label":    "Manuelle Therapie",
+            "label":    "Manuelle Therapie WS (Facette / ISG)",
             "billing":  "20701",
             "priority": 50,
             "triggers": [
@@ -376,7 +376,6 @@ class KuraEngine:
                 "Palpation: Druckdolenz + exakte Lokalisation",
                 "Schmerz: VAS x/10",
                 "Provokationstest: Lasegue / Spurling / Slump (positiv / negativ)",
-                "LWS: Schober-Zeichen (cm zu cm), FBA (cm)",
                 "Blasen-/Mastdarmfunktion: unauffaellig / gestaert (Cauda-equina-Screening)",
             ],
         },
@@ -434,6 +433,28 @@ class KuraEngine:
                 "Thomas-Handgriff: positiv / negativ",
                 "Kraft Huefte (MRC 0-5): Abduktion / Extension",
                 "VAS (0-10)",
+            ],
+        },
+        "EX_HAND": {
+            "label":    "Extremitaeten Hand / Handgelenk / Finger",
+            "billing":  "20701",
+            "priority": 44,   # above EX_FUSS (40) and EX_HUefte (41), below MT (50)
+            "triggers": [
+                "handgelenk", "handwurzel", "radiokarpal", "radiusfraktur",
+                "metakarpal", "fingergelenk", "fingergrundgelenk", "fingermittelgelenk",
+                "handkraft", "karpaltunnel", "handchirurgie", "handödem",
+                "handwurzelknochen", "daumengelenk",
+            ],
+            "icd_prefix": ["S52", "S62", "M19.0", "G56", "M65.3"],
+            "checklist": [
+                "Behandeltes Segment: z.B. Radiokarpalgelenk / MCP II / PIP III (MT-Pflichtangabe)",
+                "ROM Handgelenk: Flexion / Extension / Radialabduktion / Ulnarabduktion (Grad)",
+                "ROM Finger: je Strahl Grundgelenk / Mittelgelenk / Endgelenk (Grad oder Faust-cm)",
+                "Jamar-Handkraft (kg) re / li (altersadjustiert falls Kind)",
+                "Pinzettengriff / Schluesselgriff: moeglich / eingeschraenkt / nicht moeglich",
+                "Schmerz: VAS x/10",
+                "Narbe (falls OP): Verschieblichkeit / Sensibilitaet / Roeotung",
+                "Oedemmass: Umfang Handgelenk in cm (falls geschwollen)",
             ],
         },
         "EX_FUSS": {

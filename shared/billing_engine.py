@@ -60,20 +60,21 @@ class BillingResult:
     audit_status: str = "PASS"              # "PASS" | "REVIEW" | "BLOCK"
     compliance_warnings: list = field(default_factory=list)
     required_documentation: list = field(default_factory=list)
-    # GKV-specific
+    # GKV-spezifisch
     max_units_regelfall: int = 0
     requires_langfrist_approval: bool = False
-    fixed_price_eur: Optional[float] = None
-    # PKV-specific
-    price_range_eur: Optional[tuple] = None
-    reimbursement_likelihood: str = ""      # "HOCH" | "MITTEL" | "GERING"
+    fixed_price_eur: Optional[float] = None        # Festpreis §125 SGB V — unveränderlich
+    # PKV-spezifisch
+    price_range_eur: Optional[tuple] = None        # GebüTh-Orientierungswerte (Ober-/Untergrenze)
+    pkv_praxispreis_eur: Optional[float] = None    # Praxiseigener PKV-Preis (aus config_override.json)
+    reimbursement_likelihood: str = ""             # "HOCH" | "MITTEL" | "GERING"
     optimization_hints: list = field(default_factory=list)
-    # BG-specific
-    bg_surcharge_pct: float = 0.0           # typical DGUV surcharge over GKV
+    # BG-spezifisch (Berufsgenossenschaft / DGUV)
+    bg_surcharge_pct: float = 0.0
     bg_extra_docs: list = field(default_factory=list)
 
     def format_audit_report(self) -> str:
-        """Returns a concise, audit-ready text block for clipboard/PDF."""
+        """Gibt einen prüfbereiten Textblock für Zwischenablage/PDF zurück."""
         lines = []
         for item in self.audit_items:
             lines.append(str(item))
@@ -82,14 +83,27 @@ class BillingResult:
         return "\n".join(lines)
 
     def format_billing_line(self) -> str:
-        """Single-line billing summary for report header."""
+        """Einzeilige Abrechnungszeile für den Berichtskopf."""
         ins = self.insurance_type.value
-        if self.fixed_price_eur:
-            price = f"€{self.fixed_price_eur:.2f}"
-        elif self.price_range_eur:
-            price = f"€{self.price_range_eur[0]:.0f}–{self.price_range_eur[1]:.0f} (GebüTh)"
+        if self.insurance_type == InsuranceType.GKV:
+            # Festpreis §125 SGB V — gesetzlich fixiert, keine Abweichung möglich
+            price = f"€{self.fixed_price_eur:.2f} (Festpreis §125 SGB V)" if self.fixed_price_eur else ""
+        elif self.insurance_type == InsuranceType.BG:
+            # DGUV-Vergütung = GKV-Satz + Aufschlag
+            if self.fixed_price_eur:
+                aufschlag = f"+{self.bg_surcharge_pct:.0f}% DGUV"
+                price = f"€{self.fixed_price_eur:.2f} ({aufschlag})"
+            else:
+                price = ""
         else:
-            price = ""
+            # PKV: entweder praxiseigener Preis oder GebüTh-Orientierungswert
+            if self.pkv_praxispreis_eur:
+                price = f"€{self.pkv_praxispreis_eur:.2f} (Praxispreis PKV)"
+            elif self.price_range_eur:
+                price = (f"€{self.price_range_eur[0]:.0f}–{self.price_range_eur[1]:.0f}"
+                         f" (GebüTh-Orientierungswert)")
+            else:
+                price = ""
         regelfall = f" | max. {self.max_units_regelfall} EH" if self.max_units_regelfall else ""
         langfrist = " | ⚠️ Langfristgenehmigung erforderlich" if self.requires_langfrist_approval else ""
         return f"[{ins}] {self.position_number} – {self.position_name} | {price}{regelfall}{langfrist}"
@@ -575,7 +589,7 @@ class _GKVEngine:
                 "MT_UPGRADE", "MT-Techniken dokumentiert",
                 "WARN",
                 "Prüfen Sie Ihr Rezept: Ist 'Manuelle Therapie' explizit verordnet? "
-                "Nur dann ist 20701 abrechenbar. Rezept KG → bleibt 20501."
+                "Nur dann ist 20701 abrechenbar. Rezept KG -> bleibt 20501."
             ))
 
         # ── 4. Mandatory SOAP fields ───────────────────────────────────────────
@@ -597,10 +611,10 @@ class _GKVEngine:
         # ── 5. Befunddichte §106b ──────────────────────────────────────────────
         min_len = 60 if position in ("20701", "20511", "20510") else 20
         if len(obj) >= min_len:
-            audit.append(AuditItem("OBJ_DENSITY", f"O-Feld Mindestdichte (≥{min_len} Zeichen)",
+            audit.append(AuditItem("OBJ_DENSITY", f"O-Feld Mindestdichte (>={min_len} Zeichen)",
                                    "PASS", f"{len(obj)} Zeichen"))
         else:
-            audit.append(AuditItem("OBJ_DENSITY", f"O-Feld Mindestdichte (≥{min_len} Zeichen)",
+            audit.append(AuditItem("OBJ_DENSITY", f"O-Feld Mindestdichte (>={min_len} Zeichen)",
                                    "FAIL", f"Nur {len(obj)} Zeichen — {min_len - len(obj)} fehlen"))
             risk = "WARN"
 
@@ -780,13 +794,26 @@ class _PKVEngine:
     ⚠️ Never guarantee PKV reimbursement.
     """
 
-    def evaluate(self, icd10: str, soap: dict, transcript: str) -> BillingResult:
+    def evaluate(
+        self,
+        icd10: str,
+        soap: dict,
+        transcript: str,
+        pkv_preise: Optional[dict] = None,
+    ) -> BillingResult:
+        """
+        pkv_preise: dict[Positionsnummer → float] aus config_override.json.
+        Beispiel: {"20701": 72.00, "20501": 55.00}
+        Wenn gesetzt, gilt der Praxispreis statt des GebüTh-Orientierungswerts.
+        GKV-Festpreise werden dadurch nicht berührt.
+        """
         audit: list[AuditItem] = []
+        pkv_preise = pkv_preise or {}
 
-        audit.append(AuditItem("PKV_NOTICE", "PKV-Hinweis", "WARN",
-                               "Preise sind GebüTh-Orientierungswerte — kein GKV-Festpreis"))
-        audit.append(AuditItem("PKV_REIMBURSEMENT", "Erstattungshinweis", "WARN",
-                               "Erstattung hängt vom individuellen Versicherungsvertrag ab"))
+        audit.append(AuditItem("PKV_HINWEIS", "PKV-Abrechnungshinweis", "WARN",
+                               "Keine gesetzlichen Festpreise — Preis frei vereinbar (GebüTh als Orientierung)"))
+        audit.append(AuditItem("PKV_ERSTATTUNG", "Erstattungshinweis", "WARN",
+                               "Erstattung abhängig vom individuellen Versicherungsvertrag des Patienten"))
 
         dg = _match_dg(icd10) or "EX1b"
         entry = _HMK[dg]
@@ -795,9 +822,21 @@ class _PKVEngine:
         if entry.get("optional_mt") and self._mt_indicated(soap, transcript):
             position = "20701"
             audit.append(AuditItem("MT_UPGRADE", "MT-Erstbefundung empfohlen", "PASS",
-                                   "20700 (30 Min) bei Neupatient separat abrechenbar (+~€7)"))
+                                   "20700 (30 Min) bei Neupatient separat abrechenbar (~€7 Aufschlag)"))
 
+        # Praxispreis hat Vorrang — GebüTh nur als Orientierungswert wenn kein Praxispreis gesetzt
+        praxispreis = pkv_preise.get(position)
         price_range = _PKV_RANGES.get(position, (25.0, 65.0))
+
+        if praxispreis:
+            audit.append(AuditItem("PKV_PRAXISPREIS", "Praxiseigener PKV-Preis",
+                                   "PASS", f"€{praxispreis:.2f} (aus Praxiskonfiguration)"))
+        else:
+            audit.append(AuditItem("PKV_GEBUETH", "GebüTh-Orientierungswert",
+                                   "WARN",
+                                   f"€{price_range[0]:.0f}–{price_range[1]:.0f} — "
+                                   "Praxispreis in config_override.json unter 'pkv_preise' hinterlegen"))
+
         likelihood = self._score_likelihood(icd10, soap)
         hints = self._hints(soap, transcript, position)
 
@@ -836,10 +875,10 @@ class _PKVEngine:
         return BillingResult(
             insurance_type=InsuranceType.PKV,
             position_number=position,
-            position_name=entry["name"] + " (PKV / GebüTh-Referenz)",
+            position_name=entry["name"] + " (PKV)",
             diagnosegruppe=dg,
-            diagnosegruppe_desc=entry["desc"] + " — GKV-Katalog als klinische Referenz",
-            legal_basis="GebüTh (Orientierungswert) — kein Rechtsanspruch aus § 125 SGB V",
+            diagnosegruppe_desc=entry["desc"],
+            legal_basis="PKV — freie Preisgestaltung | GebüTh als Orientierungswert | kein §125 SGB V",
             session_duration_min=entry["duration"],
             risk_level="OK" if likelihood != "GERING" else "WARN",
             audit_items=audit,
@@ -847,6 +886,7 @@ class _PKVEngine:
             compliance_warnings=[str(a) for a in audit if a.status == "WARN"],
             required_documentation=entry["docs"],
             max_units_regelfall=0,
+            pkv_praxispreis_eur=praxispreis,
             price_range_eur=price_range,
             reimbursement_likelihood=likelihood,
             optimization_hints=hints,
@@ -947,10 +987,17 @@ class BillingEngine:
         transcript: str,
         insurance_type: InsuranceType = InsuranceType.GKV,
         config_rules: Optional[dict] = None,
+        pkv_preise: Optional[dict] = None,
     ) -> BillingResult:
+        """
+        config_rules : aus ConfigManager.billing_rules  (GKV/BG)
+        pkv_preise   : aus ConfigManager.pkv_preise     (PKV — praxiseigene Preise)
+                       z.B. {"20701": 72.00, "20501": 55.00}
+                       GKV-Festpreise werden dadurch nicht verändert.
+        """
         rules = config_rules or {}
         if insurance_type == InsuranceType.BG:
             return self._bg.evaluate(icd10, soap, transcript, rules)
         if insurance_type == InsuranceType.PKV:
-            return self._pkv.evaluate(icd10, soap, transcript)
+            return self._pkv.evaluate(icd10, soap, transcript, pkv_preise=pkv_preise)
         return self._gkv.evaluate(icd10, soap, transcript, rules)

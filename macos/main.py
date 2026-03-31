@@ -123,6 +123,11 @@ if "HF_TOKEN" not in os.environ:
 # --- Live Audio Visualizer ---
 
 
+# --- App version (must match Gist version when releasing) ---
+APP_VERSION = "2026.3.2"
+_RELEASES_URL = "https://github.com/mucite/kura/releases"
+
+
 # --- Main App ---
 def _asset(name):
     """Resolve icon path whether running as bundle or from source."""
@@ -155,7 +160,6 @@ class KuraApp(rumps.App):
         self.status_item  = rumps.MenuItem("⏳ Modelle laden...", callback=None)
         self._item_start  = rumps.MenuItem("Neue Sitzung", callback=None)
         self._item_stop   = rumps.MenuItem("Stoppen & Auswerten", callback=None)
-        self._item_pdf    = rumps.MenuItem("Bericht als PDF", callback=self.save_pdf)
         self._item_arch   = rumps.MenuItem("Archiv", callback=self.open_archive)
         self._item_config = rumps.MenuItem(
             "Praxis-Einstellungen",
@@ -167,6 +171,7 @@ class KuraApp(rumps.App):
         )
         self._item_lic    = rumps.MenuItem("", callback=self.activate_license)
         self._item_deact  = rumps.MenuItem("Lizenz deaktivieren", callback=self.deactivate_license)
+        self._item_update = rumps.MenuItem("Aktualisierungen prüfen", callback=self.check_for_update)
 
         self.menu = [
             self.status_item,
@@ -174,7 +179,6 @@ class KuraApp(rumps.App):
             self._item_start,
             self._item_stop,
             None,
-            self._item_pdf,
             self._item_arch,
             None,
             self._item_config,
@@ -183,7 +187,8 @@ class KuraApp(rumps.App):
             self._item_lic,
             self._item_deact,
             None,
-            "Beenden",
+            self._item_update,
+            rumps.MenuItem("Beenden", callback=self._quit),
         ]
         self._refresh_menu_state(status)
 
@@ -196,6 +201,7 @@ class KuraApp(rumps.App):
         os.makedirs(_kura_data_dir, exist_ok=True)
         self.temp_audio = os.path.join(_kura_data_dir, "session.wav")
         self.last_report = None
+        self.last_billing_result = None
 
         # ── Microphone ownership ──────────────────────────────────────────────
         # ffmpeg is started in its own process group (os.setsid) so we can
@@ -211,6 +217,7 @@ class KuraApp(rumps.App):
         # before it starts. rumps/NSApplication manages graceful shutdown.
         import atexit
         atexit.register(self._kill_stale_ffmpeg)
+        atexit.register(self._quit)
         # --- NEW: Timer State ---
         self.seconds_elapsed = 0
         self.timer = rumps.Timer(self.update_timer, 1)  # Ticks every 1 second
@@ -258,13 +265,26 @@ class KuraApp(rumps.App):
             self.open_gist_override if is_pro else self._config_locked
         )
 
-        # PDF only useful after at least one report
-        has_report = bool(getattr(self, 'last_report', None))
-        self._item_pdf.set_callback(self.save_pdf if has_report else None)
 
     def _set_recording_state(self, recording: bool):
         self._item_start.set_callback(None if recording else self.start)
         self._item_stop.set_callback(self.stop if recording else None)
+
+    def _quit(self, _=None):
+        """Graceful shutdown: stop recording, free GPU/Metal memory, then exit."""
+        # Stop any active recording first
+        if getattr(self, 'recording', False):
+            self._kill_stale_ffmpeg()
+
+        # Release LLM weights and flush Metal cache
+        engine = getattr(self, 'engine', None)
+        if engine is not None:
+            try:
+                engine.cleanup()
+            except Exception:
+                pass
+
+        rumps.quit_application()
 
     def _kill_stale_ffmpeg(self):
         """
@@ -326,12 +346,19 @@ class KuraApp(rumps.App):
 
             if br:
                 billing_line = br.format_billing_line()
-                status_icon = {"PASS": "[PASS]", "REVIEW": "[WARN]", "BLOCK": "[STOP]"}.get(br.audit_status, "[?]")
+                total_items  = len([a for a in br.audit_items if a.status != "PASS"])
+                pass_items   = len([a for a in br.audit_items if a.status == "PASS"])
+                if br.audit_status == "PASS":
+                    audit_summary = f"✅ AUDIT BESTANDEN — alle {pass_items} Prüfpunkte erfüllt"
+                elif br.audit_status == "BLOCK":
+                    audit_summary = f"🔴 ABRECHNUNG GESPERRT — ärztliche Abklärung erforderlich"
+                else:
+                    audit_summary = f"⚠️  PRÜFUNG ERFORDERLICH — {total_items} Hinweise (vor Abrechnung prüfen)"
                 flagged = [str(i) for i in br.audit_items if i.status in ("WARN", "FAIL", "BLOCK")]
-                audit_notes = ("\n".join(flagged)) if flagged else ""
+                audit_notes = "\n".join(flagged) if flagged else ""
             else:
                 billing_line = res.get('billing_suggestion', '–')
-                status_icon = "⚠️"
+                audit_summary = "⚠️  Abrechnungsprüfung nicht verfügbar"
                 warnings = res.get('compliance_check', [])
                 audit_notes = "\n".join(warnings) if warnings else ""
 
@@ -340,7 +367,7 @@ class KuraApp(rumps.App):
             patient_display = self.patient_name.replace('_', ' ')
             profile_label = res.get('profile_label', '')
 
-            footer = f"{billing_line}  |  ICD-10: {icd}  |  {status_icon}"
+            footer = f"{billing_line}  |  ICD-10: {icd}\n{audit_summary}"
             if audit_notes:
                 footer += f"\n{audit_notes}"
 
@@ -434,6 +461,7 @@ class KuraApp(rumps.App):
 
             # --- C. STATE & PDF & ARCHIVE ---
             self.last_report = edited_text
+            self.last_billing_result = res.get('billing_result') if res else None
             self.save_pdf(None)
 
             timestamp = time.strftime("%Y%m%d-%H%M")
@@ -457,6 +485,70 @@ class KuraApp(rumps.App):
 
     def update_license_display(self):
         self._refresh_menu_state()
+
+    # ── Update check ──────────────────────────────────────────────────────────
+
+    def check_for_update(self, _=None):
+        """Check Gist version against APP_VERSION. Called on boot and from tray."""
+        def _run():
+            try:
+                import requests as _req
+                r = _req.get(
+                    "https://gist.githubusercontent.com/mucite/"
+                    "6994897471e0676bbbdd2468002c24fc/raw/physio_config_2026.json",
+                    timeout=6,
+                )
+                if r.status_code != 200:
+                    self._on_main(lambda: self._item_update.set_callback(self.check_for_update))
+                    return
+                gist_ver = r.json().get("version", "")
+                if self._version_gt(gist_ver, APP_VERSION):
+                    # New version available
+                    self._on_main(lambda v=gist_ver: (
+                        setattr(self._item_update, 'title',
+                                f"Update verfuegbar: v{v} (jetzt herunterladen)"),
+                        self._item_update.set_callback(self._open_update_page),
+                        rumps.notification(
+                            "Kura Update verfuegbar",
+                            f"Version {v} ist bereit",
+                            "Klicken Sie auf 'Update verfuegbar' im Tray und beenden Sie Kura vor der Installation.",
+                        ),
+                    ))
+                else:
+                    self._on_main(lambda: (
+                        setattr(self._item_update, 'title', "Aktualisierungen pruefen"),
+                        self._item_update.set_callback(self.check_for_update),
+                        rumps.notification("Kura", "Kein Update", f"Sie verwenden die aktuelle Version ({APP_VERSION})."),
+                    ))
+            except Exception as e:
+                print(f"Update-Prüfung fehlgeschlagen: {e}")
+                self._on_main(lambda: rumps.notification(
+                    "Kura", "Update-Prüfung fehlgeschlagen",
+                    "Keine Verbindung. Bitte später erneut versuchen."
+                ))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _open_update_page(self, _=None):
+        rumps.alert(
+            title="Kura beenden vor Update",
+            message=(
+                f"Neue Version verfuegbar.\n\n"
+                "Wichtig: Beenden Sie Kura zuerst ueber 'Beenden' im Tray,\n"
+                "bevor Sie die neue Version installieren.\n\n"
+                "GitHub-Releases wird jetzt geoeffnet."
+            ),
+            ok="Herunterladen"
+        )
+        subprocess.Popen(["open", _RELEASES_URL])
+
+    @staticmethod
+    def _version_gt(a: str, b: str) -> bool:
+        """Return True if version string a is strictly greater than b (e.g. '2026.4.0' > '2026.3.2')."""
+        try:
+            return tuple(int(x) for x in a.split(".")) > tuple(int(x) for x in b.split("."))
+        except Exception:
+            return False
 
     def update_timer(self, _):
         """Updates the menu bar title with recording duration. Detects ffmpeg death."""
@@ -560,6 +652,8 @@ class KuraApp(rumps.App):
                 self._item_start.set_callback(self.start),
                 rumps.notification("Kura", "Bereit", "KI-Modelle geladen. Kura ist einsatzbereit.")
             ))
+            # Silent background update check — runs after boot, no UI block
+            self.check_for_update()
 
         except MemoryError as e:
             error_msg = f"Speicher-Fehler: {e}"
@@ -1078,9 +1172,12 @@ class KuraApp(rumps.App):
                 ('\u274c', '[STOP]'), ('\u2714', '[PASS]'), ('\u2713', '[PASS]'),
             ]
             _CHAR_MAP = str.maketrans({
-                '\u20ac': 'EUR',            # € — not in ISO 8859-1
-                '\u2013': '-', '\u2014': '-',
-                '\u201e': '"', '\u201c': '"', '\u201d': '"',
+                '\u20ac': 'EUR',            # €
+                '\u2013': '-', '\u2014': '-',   # – —
+                '\u2192': '->', '\u2190': '<-', '\u2194': '<->',  # → ← ↔
+                '\u2265': '>=', '\u2264': '<=', '\u2260': '!=',   # ≥ ≤ ≠
+                '\u00b1': '+/-',            # ±
+                '\u201e': '"', '\u201c': '"', '\u201d': '"', '\u2018': "'", '\u2019': "'",
                 '\u2502': '|', '\u2500': '-', '\u2501': '-', '\u2550': '=',
                 '\u2588': '#', '\u25a0': '#',
                 '\xb0': 'Grad',
@@ -1177,25 +1274,104 @@ class KuraApp(rumps.App):
                 pdf.multi_cell(W, 5.5, s(body), new_x="LMARGIN", new_y="NEXT")
                 pdf.ln(4)
 
-            # ── 4. Billing / Audit box ────────────────────────────────────
-            if billing_line or audit_lines:
-                pdf.set_draw_color(*RULE)
-                pdf.set_fill_color(*SHADE)
+            # ── 4. Abrechnung & Audit ─────────────────────────────────────
+            br_obj = getattr(self, 'last_billing_result', None)
+
+            # Section header
+            pdf.set_fill_color(*SHADE)
+            pdf.set_draw_color(*RULE)
+            pdf.set_text_color(*MID)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(W, 6, "  ABRECHNUNG & AUDIT",
+                     new_x="LMARGIN", new_y="NEXT", fill=True, border=1)
+            pdf.ln(2)
+
+            if br_obj:
+                # ── Abrechnungszeile ──────────────────────────────────────
+                pdf.set_text_color(*BODY)
+                pdf.set_font("Helvetica", "B", 9)
+                pdf.multi_cell(W, 5.5, s(br_obj.format_billing_line()),
+                               new_x="LMARGIN", new_y="NEXT")
+
+                # Diagnosegruppe + Rechtsgrundlage
+                pdf.set_font("Helvetica", "", 8)
                 pdf.set_text_color(*MID)
-                pdf.set_font("Helvetica", "B", 8)
-                pdf.cell(W, 6, "  ABRECHNUNG & AUDIT",
-                         new_x="LMARGIN", new_y="NEXT", fill=True, border=1)
+                dg_line = (f"Diagnosegruppe: {br_obj.diagnosegruppe} — "
+                           f"{br_obj.diagnosegruppe_desc} | {br_obj.legal_basis}")
+                pdf.multi_cell(W, 4.5, s(dg_line), new_x="LMARGIN", new_y="NEXT")
+                pdf.ln(3)
+
+                # ── Audit-Status Badge ────────────────────────────────────
+                STATUS_COLORS = {
+                    "PASS":   (34,  139, 34),   # Grün — Audit bestanden
+                    "REVIEW": (200, 100,  0),   # Orange — Hinweise vorhanden
+                    "BLOCK":  (180,  20, 20),   # Rot — Abrechnung gesperrt
+                }
+                STATUS_LABELS = {
+                    "PASS":   "AUDIT BESTANDEN",
+                    "REVIEW": "PRUEFUNG ERFORDERLICH",
+                    "BLOCK":  "ABRECHNUNG GESPERRT",
+                }
+                badge_col = STATUS_COLORS.get(br_obj.audit_status, (90, 90, 90))
+                badge_txt = STATUS_LABELS.get(br_obj.audit_status, br_obj.audit_status)
+
+                pass_count   = sum(1 for a in br_obj.audit_items if a.status == "PASS")
+                total_count  = len(br_obj.audit_items)
+                open_count   = total_count - pass_count
+
+                if br_obj.audit_status == "PASS":
+                    badge_detail = f"Alle {total_count} Pruefpunkte erfuellt"
+                elif br_obj.audit_status == "BLOCK":
+                    badge_detail = "Aerztliche Abklaerung vor Therapiefortsetzung erforderlich"
+                else:
+                    badge_detail = f"{open_count} von {total_count} Hinweisen offen"
+
+                pdf.set_fill_color(*badge_col)
+                pdf.set_text_color(*WHITE)
+                pdf.set_font("Helvetica", "B", 9)
+                pdf.cell(W, 7, s(f"  {badge_txt}  —  {badge_detail}"),
+                         new_x="LMARGIN", new_y="NEXT", fill=True)
+                pdf.ln(2)
+
+                # ── Einzelne Audit-Punkte ─────────────────────────────────
+                # Bei PASS: nur kritische Warnungen (FAIL/BLOCK) zeigen falls vorhanden
+                # Bei REVIEW/BLOCK: alle nicht-PASS Punkte zeigen
+                if br_obj.audit_status == "PASS":
+                    show_items = [a for a in br_obj.audit_items
+                                  if a.status in ("FAIL", "BLOCK")]
+                else:
+                    show_items = [a for a in br_obj.audit_items
+                                  if a.status in ("WARN", "FAIL", "BLOCK")]
+
+                if show_items:
+                    pdf.set_font("Helvetica", "B", 7.5)
+                    pdf.set_text_color(*MID)
+                    pdf.cell(W, 5, "  Offene Pruefpunkte:",
+                             new_x="LMARGIN", new_y="NEXT")
+                    pdf.set_font("Helvetica", "", 8)
+                    for item in show_items:
+                        item_col = {
+                            "FAIL":  (180, 20, 20),
+                            "BLOCK": (180, 20, 20),
+                            "WARN":  (180, 100, 0),
+                        }.get(item.status, BODY)
+                        pdf.set_text_color(*item_col)
+                        pdf.multi_cell(W, 4.5, s(f"  {item.icon} {item.label}"
+                                                 + (f": {item.detail}" if item.detail else "")),
+                                       new_x="LMARGIN", new_y="NEXT")
+
+            else:
+                # Fallback: plain text rendering (no billing_result object)
                 pdf.set_font("Helvetica", "", 9)
                 pdf.set_text_color(*BODY)
                 if billing_line:
-                    pdf.ln(2)
                     pdf.multi_cell(W, 5, billing_line, new_x="LMARGIN", new_y="NEXT")
                 for al in audit_lines:
                     pdf.multi_cell(W, 5, al, new_x="LMARGIN", new_y="NEXT")
-                pdf.ln(1)
-                # Close box border
-                pdf.set_draw_color(*RULE)
-                pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+
+            pdf.ln(1)
+            pdf.set_draw_color(*RULE)
+            pdf.line(15, pdf.get_y(), 195, pdf.get_y())
 
             # ── 5. Footer watermark ───────────────────────────────────────
             pdf.set_y(-12)

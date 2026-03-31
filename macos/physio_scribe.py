@@ -1067,6 +1067,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             transcript=transcript,
             insurance_type=insurance_type,
             config_rules=self.billing_rules,
+            pkv_preise=self.config.pkv_preise,
         )
 
         return {

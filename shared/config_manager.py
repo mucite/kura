@@ -132,6 +132,26 @@ class ConfigManager:
             "Kura-Gist-Konfiguration gezogen. Diese Datei wird NICHT "
             "an Kura Medical uebertragen."
         )
+        # PKV-Preise: praxiseigene Honorare — nicht im Gist enthalten, hier individuell setzen
+        if "pkv_preise" not in template:
+            template["pkv_preise"] = {
+                "_hinweis": (
+                    "Praxiseigene PKV-Honorare in Euro. "
+                    "Tragen Sie hier Ihre tatsaechlichen Behandlungspreise ein. "
+                    "Diese ueberschreiben die GebueeTh-Orientierungswerte in der Kura-Ausgabe. "
+                    "GKV-Festpreise (§125 SGB V) werden hierdurch NICHT veraendert."
+                ),
+                "20501": 0.0,
+                "20511": 0.0,
+                "20560": 0.0,
+                "20700": 0.0,
+                "20701": 0.0,
+                "21100": 0.0,
+                "21101": 0.0,
+                "21102": 0.0,
+                "21110": 0.0,
+                "21111": 0.0,
+            }
         with open(_LOCAL_OVERRIDE, "w", encoding="utf-8") as f:
             json.dump(template, f, indent=2, ensure_ascii=False)
         return _LOCAL_OVERRIDE
@@ -183,3 +203,17 @@ class ConfigManager:
     @property
     def version(self):
         return self.data.get("version", "Fallback")
+
+    @property
+    def pkv_preise(self) -> dict:
+        """
+        Praxiseigene PKV-Preise (Positionsnummer → Betrag in €).
+        Aus config_override.json unter dem Schlüssel 'pkv_preise'.
+        Beispiel: {"20701": 72.00, "20501": 55.00}
+        GKV-Festpreise §125 SGB V werden hierdurch nicht berührt.
+        """
+        # Nur tatsächlich gesetzte Preise zurückgeben (0.0 = nicht konfiguriert → GebüTh-Fallback)
+        return {
+            k: float(v) for k, v in self.data.get("pkv_preise", {}).items()
+            if not k.startswith("_") and isinstance(v, (int, float)) and float(v) > 0
+        }

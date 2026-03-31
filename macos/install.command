@@ -48,12 +48,13 @@ echo "🔓 Removing macOS quarantine flag..."
 xattr -rd com.apple.quarantine "$APP_DEST" 2>/dev/null || true
 echo "   ✅ Done"
 
-# ── Re-sign ad-hoc after copy ─────────────────────────────────────────────────
-# macOS can invalidate signatures when files are copied; re-signing fixes this.
-echo "✍️  Re-signing application..."
-codesign --force --deep --sign - "$APP_DEST" 2>/dev/null \
-    && echo "   ✅ Done" \
-    || echo "   ⚠️  Signing skipped (codesign unavailable)"
+# ── Verify signature is intact after copy ────────────────────────────────────
+# Do NOT re-sign here — codesign without --entitlements strips the JIT and
+# microphone entitlements that were embedded during build, which breaks MLX
+# and audio input. The original ad-hoc signature survives a plain cp -R.
+codesign --verify --deep "$APP_DEST" 2>/dev/null \
+    && echo "🔏 Signature intact" \
+    || echo "⚠️  Signature check skipped"
 
 # ── Grant microphone permission hint ─────────────────────────────────────────
 echo ""

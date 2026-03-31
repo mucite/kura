@@ -51,6 +51,7 @@ class KuraEngine:
                 tokenizer_config={"local_files_only": True, "trust_remote_code": True}
             )
             _log.info("LLM loaded OK. Whisper model path: %s", self.stt_model)
+            for h in _log.handlers: h.flush()
             print("✅ Models ready.")
         except Exception as e:
             _log.exception("Model load failed: %s", e)
@@ -124,7 +125,9 @@ class KuraEngine:
 
     def _cleanup_gpu_memory(self):
         gc.collect()
-        if hasattr(mx, 'metal') and hasattr(mx.metal, 'clear_cache'):
+        if hasattr(mx, 'clear_cache'):
+            mx.clear_cache()
+        elif hasattr(mx, 'metal') and hasattr(mx.metal, 'clear_cache'):
             mx.metal.clear_cache()
         time.sleep(0.5)
 
@@ -997,6 +1000,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         audio_size = os.path.getsize(audio_path) if os.path.exists(audio_path) else 0
         _log.info("Whisper start | model=%s | audio=%s (%d bytes)",
                   self.stt_model, audio_path, audio_size)
+        for h in _log.handlers: h.flush()
         raw_t = mlx_whisper.transcribe(
             audio_path,
             path_or_hf_repo=self.stt_model,
@@ -1006,12 +1010,17 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             condition_on_previous_text=wcfg.get("condition_on_previous_text", True),
         ).get("text", "")
         _log.info("Whisper done | transcript length=%d", len(raw_t))
+        for h in _log.handlers: h.flush()
         transcript = self.clean_transcript(raw_t)
 
         profile_id = self._detect_profile(transcript)
         prof_label = self._PROFILES[profile_id]["label"]
         if status_callback: status_callback(f"KI-Analyse [{prof_label}]...")
+        _log.info("LLM generate start | profile=%s", profile_id)
+        for h in _log.handlers: h.flush()
         raw_output = self._generate_soap_note(transcript, profile_id)
+        _log.info("LLM generate done | output_len=%d", len(raw_output))
+        for h in _log.handlers: h.flush()
 
         if status_callback: status_callback("🔍 Validierung...")
         parsed = self.parse_robust_json(raw_output)

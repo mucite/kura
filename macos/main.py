@@ -15,10 +15,17 @@ from dotenv import load_dotenv
 # --- Crash Logging Setup ---
 def setup_crash_logging():
     """Setup crash logging to help diagnose issues"""
+    import faulthandler
     log_dir = os.path.expanduser("~/Library/Logs/Kura")
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"crash_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-    
+
+    # faulthandler catches C-level crashes (SIGSEGV, SIGABRT, Metal assertion failures)
+    # and writes a native Python traceback — bypasses sys.excepthook which only catches Python exceptions
+    fault_file = os.path.join(log_dir, "fault.log")
+    _fh = open(fault_file, 'a')
+    faulthandler.enable(file=_fh)
+
     def log_crash(exc_type, exc_value, exc_traceback):
         with open(log_file, 'w') as f:
             f.write(f"Kura Crash Report - {datetime.now()}\n")
@@ -35,11 +42,11 @@ def setup_crash_logging():
                 _mpath = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../models')
             f.write(f"Models path: {_mpath}\n")
             f.write(f"Models exist: {os.path.exists(_mpath)}\n")
-        
+
         # Show user-friendly error
         os.system(f'osascript -e \'display alert "Kura Fehler" message "App konnte nicht starten. Log: {log_file}" buttons {{"OK"}} default button "OK"\'')
         sys.exit(1)
-    
+
     sys.excepthook = log_crash
     return log_file
 
@@ -117,10 +124,19 @@ if "HF_TOKEN" not in os.environ:
 
 
 # --- Main App ---
+def _asset(name):
+    """Resolve icon path whether running as bundle or from source."""
+    if getattr(sys, 'frozen', False):
+        base = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, 'assets', name)
+
+
 class KuraApp(rumps.App):
     def __init__(self):
-        # Start with the stethoscope icon
-        super().__init__("🩺")
+        # Image-based icon: fixed pixel width → never pushes other menu bar items off screen
+        super().__init__("", icon=_asset("icon_idle.png"), template=True, quit_button=None)
 
         # --- Folder Initialization ---
         # IMPORTANT: Store reports in user's Documents (app bundle is read-only on DMG)
@@ -136,6 +152,7 @@ class KuraApp(rumps.App):
         # --- Menu items (stored as attrs for dynamic updates) ---
         is_pro = (status is True)
 
+        self.status_item  = rumps.MenuItem("⏳ Modelle laden...", callback=None)
         self._item_start  = rumps.MenuItem("Neue Sitzung", callback=None)
         self._item_stop   = rumps.MenuItem("Stoppen & Auswerten", callback=None)
         self._item_pdf    = rumps.MenuItem("Bericht als PDF", callback=self.save_pdf)
@@ -152,6 +169,8 @@ class KuraApp(rumps.App):
         self._item_deact  = rumps.MenuItem("Lizenz deaktivieren", callback=self.deactivate_license)
 
         self.menu = [
+            self.status_item,
+            None,
             self._item_start,
             self._item_stop,
             None,
@@ -185,18 +204,13 @@ class KuraApp(rumps.App):
         self._ffmpeg_pid_file = os.path.join(_kura_data_dir, "ffmpeg.pid")
         self._kill_stale_ffmpeg()
 
-        # atexit fires on normal exit and SIGTERM (not SIGKILL — that's what
+        # atexit fires on normal exit and Cmd+Q (not SIGKILL — that's what
         # the PID file covers on next launch).
-        import atexit, signal as _signal
+        # Do NOT set a SIGTERM handler: macOS sends SIGTERM to apps during
+        # Gatekeeper/launch validation, and intercepting it would kill the app
+        # before it starts. rumps/NSApplication manages graceful shutdown.
+        import atexit
         atexit.register(self._kill_stale_ffmpeg)
-
-        _orig_sigterm = _signal.getsignal(_signal.SIGTERM)
-        def _sigterm(signum, frame):
-            self._kill_stale_ffmpeg()
-            if callable(_orig_sigterm):
-                _orig_sigterm(signum, frame)
-            sys.exit(0)
-        _signal.signal(_signal.SIGTERM, _sigterm)
         # --- NEW: Timer State ---
         self.seconds_elapsed = 0
         self.timer = rumps.Timer(self.update_timer, 1)  # Ticks every 1 second
@@ -301,7 +315,7 @@ class KuraApp(rumps.App):
         if self.pending_ai_result and not self._review_in_progress:
             res = self.pending_ai_result
             self.pending_ai_result = None
-            self.title = "🩺"
+            self._set_icon("idle")
             self._review_in_progress = True
             # afplay is non-blocking — fires immediately, no UI freeze
             subprocess.Popen(['afplay', '/System/Library/Sounds/Glass.aiff'],
@@ -445,11 +459,39 @@ class KuraApp(rumps.App):
         self._refresh_menu_state()
 
     def update_timer(self, _):
-        """Updates the menu bar title with recording duration."""
+        """Updates the menu bar title with recording duration. Detects ffmpeg death."""
         if self.recording:
+            # Detect if ffmpeg died unexpectedly (crash, OOM, killed externally)
+            proc = getattr(self, 'proc', None)
+            if proc is not None and proc.poll() is not None:
+                # ffmpeg exited on its own — stop cleanly
+                import logging as _logging
+                _logging.getLogger("kura").warning(
+                    "ffmpeg exited unexpectedly (rc=%d) after %ds — auto-stopping",
+                    proc.returncode, self.seconds_elapsed
+                )
+                self.recording = False
+                self.timer.stop()
+                self._set_recording_state(False)
+                self._set_icon("idle")
+                self.status_item.title = "✅ Kura Bereit (Lokal & DSGVO)"
+                self.seconds_elapsed = 0
+                try:
+                    if os.path.exists(self._ffmpeg_pid_file):
+                        os.remove(self._ffmpeg_pid_file)
+                except Exception:
+                    pass
+                rumps.notification(
+                    "Kura – Aufnahme unterbrochen",
+                    "Mikrofon-Aufnahme unerwartet beendet",
+                    "Bitte neue Sitzung starten."
+                )
+                return
+
             self.seconds_elapsed += 1
             mins, secs = divmod(self.seconds_elapsed, 60)
-            self.title = f"⏺ {mins:02d}:{secs:02d}"
+            self._on_main(lambda m=f"⏺ {mins}:{secs:02d} – Aufnahme läuft":
+                          setattr(self.status_item, 'title', m))
 
     # --- Boot Engine ---
     def _ffmpeg_path(self):
@@ -469,6 +511,18 @@ class KuraApp(rumps.App):
         raise FileNotFoundError(
             "ffmpeg nicht gefunden. Installieren Sie es mit: brew install ffmpeg"
         )
+
+    def _set_icon(self, state: str, label: str = ""):
+        """Thread-safe icon + title update. state: 'idle' | 'record' | 'ai'"""
+        icon = _asset(f"icon_{state}.png")
+        # idle uses template=True (black stethoscope adapts to dark/light menu bar)
+        # record/ai use template=False to preserve red/blue colour
+        tmpl = (state == "idle")
+        self._on_main(lambda i=icon, t=label, tm=tmpl: (
+            setattr(self, 'template', tm),
+            setattr(self, 'icon', i),
+            setattr(self, 'title', t),
+        ))
 
     def _set_status(self, text):
         """Thread-safe status update — always runs on the main thread via gui_monitor."""
@@ -501,8 +555,9 @@ class KuraApp(rumps.App):
 
             self._on_main(lambda: (
                 setattr(self.status_item, 'title', "✅ Kura Bereit (Lokal & DSGVO)"),
-                setattr(self, 'title', "🩺"),
-                self.menu["🔴 Sitzung starten"].set_callback(self.start),
+                setattr(self, 'template', True),
+                setattr(self, 'icon', _asset("icon_idle.png")),
+                self._item_start.set_callback(self.start),
                 rumps.notification("Kura", "Bereit", "KI-Modelle geladen. Kura ist einsatzbereit.")
             ))
 
@@ -727,7 +782,6 @@ class KuraApp(rumps.App):
             return ""
 
     # --- Start Session ---
-    @rumps.clicked("🔴 Sitzung starten")
     def start(self, _):
         if self.recording:
             rumps.alert("Fehler", "Aufnahme läuft bereits.")
@@ -778,6 +832,7 @@ class KuraApp(rumps.App):
             self.timer.start()
             self.recording = True
             self._set_recording_state(True)
+            self._set_icon("record")
 
             try:
                 # Record as 16kHz mono PCM — exactly what Whisper needs.
@@ -787,6 +842,7 @@ class KuraApp(rumps.App):
                     [self._ffmpeg_path(), '-y',
                      '-f', 'avfoundation', '-i', ':0',
                      '-ar', '16000', '-ac', '1', '-acodec', 'pcm_s16le',
+                     '-t', '5400',   # hard cap: 90 min max (physiotherapy session limit)
                      self.temp_audio],
                     stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                     preexec_fn=os.setsid,
@@ -804,7 +860,6 @@ class KuraApp(rumps.App):
                 self._set_recording_state(False)
                 rumps.alert("Aufnahmefehler", f"Konnte Aufnahme nicht starten: {e}\n\nPrüfen Sie Mikrofon-Berechtigung in Systemeinstellungen.")
 
-    @rumps.clicked("⏹ Stoppen & Verarbeiten")
     def stop(self, _):
         if not self.recording:
             return
@@ -812,6 +867,8 @@ class KuraApp(rumps.App):
         self.timer.stop()
         self.recording = False
         self._set_recording_state(False)
+        self._set_icon("idle")
+        self.status_item.title = "✅ Kura Bereit (Lokal & DSGVO)"
 
         self._kill_stale_ffmpeg()
         # PID file no longer needed — recording ended cleanly
@@ -826,7 +883,6 @@ class KuraApp(rumps.App):
                         f"Nur {self.seconds_elapsed}s aufgenommen.\n"
                         "Bitte mindestens 10 Sekunden sprechen.")
             self.seconds_elapsed = 0
-            self.title = "🩺"
             return
 
         if not self._audio_has_speech(self.temp_audio):
@@ -838,18 +894,15 @@ class KuraApp(rumps.App):
             except Exception:
                 pass
             self.seconds_elapsed = 0
-            self.title = "🩺"
             return
 
         self.seconds_elapsed = 0
 
         status = self.license_mgr.verify_locally()
         if status is True or status == "TRIAL":
-            # Change icon to brain while AI works
-            self.title = "🧠"
+            self._set_icon("ai")
             threading.Thread(target=self.run_ai).start()
         else:
-            self.title = "🩺"
             self.show_upgrade_dialog()
 
     def _audio_has_speech(self, path: str, silence_db: float = -60.0) -> bool:
@@ -872,7 +925,8 @@ class KuraApp(rumps.App):
     def run_ai(self):
         try:
             def update_status(msg):
-                self._on_main(lambda m=msg: setattr(self, 'title', m))
+                # Show status text next to the AI icon in the menu bar
+                self._set_icon("ai", msg)
 
             # Execute AI Engine - this is the heavy part
             res = self.engine.run_full_flow(
@@ -904,7 +958,7 @@ class KuraApp(rumps.App):
                 logging.getLogger("kura").error("run_ai crash: %s\n%s", e, tb)
             except Exception:
                 pass
-            self.title = "🩺"
+            self._set_icon("idle")
             self.pending_ai_result = None
 
             # Delete audio file even on error (DSGVO compliance)

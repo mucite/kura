@@ -4,11 +4,10 @@
 # === Core ===
 python-dotenv==1.0.0
 
-# === GUI ===
-# PySimpleGUI now requires private PyPI server
-# Install with: py -3.12 -m pip install --extra-index-url https://PySimpleGUI.net/install PySimpleGUI
---extra-index-url https://PySimpleGUI.net/install
-PySimpleGUI>=5.0.8
+# === GUI (FREE - MIT License) ===
+customtkinter>=5.2.0
+# Modern, professional UI - 100% free (MIT license)
+# No paid subscription required!
 
 # === Audio (recording via sounddevice — no ffmpeg required) ===
 sounddevice==0.4.6

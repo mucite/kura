@@ -882,11 +882,12 @@ class KuraApp:
             [sg.HSeparator()],
 
             [sg.Text("Patient:", font=("Arial", 9)),
-             sg.InputText("Weber_15031964", key="-PATIENT-", size=(28, 1), font=("Arial", 9)),
-             sg.Text("  Kasse:", font=("Arial", 9)),
-             sg.Radio("GKV", "INSURANCE", key="-GKV-", default=True, font=("Arial", 9)),
-             sg.Radio("PKV", "INSURANCE", key="-PKV-", font=("Arial", 9)),
-             sg.Radio("BG",  "INSURANCE", key="-BG-",  font=("Arial", 9))],
+             sg.InputText("Weber_15031964", key="-PATIENT-", size=(30, 1), font=("Arial", 9)),
+             sg.Frame("Versicherung", [
+                 [sg.Radio("GKV", "INSURANCE", key="-GKV-", default=True, font=("Arial", 9)),
+                  sg.Radio("PKV", "INSURANCE", key="-PKV-", font=("Arial", 9)),
+                  sg.Radio("BG",  "INSURANCE", key="-BG-",  font=("Arial", 9))],
+             ], font=("Arial", 8), pad=(8, 0))],
             [sg.HSeparator()],
 
             [sg.Button("🔴 Sitzung starten", key="-START-", size=(20, 1), font=("Arial", 9)),

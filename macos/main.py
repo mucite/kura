@@ -894,19 +894,23 @@ class KuraApp(rumps.App):
             raw_input = response.text.strip().replace(" ", "_")
             self.patient_name = raw_input
 
-            # Insurance type dialog
+            # Insurance type dialog — three buttons, GKV is default (OK)
             from shared.billing_engine import InsuranceType
-            ins_window = rumps.Window(
-                "Kassentyp eingeben: GKV, PKV oder BG",
-                "Kura - Versicherungstyp",
-                "GKV"
+            ins_choice = rumps.alert(
+                title="Kura — Versicherungstyp",
+                message="Welche Versicherung hat der Patient?\n\n"
+                        "  GKV  — Gesetzlich (§125 SGB V, Festpreise)\n"
+                        "  PKV  — Privat (GebüTh, freie Preise)\n"
+                        "  BG   — Berufsgenossenschaft (DGUV)",
+                ok="GKV",
+                cancel="PKV",
+                other="BG",
             )
-            ins_response = ins_window.run()
-            ins_text = ins_response.text.strip().upper() if ins_response.clicked else "GKV"
+            # rumps.alert: 1 = ok (GKV), 0 = cancel (PKV), -1 = other (BG)
             self.insurance_type = {
-                "PKV": InsuranceType.PKV,
-                "BG":  InsuranceType.BG,
-            }.get(ins_text, InsuranceType.GKV)
+                0:  InsuranceType.PKV,
+                -1: InsuranceType.BG,
+            }.get(ins_choice, InsuranceType.GKV)
 
             # Check microphone permission at first use, not at startup
             if not self.check_microphone_permission():

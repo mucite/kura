@@ -307,7 +307,7 @@ _HMK: dict[str, dict] = {
     },
     "LY4": {
         "desc": "Chronisch venöse Insuffizienz mit sekundärem Lymphödem",
-        "heilmittel": "MLD", "position": "21100",
+        "heilmittel": "MLD", "position": "20205",
         "name": "Manuelle Lymphdrainage 30 Min",
         "duration": 30, "regelfall": 6, "langfristig": False,
         "icd": ["I83", "I87"],

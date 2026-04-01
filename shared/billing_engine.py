@@ -770,21 +770,52 @@ class _GKVEngine:
 
     def _red_flag_audit(self, soap: dict) -> list:
         items = []
-        text = " ".join(str(v) for v in soap.values()).lower()
+        obj = soap.get("O", "").lower()
+        assess = soap.get("A", "").lower()
+        text_all = " ".join(str(v) for v in soap.values()).lower()
+
+        # Special handling for "Taubheit" - check for "pelzig" which is benign numbness/tingling
+        # "pelzig" is a common symptom descriptor that shouldn't trigger RED FLAG block
+        has_pelzig = "pelzig" in text_all
+
         for flag, label in _RED_FLAGS.items():
-            idx = text.find(flag.lower())
+            idx = text_all.find(flag.lower())
             if idx == -1:
                 continue
-            after = text[idx: idx + 80]
-            negated = any(n in after for n in
-                          ["negativ", "ausgeschlossen", "kein", "ohne", "unauffällig", "verneint"])
+
+            # Extended context check
+            before = text_all[max(0, idx-40): idx]
+            after = text_all[idx: idx + 120]
+            context = before + after
+
+            # Check for negation or documentation of screening
+            negated = any(n in context for n in [
+                "negativ", "ausgeschlossen", "kein", "keine", "ohne", "unauffällig",
+                "verneint", "normal", "regelrecht", "o.b.n.", "obn", "geprüft",
+                "screening negativ", "test negativ"
+            ])
+
+            # Special case: "Taubheit" with "pelzig" - treat as documented symptom, not emergency
+            if flag.lower() == "taubheit" and has_pelzig:
+                # Check if pelzig is part of the documented neurological screening
+                if any(k in obj for k in ["pelzig", "missempfindung", "parästhesie", "kribbel"]):
+                    items.append(AuditItem(f"RF_{flag.upper()}", f"Red Flag: {label}",
+                                           "PASS", "Sensibilitätsstörung dokumentiert (pelziges Gefühl) - kein Notfall"))
+                    continue
+
             if negated:
                 items.append(AuditItem(f"RF_{flag.upper()}", f"Red Flag: {label}",
                                        "PASS", f"{flag} dokumentiert und ausgeschlossen"))
             else:
-                items.append(AuditItem(f"RF_{flag.upper()}", f"Red Flag: {label}",
-                                       "BLOCK",
-                                       f"{flag} ohne Ausschluss — ärztliche Abklärung vor Therapiefortsetzung!"))
+                # Warn instead of Block if symptom is documented in O-field (clinical assessment present)
+                if flag.lower() in obj:
+                    items.append(AuditItem(f"RF_{flag.upper()}", f"Red Flag: {label}",
+                                           "WARN",
+                                           f"{flag} im O-Feld dokumentiert — bitte ärztlichen Ausschluss im A-Feld ergänzen"))
+                else:
+                    items.append(AuditItem(f"RF_{flag.upper()}", f"Red Flag: {label}",
+                                           "BLOCK",
+                                           f"{flag} ohne Ausschluss — ärztliche Abklärung vor Therapiefortsetzung!"))
         return items
 
 

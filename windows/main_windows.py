@@ -165,7 +165,7 @@ class KuraApp:
             sg.popup_error("KI-Modelle werden noch geladen. Bitte warten.")
             return
 
-        self.patient_name = patient_name.strip().replace(" ", "_") or "Unbekannt"
+        self.patient_name = patient_name.strip().replace(" ", "_") or "Patient"
         self.recording = True
         self.seconds_elapsed = 0
         self._audio_chunks = []
@@ -214,18 +214,23 @@ class KuraApp:
 
         # Minimum recording guard (same as macOS: 10 seconds)
         if self.seconds_elapsed < 10:
-            window["-STATUS-"].update("🩺 Bereit")
+            mins, secs = divmod(self.seconds_elapsed, 60)
+            duration = f"{mins}:{secs:02d}" if mins > 0 else f"{secs}s"
+            window["-STATUS-"].update(f"✅ Aufnahme entfernt ({duration})")
             sg.popup_error(
                 f"Aufnahme zu kurz ({self.seconds_elapsed}s).\n\n"
                 "Bitte mindestens 10 Sekunden sprechen.",
                 title="Kura"
             )
             self.seconds_elapsed = 0
+            window["-STATUS-"].update("🩺 Bereit")
             return
 
         # Speech detection: check audio has actual signal above silence floor
         if not self._audio_has_speech():
-            window["-STATUS-"].update("🩺 Bereit")
+            mins, secs = divmod(self.seconds_elapsed, 60)
+            duration = f"{mins}:{secs:02d}" if mins > 0 else f"{secs}s"
+            window["-STATUS-"].update(f"✅ Stille Aufnahme entfernt ({duration})")
             sg.popup_error(
                 "Kein Ton erkannt.\n\n"
                 "Die Aufnahme enthält kein hörbares Sprachsignal.\n"
@@ -234,28 +239,52 @@ class KuraApp:
             )
             self.seconds_elapsed = 0
             try:
-                os.remove(self.temp_audio)
+                if os.path.exists(self.temp_audio):
+                    os.remove(self.temp_audio)
             except Exception:
                 pass
+            window["-STATUS-"].update("🩺 Bereit")
             return
 
-        self.seconds_elapsed = 0
-        window["-STATUS-"].update("🧠 KI-Analyse läuft...")
+        # Show duration with green tick before processing
+        mins, secs = divmod(self.seconds_elapsed, 60)
+        duration = f"{mins}:{secs:02d}" if mins > 0 else f"{secs}s"
+        window["-STATUS-"].update(f"✅ Aufnahme: {duration} — KI-Analyse läuft...")
 
+        # Clear output and show processing start
+        window["-OUTPUT-"].update(f"🎙️ Aufnahme beendet: {duration}\n⏳ KI-Verarbeitung startet...\n")
+
+        # Don't reset seconds_elapsed here - reset it after AI completes
         status = self.license_mgr.verify_locally()
         if status is True or status == "TRIAL":
             threading.Thread(target=self._run_ai, args=(window,), daemon=True).start()
         else:
+            self.seconds_elapsed = 0
             window["-STATUS-"].update("🩺 Bereit")
             self._show_upgrade_dialog()
 
-    def _audio_has_speech(self, silence_threshold: int = 200) -> bool:
+    def _audio_has_speech(self, silence_threshold: int = 100) -> bool:
         """Return True if recorded audio chunks contain signal above silence_threshold (RMS)."""
         if not self._audio_chunks:
             return False
         try:
             audio = np.concatenate(self._audio_chunks, axis=0).astype(np.float32)
             rms = float(np.sqrt(np.mean(audio ** 2)))
+            
+            # Also calculate peak amplitude to detect any signal
+            peak = float(np.max(np.abs(audio)))
+            
+            # Check if the audio file was actually written and has content
+            if os.path.exists(self.temp_audio):
+                file_size = os.path.getsize(self.temp_audio)
+                if file_size < 1000:  # Less than 1KB is suspicious
+                    return False
+            
+            # Use both RMS and peak to determine if there's actual audio
+            # If peak is very low (< 500), it's definitely silence
+            if peak < 500:
+                return False
+            
             return rms > silence_threshold
         except Exception:
             return True  # can't determine — let Whisper try
@@ -265,7 +294,10 @@ class KuraApp:
     def _run_ai(self, window):
         try:
             def update_status(msg):
+                # Update status bar
                 window.write_event_value("-STATUS-UPDATE-", msg)
+                # Also update output box
+                window.write_event_value("-PROGRESS-", msg)
 
             res = self.engine.run_full_flow(
                 self.temp_audio,
@@ -280,15 +312,24 @@ class KuraApp:
             except Exception as e:
                 print(f"⚠️ Could not delete audio: {e}")
 
+            # Reset timer after successful processing
+            self.seconds_elapsed = 0
             window.write_event_value("-AI-DONE-", res)
 
+
         except Exception as e:
-            print(f"❌ AI Error: {e}")
+            error_msg = str(e)
+            print(f"❌ AI Error: {error_msg}")
+
+            # Reset timer on error
+            self.seconds_elapsed = 0
+
             try:
                 if os.path.exists(self.temp_audio):
                     os.remove(self.temp_audio)
             except Exception:
                 pass
+
             window.write_event_value("-AI-ERROR-", str(e))
 
     # ── Result review window ───────────────────────────────────────────────────
@@ -413,12 +454,20 @@ class KuraApp:
         # Archive JSON + PDF
         self.last_report = edited_text
         self.last_billing_result = res.get("billing_result")
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M")
-        patient_dir = os.path.join(self.report_dir, self.patient_name)
-        os.makedirs(patient_dir, exist_ok=True)
-        with open(os.path.join(patient_dir, f"{timestamp}.json"), "w", encoding="utf-8") as f:
+        
+        # Save JSON to date-based folder: archive/YYYY-MM-DD/HHMMSS_PatientName.json
+        now = datetime.now()
+        date_folder = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H%M%S")  # Include seconds for collision-proof naming
+        day_folder = os.path.join(self.report_dir, date_folder)
+        os.makedirs(day_folder, exist_ok=True)
+        
+        json_path = os.path.join(day_folder, f"{time_str}_{self.patient_name}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump({"text": edited_text, "patient": self.patient_name,
-                       "icd10": user_icd or res.get("icd10"), "timestamp": timestamp},
+                       "icd10": user_icd or res.get("icd10"), 
+                       "timestamp": now.strftime("%Y%m%d-%H%M"),
+                       "date": date_folder},
                       f, ensure_ascii=False, indent=4)
 
         self._save_pdf_to_disk()
@@ -450,12 +499,18 @@ class KuraApp:
             sg.popup_error("Kein Bericht zum Speichern vorhanden.")
             return
 
+        # Organize by date since patient names can repeat: archive/YYYY-MM-DD/HHMMSS_PatientName.pdf
         safe_name   = self.patient_name.replace(" ", "_")
-        timestamp   = datetime.now().strftime("%Y%m%d-%H%M")
-        desktop     = os.path.join(os.path.expanduser("~/Desktop"), f"Kura_{safe_name}.pdf")
-        patient_dir = os.path.join(self.report_dir, safe_name)
-        os.makedirs(patient_dir, exist_ok=True)
-        archive = os.path.join(patient_dir, f"Bericht_{timestamp}.pdf")
+        now = datetime.now()
+        date_folder = now.strftime("%Y-%m-%d")  # ISO format for sorting
+        time_str    = now.strftime("%H%M%S")  # Include seconds for collision-proof naming
+
+        # Create date-based folder structure
+        day_folder = os.path.join(self.report_dir, date_folder)
+        os.makedirs(day_folder, exist_ok=True)
+        
+        # Single organized location: archive/YYYY-MM-DD/HHMMSS_PatientName.pdf
+        pdf_path = os.path.join(day_folder, f"{time_str}_{safe_name}.pdf")
 
         try:
             # ── Character safety (same table as macOS) ────────────────────────
@@ -656,11 +711,25 @@ class KuraApp:
                      s(f"Kura v{APP_VERSION} | Lokale KI-Verarbeitung | DSGVO-konform | {date_str}"),
                      align="C")
 
-            pdf.output(archive)
-            pdf.output(desktop)
+            pdf.output(pdf_path)
+
+            # Notify user and offer to open the folder
+            result = sg.popup_yes_no(
+                f"PDF erfolgreich gespeichert!\n\n"
+                f"Datei: {os.path.basename(pdf_path)}\n"
+                f"Pfad: {day_folder}\n\n"
+                f"Ordner jetzt öffnen?",
+                title="PDF Gespeichert"
+            )
+            if result == "Yes":
+                # Open the day's folder
+                os.startfile(day_folder)
 
         except Exception as e:
             sg.popup_error(f"PDF-Fehler: {e}", title="Kura")
+            print(f"PDF Error Details: {e}")
+            import traceback
+            traceback.print_exc()
 
     # ── Update check ──────────────────────────────────────────────────────────
 
@@ -882,7 +951,7 @@ class KuraApp:
             [sg.HSeparator()],
 
             [sg.Text("Patient:", font=("Arial", 9)),
-             sg.InputText("Weber_15031964", key="-PATIENT-", size=(30, 1), font=("Arial", 9)),
+             sg.InputText("Weber", key="-PATIENT-", size=(30, 1), font=("Arial", 9)),
              sg.Frame("Versicherung", [
                  [sg.Radio("GKV", "INSURANCE", key="-GKV-", default=True, font=("Arial", 9)),
                   sg.Radio("PKV", "INSURANCE", key="-PKV-", font=("Arial", 9)),
@@ -934,6 +1003,16 @@ class KuraApp:
             # ── Background / async events ──────────────────────────────────────
             elif event == "-STATUS-UPDATE-":
                 window["-STATUS-"].update(values[event])
+            
+            elif event == "-PROGRESS-":
+                # Show progress in output box
+                current = window["-OUTPUT-"].get()
+                # Keep only the last few progress messages
+                lines = current.split('\n')
+                if len(lines) > 10:
+                    lines = lines[-10:]
+                new_text = '\n'.join(lines) + '\n' + values[event]
+                window["-OUTPUT-"].update(new_text)
 
             elif event == "-BOOT-DONE-":
                 window["-OUTPUT-"].update(

@@ -14,7 +14,7 @@
 
 ; ── Version (override with /DAppVersion=x.x.x on command line) ──────────────
 #ifndef AppVersion
-  #define AppVersion "2026.1.0"
+  #define AppVersion "2026.3.2"
 #endif
 
 ; ── Constants ────────────────────────────────────────────────────────────────

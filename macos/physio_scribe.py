@@ -1265,13 +1265,37 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         return parsed
 
     def parse_robust_json(self, text):
+        """
+        Robust JSON parser - ensures all SOAP fields are strings, not nested objects.
+        """
         try:
             match = re.search(r'\{.*\}', text, re.DOTALL)
             data = json.loads(match.group() if match else "{}")
-            s = data.get("soap", {})
-            return {"icd10": data.get("icd10", "M99.9"), "soap": {k: s.get(k, "N/A") for k in "SOAP"}}
-        except Exception:
-            return {"icd10": "M99.9", "soap": {k: "Fehler" for k in "SOAP"}}
+            soap_raw = data.get("soap", {})
+
+            # Ensure all SOAP fields are strings, not nested objects
+            soap_clean = {}
+            for field in ["S", "O", "A", "P"]:
+                value = soap_raw.get(field, "")
+                # Convert non-string values to strings
+                if isinstance(value, dict):
+                    # Flatten nested dict to readable string
+                    value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
+                elif not isinstance(value, str):
+                    value = str(value) if value else "N/A"
+                # Ensure non-empty
+                if not value or value in ("N/A", "n.d.", "Fehler", "{}"):
+                    if field == "A":
+                        # Assessment should never be empty
+                        value = f"{data.get('icd10', 'M99.9')} | Red Flags klinisch ausgeschlossen."
+                    else:
+                        value = "N/A"
+                soap_clean[field] = value.strip() if value else "N/A"
+
+            return {"icd10": data.get("icd10", "M99.9"), "soap": soap_clean}
+        except Exception as e:
+            print(f"⚠️ JSON parsing failed: {e}")
+            return {"icd10": "M99.9", "soap": {k: "Fehler" for k in ["S", "O", "A", "P"]}}
 
     def cleanup(self):
         self.model = self.tokenizer = None

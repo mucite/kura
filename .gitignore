@@ -66,14 +66,11 @@ reports/
 ._*
 
 # Models (large files)
-models/*/model.safetensors
-models/*/tokenizer.json
+models/
 website/
-models/*/weights.safetensors
-models/*/*.bin
+.claude
 
 # Temporary files
 *.log
 *.tmp
 **/*.md
-

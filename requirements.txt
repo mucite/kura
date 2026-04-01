@@ -1,7 +1,9 @@
 rumps>=0.3.1
 python-dotenv>=1.0.0
+rumps>=0.3.1
+python-dotenv>=1.0.0
+openai>=1.12.0
 mlx-lm>=0.0.12
-mlx-whisper>=0.1.0
 huggingface_hub>=0.20.0
 requests>=2.31.0
 fpdf2>=2.7.8

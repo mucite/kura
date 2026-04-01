@@ -465,17 +465,22 @@ class KuraApp(rumps.App):
             self.last_billing_result = res.get('billing_result') if res else None
             self.save_pdf(None)
 
-            timestamp = time.strftime("%Y%m%d-%H%M")
-            patient_dir = os.path.join(self.report_dir, self.patient_name)
-            os.makedirs(patient_dir, exist_ok=True)
+            # Save JSON to date-based folder: archive/YYYY-MM-DD/HHMMSS_PatientName.json
+            now = datetime.now()
+            date_folder = now.strftime("%Y-%m-%d")
+            time_str = now.strftime("%H%M%S")  # Include seconds for collision-proof naming
+            day_folder = os.path.join(self.report_dir, date_folder)
+            os.makedirs(day_folder, exist_ok=True)
 
             # Save full data for future "Reflective Learning"
-            with open(os.path.join(patient_dir, f"{timestamp}.json"), 'w', encoding='utf-8') as f:
+            json_path = os.path.join(day_folder, f"{time_str}_{self.patient_name}.json")
+            with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump({
                     "text": edited_text,
                     "patient": self.patient_name,
                     "icd10": user_icd if icd_match else "Unknown",
-                    "timestamp": timestamp
+                    "timestamp": now.strftime("%Y%m%d-%H%M"),
+                    "date": date_folder,
                 }, f, ensure_ascii=False, indent=4)
 
             self.update_license_display()
@@ -882,17 +887,18 @@ class KuraApp(rumps.App):
             rumps.alert("Fehler", "KI-Engine nicht bereit.\n\nBitte warten Sie, bis 'KI-Modelle laden...' abgeschlossen ist.\n\nFalls das Problem weiterhin besteht, starten Sie Kura neu.")
             return
 
-        # Input Window: Standardized for Name and Birthdate
+        # Simple patient name input
         window = rumps.Window(
-            "Eingabe: Name_DDMMYYYY (z.B. Weber_15031964)",
-            "Kura - Patienten-Identifikation",
-            "Mustermann_01011980"
+            "Patientenname:",
+            "Kura",
+            "Weber"
         )
         response = window.run()
 
         if response.clicked:
+            # Just use the name - timestamp will make it unique
             raw_input = response.text.strip().replace(" ", "_")
-            self.patient_name = raw_input
+            self.patient_name = raw_input if raw_input else "Patient"
 
             # Insurance type dialog — three buttons, GKV is default (OK)
             from shared.billing_engine import InsuranceType
@@ -1159,14 +1165,18 @@ class KuraApp(rumps.App):
         if not self.last_report:
             return
 
-        # 1. Define Paths
+        # Organize by date since patient names can repeat: archive/YYYY-MM-DD/HHMMSS_PatientName.pdf
         safe_name = self.patient_name.replace(' ', '_')
-        desktop_path = os.path.expanduser(f"~/Desktop/Kura_{safe_name}.pdf")
+        now = datetime.now()
+        date_folder = now.strftime("%Y-%m-%d")  # ISO format for sorting
+        time_str = now.strftime("%H%M%S")  # Include seconds for collision-proof naming
 
-        timestamp_file = time.strftime("%Y%m%d-%H%M")
-        patient_folder = os.path.join(self.report_dir, safe_name)
-        os.makedirs(patient_folder, exist_ok=True)
-        archive_path = os.path.join(patient_folder, f"Bericht_{timestamp_file}.pdf")
+        # Create date-based folder structure
+        day_folder = os.path.join(self.report_dir, date_folder)
+        os.makedirs(day_folder, exist_ok=True)
+
+        # Single organized location: archive/YYYY-MM-DD/HHMMSS_PatientName.pdf
+        pdf_path = os.path.join(day_folder, f"{time_str}_{safe_name}.pdf")
 
         try:
             import re as _re
@@ -1387,10 +1397,12 @@ class KuraApp(rumps.App):
                      s(f"Kura v2026 | Lokale KI-Verarbeitung | DSGVO-konform | {date_str}"),
                      align="C")
 
-            pdf.output(archive_path)
-            pdf.output(desktop_path)
+            pdf.output(pdf_path)
+
+            patient_display = self.patient_name.replace("_", " ")
+            date_str = now.strftime("%d.%m.%Y")
             rumps.notification("Kura", "PDF gespeichert",
-                               s(f"{patient_display} | {date_str}"))
+                               s(f"{patient_display} | {date_str} | {day_folder}"))
 
         except Exception as e:
             print(f"PDF Error: {e}")

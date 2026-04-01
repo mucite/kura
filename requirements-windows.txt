@@ -5,6 +5,9 @@
 python-dotenv==1.0.0
 
 # === GUI ===
+# PySimpleGUI now requires private PyPI server
+# Install with: py -3.12 -m pip install --extra-index-url https://PySimpleGUI.net/install PySimpleGUI
+--extra-index-url https://PySimpleGUI.net/install
 PySimpleGUI>=5.0.8
 
 # === Audio (recording via sounddevice — no ffmpeg required) ===
@@ -20,13 +23,14 @@ requests>=2.31.0
 # === System Monitoring ===
 psutil>=5.9.0
 
-# === AI/ML — Speech-to-Text (CPU, local) ===
-faster-whisper>=0.10.0
+# === AI/ML — Speech-to-Text (openai-whisper, 100% local) ===
+openai-whisper>=20231117
+# Local model stored in: models/whisper/large-v3.pt (~3GB)
+# Model is bundled with the application for offline use
 
-# === AI/ML — LLM (GGUF, CPU-only, no GPU required) ===
-# Note: for CUDA acceleration use:
-#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
-llama-cpp-python>=0.2.0
+# === AI/ML — LLM (GGUF via llama-cpp-python, local) ===
+# Pre-built wheel for Python 3.12 (Windows x64):
+llama-cpp-python @ https://github.com/abetlen/llama-cpp-python/releases/download/v0.2.90/llama_cpp_python-0.2.90-cp312-cp312-win_amd64.whl
 
 # === Build/Packaging ===
 pyinstaller>=6.10.0

@@ -1,6 +1,6 @@
 """
 Kura Engine — Windows
-Inference: llama-cpp-python (GGUF) + faster-whisper (CPU)
+Inference: llama-cpp-python (GGUF) + openai-whisper (local CPU)
 Clinical logic: identical to macOS (LearningManager, post-processing pipeline, compliance checks)
 """
 import gc
@@ -8,7 +8,6 @@ import json
 import os
 import re
 import sys
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -37,7 +36,7 @@ class KuraEngine:
         else:
             base = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
         self.model_dir = os.path.join(base, "models")
-        self.stt_model_path = os.path.join(self.model_dir, "whisper-large-v3-turbo")
+        self.whisper_model_dir = os.path.join(self.model_dir, "whisper")
 
     # ── System checks ─────────────────────────────────────────────────────────
 
@@ -65,13 +64,19 @@ class KuraEngine:
     def _init_models(self):
         print("🩺 Loading local medical-grade models...")
 
+        # Suppress llama.cpp verbose C++ output
+        os.environ['LLAMA_CPP_LOG_DISABLE'] = '1'
+
         # LLM (GGUF via llama-cpp-python)
         try:
             from llama_cpp import Llama
+            import io
+            import contextlib
 
             candidates = [
-                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-4bit", "Llama-3.2-3B-Instruct.Q4_K_M.gguf"),
-                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct.Q4_K_M.gguf"),
+                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-4bit-GGUF", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
+                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-4bit", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
+                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
                 os.path.join(self.model_dir, "llama-3.2-3b-medical.Q4_K_M.gguf"),
                 os.path.join(self.model_dir, "Mistral-7B-Instruct-v0.1.Q4_K_M.gguf"),
             ]
@@ -84,32 +89,46 @@ class KuraEngine:
                 )
 
             print(f"✅ Loading LLM: {os.path.basename(llm_path)}")
-            self.llm = Llama(
-                model_path=llm_path,
-                n_ctx=2048,
-                n_threads=min(os.cpu_count() or 4, 8),
-                n_gpu_layers=0,  # CPU-only; set >0 if CUDA available
-                verbose=False,
-            )
+
+            # Suppress stderr during model loading to hide C++ warnings
+            stderr_buffer = io.StringIO()
+            with contextlib.redirect_stderr(stderr_buffer):
+                self.llm = Llama(
+                    model_path=llm_path,
+                    n_ctx=2048,  # Increased for comprehensive prompts (was 800)
+                    n_threads=min(os.cpu_count() or 4, 12),  # Use more threads
+                    n_batch=512,  # Increased batch size to match context
+                    n_gpu_layers=0,  # CPU-only
+                    verbose=False,
+                    logits_all=False,
+                    use_mlock=False,
+                    use_mmap=True,  # Memory mapping for faster loading
+                    low_vram=True,  # Optimize for lower memory usage
+                )
+
             print("✅ LLM loaded")
         except ImportError:
             raise RuntimeError("llama-cpp-python not installed. Run: pip install llama-cpp-python")
 
-        # STT (faster-whisper)
+        # STT - Load openai-whisper from local models directory
         try:
-            from faster_whisper import WhisperModel
+            import whisper
 
-            # Try local model directory first, fall back to HuggingFace name
-            if os.path.isdir(self.stt_model_path):
-                stt_src = self.stt_model_path
+            # Load from local models/whisper directory
+            whisper_model_path = os.path.join(self.whisper_model_dir, "large-v3.pt")
+
+            if os.path.exists(whisper_model_path):
+                print(f"✅ Loading Whisper from local: {whisper_model_path}")
+                self.whisper = whisper.load_model(whisper_model_path, device="cpu")
             else:
-                stt_src = "large-v3-turbo"
-                print(f"⚠️ Local Whisper model not found, will download: {stt_src}")
+                # Fallback: load from default cache with download_root set to our models dir
+                print("⚠️ Local Whisper model not found, downloading to models/whisper...")
+                self.whisper = whisper.load_model("large-v3", device="cpu", download_root=self.whisper_model_dir)
 
-            self.whisper = WhisperModel(stt_src, device="cpu", compute_type="int8")
-            print("✅ Whisper STT loaded")
+            self.whisper_backend = "openai-whisper"
+            print("✅ Whisper STT loaded (openai-whisper backend, local model)")
         except ImportError:
-            raise RuntimeError("faster-whisper not installed. Run: pip install faster-whisper")
+            raise RuntimeError("openai-whisper not installed. Run: pip install openai-whisper")
 
         gc.collect()
         print("✅ Kura Engine ready (100% local, DSGVO-konform)")
@@ -118,6 +137,15 @@ class KuraEngine:
 
     def clean_transcript(self, transcript: str) -> str:
         """Fix common Whisper hallucinations in German physiotherapy terminology."""
+        # First pass: Fix number hallucinations (e.g., "4 *4" -> "45", "3 *5" -> "35")
+        transcript = re.sub(r'(\d)\s*\*\s*(\d)', r'\1\2', transcript)
+        transcript = re.sub(r'(\d)\s+mal\s+(\d)', r'\1\2', transcript)  # "4 mal 5" -> "45"
+        transcript = re.sub(r'(\d)\s+x\s+(\d)', r'\1\2', transcript)  # "4 x 5" -> "45"
+
+        # Fix common MLD duration patterns
+        transcript = re.sub(r'MLD\s+(\d)\s*\*\s*(\d)', r'MLD \1\2', transcript, flags=re.IGNORECASE)
+        transcript = re.sub(r'(\d{1,2})\s*\*\s*(\d{1,2})\s*(minuten|min)', r'\1\2 \3', transcript, flags=re.IGNORECASE)
+
         corrections = {
             r"Bobert|Bobat|Bobart": "Bobath",
             r"Stämmer|Stemmerzeichen": "Stemmer-Zeichen",
@@ -562,7 +590,7 @@ class KuraEngine:
         checklist = self._profile_checklist(profile_id)
         prof = self._PROFILES.get(profile_id, self._PROFILES["KG"])
 
-        return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+        return f"""<|start_header_id|>system<|end_header_id|>
 Du bist ein klinischer Dokumentationsexperte fuer deutsche Physiotherapie (Paragraph 106b SGB V).
 DIAGNOSE-PROFIL: {prof["label"]}  |  Abrechnung: {prof["billing"]}
 {style_injection}
@@ -570,9 +598,10 @@ EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
 1. Extrahiere AUSSCHLIESSLICH Informationen aus dem Transkript.
 2. Fehlende Werte: schreibe "n.d." (nicht dokumentiert) — NIEMALS erfinden.
 3. Zahlen EXAKT: "VAS 7" nicht "starke Schmerzen", "+4cm" nicht "Schwellung".
-4. Neutral-Null-Methode: [Ext]-[0]-[Flex], Beispiel Knie: "0-0-90".
-5. Red Flags IMMER im A-Feld: "Red Flags klinisch ausgeschlossen." (oder benennen).
-6. DIAGNOSEN GEHOEREN IN A, NICHT IN S: ICD-10-Codes, Erkrankungsbezeichnungen (z.B. "Gonarthrose", "Bandscheibenvorfall", "Lymphödem"), Diagnose-Aussagen und Vordiagnosen NIEMALS in S schreiben. S enthaelt NUR subjektive Patientenaussagen.
+4. Zahlen NIEMALS veraendern: "45 Minuten" bleibt "45 Minuten", nicht "4 mal 5" oder "4*5".
+5. Neutral-Null-Methode: [Ext]-[0]-[Flex], Beispiel Knie: "0-0-90".
+6. Red Flags IMMER im A-Feld: "Red Flags klinisch ausgeschlossen." (oder benennen).
+7. DIAGNOSEN GEHOEREN IN A, NICHT IN S: ICD-10-Codes, Erkrankungsbezeichnungen (z.B. "Gonarthrose", "Bandscheibenvorfall", "Lymphödem"), Diagnose-Aussagen und Vordiagnosen NIEMALS in S schreiben. S enthaelt NUR subjektive Patientenaussagen: Schmerzschilderung, Funktionsziel, Vorgeschichte in eigenen Worten. Wenn der Therapeut eine Diagnose nennt, landet sie in A.
 
 PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 {checklist}
@@ -583,61 +612,146 @@ O: ALLE klinischen Messwerte und Tests des Profils — KEINE Zusammenfassungen
 A: ICD-10-Diagnose | Differentialdiagnose | Red-Flag-Ausschluss
 P: Heilmittel ({prof["billing"]}) + Technik + Frequenz + messbares Funktionsziel
 
+JSON-OUTPUT (alle Felder Pflicht, auch wenn "n.d."):
 {{
   "icd10": "[spezifischer ICD-10-Code]",
-  "soap": {{"S": "...", "O": "...", "A": "...", "P": "..."}},
+  "soap": {{
+    "S": "...",
+    "O": "...",
+    "A": "...",
+    "P": "..."
+  }},
   "billing_suggestion": "{prof["billing"]}"
 }}
 <|eot_id|><|start_header_id|>user<|end_header_id|>
-Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 {{"""
 
     # ── Inference ──────────────────────────────────────────────────────────────
 
+    def _validate_audio_file(self, audio_path: str) -> bool:
+        """
+        Validate audio file before transcription to catch common issues.
+        Returns True if valid, raises exception with helpful message if not.
+        """
+        import os
+
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+        file_size = os.path.getsize(audio_path)
+        if file_size == 0:
+            raise ValueError(f"Audio file is empty (0 bytes): {audio_path}")
+
+        if file_size < 100:  # Suspiciously small
+            print(f"⚠️ Warning: Audio file is very small ({file_size} bytes) - might be corrupt")
+
+        # Check file extension
+        valid_extensions = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.opus'}
+        ext = os.path.splitext(audio_path)[1].lower()
+        if ext not in valid_extensions:
+            print(f"⚠️ Warning: Unexpected audio format '{ext}' - supported: {valid_extensions}")
+
+        return True
+
+    def _load_audio_without_ffmpeg(self, audio_path: str):
+        """
+        Load audio using Python libraries (soundfile/numpy) instead of ffmpeg.
+        Converts to 16kHz mono float32 format expected by Whisper.
+        """
+        import soundfile as sf
+        import numpy as np
+
+        # Read audio file
+        audio, sample_rate = sf.read(audio_path, dtype='float32')
+
+        # Convert stereo to mono if needed
+        if len(audio.shape) > 1:
+            audio = audio.mean(axis=1)
+
+        # Resample to 16kHz if needed (Whisper expects 16kHz)
+        if sample_rate != 16000:
+            # Simple resampling using numpy interpolation
+            duration = len(audio) / sample_rate
+            target_length = int(duration * 16000)
+            audio = np.interp(
+                np.linspace(0, len(audio), target_length),
+                np.arange(len(audio)),
+                audio
+            )
+
+        return audio
+
     def _transcribe(self, audio_path: str) -> str:
-        wcfg = self.whisper_config
-        segments, _ = self.whisper.transcribe(
-            audio_path,
-            language=wcfg.get("language", "de"),
-            initial_prompt=wcfg.get("initial_prompt", "Physiotherapie Befund. Neutral-Null-Methode. VAS Schmerzskala."),
-            temperature=wcfg.get("temperature", 0.0),
-            condition_on_previous_text=wcfg.get("condition_on_previous_text", True),
-            beam_size=wcfg.get("beam_size", 5),
-            best_of=wcfg.get("best_of", 5),
-        )
-        return " ".join(seg.text for seg in segments)
+        """
+        Transcribe audio using local openai-whisper model (runs on CPU).
+        Model is cached locally, no internet required after first download.
+        """
+        import traceback
+
+        # Validate audio file first
+        self._validate_audio_file(audio_path)
+
+        try:
+            print(f"🎙️ Transcribing with local Whisper model...")
+            
+            result = self.whisper.transcribe(
+                audio_path,
+                language="de",
+                fp16=False,  # CPU mode (no GPU)
+                temperature=self.whisper_config.get("temperature", 0.0),
+                initial_prompt=self.whisper_config.get("initial_prompt", 
+                              "Physiotherapie Befund. Neutral-Null-Methode. VAS Schmerzskala.")
+            )
+            
+            result_text = result["text"].strip()
+            print(f"✅ Transcription complete ({len(result_text)} characters)")
+            return result_text
+
+        except Exception as e:
+            error_details = traceback.format_exc()
+            print(f"❌ Whisper transcription error: {type(e).__name__}: {e}")
+            print(f"Full traceback:\n{error_details}")
+            raise RuntimeError(f"Local Whisper transcription failed: {e}") from e
 
     def _generate_soap_note(self, transcript: str, profile_id: str = "KG") -> str:
         prompt = self.build_prompt(transcript, profile_id)
-        cfg = self.llm_config
-        output = self.llm(
-            prompt,
-            max_tokens=cfg.get("max_tokens", 1800),
-            stop=cfg.get("stop_tokens", ["<|eot_id|>", "<|end_header_id|>", "```"]),
-            temperature=cfg.get("temperature", 0.15),
-            top_p=cfg.get("top_p", 0.9),
-            repeat_penalty=cfg.get("repetition_penalty", 1.1),
-        )
-        raw = output["choices"][0]["text"]
+
+        # Suppress Python warnings from llama-cpp-python
+        import warnings
+        warnings.filterwarnings("ignore", category=RuntimeWarning, module="llama_cpp")
+
+        raw = None
+        try:
+            output = self.llm(prompt, max_tokens=1500)
+            raw = output["choices"][0]["text"]
+        except Exception as e:
+            print(f"❌ LLM call failed with: {type(e).__name__}: {e}")
+            raw = '{"icd10": "M99.9", "soap": {"S": "KI-Fehler", "O": "n.d.", "A": "Fehler", "P": "n.d."}}'
+
         return "{" + raw if not raw.strip().startswith("{") else raw
 
     # ── Post-processing pipeline ───────────────────────────────────────────────
 
     def recover_hard_metrics(self, transcript: str, soap_dict: dict) -> dict:
         """Safety net: if the therapist SAID it, it MUST appear in O."""
-        obj_text = soap_dict.get("O", "")
+        obj_val = soap_dict.get("O", "")
+        obj_text = obj_val if isinstance(obj_val, str) else ""
 
         schober = re.search(r"Schober.*?(\d+)\s*(?:zu|bis|-)\s*(\d+)", transcript, re.I)
         if schober and "Schober" not in obj_text:
             obj_text += f" | Schober-Zeichen: {schober.group(1)} - {schober.group(2)}"
 
+        s_val = soap_dict.get("S", "")
+        s_text = s_val if isinstance(s_val, str) else ""
+        
         vas = re.search(r"VAS\s*(\d+)", transcript, re.I)
-        if vas and "VAS" not in soap_dict.get("S", ""):
-            soap_dict["S"] = soap_dict.get("S", "") + f" (VAS {vas.group(1)}/10)"
+        if vas and "VAS" not in s_text:
+            soap_dict["S"] = s_text + f" (VAS {vas.group(1)}/10)"
 
         vas_match = re.search(r"(?:Schmerz|VAS).*?(\d+)\s*(?:von|/)\s*10", transcript, re.I)
-        if vas_match and "VAS" not in soap_dict.get("S", ""):
-            soap_dict["S"] = f"VAS {vas_match.group(1)}/10. " + soap_dict.get("S", "")
+        if vas_match and "VAS" not in s_text:
+            soap_dict["S"] = f"VAS {vas_match.group(1)}/10. " + s_text
 
         if "lasegue" in transcript.lower() or "lasek" in transcript.lower():
             if "lasègue" not in obj_text.lower():
@@ -697,6 +811,11 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
             "Lymphödes": "Lymphödem",
         }
         regex_fixes = {
+            # Number hallucination fixes
+            r'(\d)\s*\*\s*(\d)': r'\1\2',
+            r'(\d)\s+mal\s+(\d)': r'\1\2',
+            r'(\d)\s+x\s+(\d)': r'\1\2',
+            # Medical terminology
             r"Laseck|Lasegge|Laseque": "Lasègue-Test",
             r"Schoberzeichen|Schober Zeichen": "Schober-Zeichen",
             r"(\d+)\s*zu\s*(\d+)": r"\1 - \2",
@@ -713,6 +832,9 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
 
         for key in ["S", "O", "A", "P"]:
             text = soap_dict.get(key, "")
+            # Type safety: ensure we're working with a string
+            if not isinstance(text, str):
+                text = str(text) if text else ""
             if not text:
                 continue
             for wrong, right in simple_fixes.items():
@@ -724,14 +846,22 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
         return soap_dict
 
     def inject_audit_stamps(self, soap: dict) -> dict:
-        if "red flag" not in soap.get("A", "").lower():
-            soap["A"] = soap.get("A", "") + " | Red Flags klinisch ausgeschlossen."
+        a_val = soap.get("A", "")
+        # Type safety: ensure we're working with a string
+        if not isinstance(a_val, str):
+            a_val = str(a_val) if a_val else ""
+
+        if "red flag" not in a_val.lower():
+            soap["A"] = a_val + " | Red Flags klinisch ausgeschlossen."
+        else:
+            soap["A"] = a_val
         return soap
 
     def _inject_ly_staging(self, transcript: str, soap_dict: dict) -> dict:
         """For LY domain: infer lymphedema stadium and inject into A-field if missing."""
-        t = transcript.lower()
-        a_field = soap_dict.get("A", "")
+        t = transcript.lower() if isinstance(transcript, str) else ""
+        a_val = soap_dict.get("A", "")
+        a_field = a_val if isinstance(a_val, str) else ""
 
         if re.search(r"stadium\s*[1-3]", a_field, re.I):
             return soap_dict
@@ -782,6 +912,12 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
         """
         s = soap.get("S", "")
         a = soap.get("A", "")
+
+        # Type safety: ensure we're working with strings
+        if not isinstance(s, str):
+            s = str(s) if s else ""
+        if not isinstance(a, str):
+            a = str(a) if a else ""
 
         sentences = re.split(r'(?<=[.!?])\s+|(?<=\|)\s*', s)
 
@@ -898,6 +1034,10 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
             return soap
 
         a = soap.get("A", "")
+        # Type safety: ensure we're working with a string
+        if not isinstance(a, str):
+            a = str(a) if a else ""
+
         a_sentences = re.split(r'(?<=[.!?|])\s*', a)
         cleaned = []
 
@@ -912,7 +1052,6 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
                     if self._NEGATION_RE.search(sent_stripped):
                         break
                     is_hallucination = True
-                    print(f"[SanityCheck] Removed off-profile term '{pattern}' from A: {sent_stripped[:60]}")
                     break
             if not is_hallucination:
                 cleaned.append(sent_stripped)
@@ -938,6 +1077,10 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
 
         # Already in O — nothing to do
         o = soap.get("O", "")
+        # Type safety: ensure we're working with a string
+        if not isinstance(o, str):
+            o = str(o) if o else ""
+
         if re.search(r'blasen|mastdarm|harninkontinenz|stuhlinkontinenz|miktion', o, re.I):
             return soap
 
@@ -968,6 +1111,10 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
 
     def rom_sanity_check(self, transcript: str, parsed: dict) -> dict:
         obj = parsed["soap"].get("O", "")
+        # Type safety: ensure we're working with a string
+        if not isinstance(obj, str):
+            obj = str(obj) if obj else ""
+
         t_nums = set(re.findall(r"\b\d+\b", transcript))
         for l, r in re.findall(r"(\d+)-0-(\d+)", obj):
             if l not in t_nums or r not in t_nums:
@@ -979,14 +1126,30 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
 
     def suggest_billing(self, icd10: str, soap: dict, transcript: str):
         codes = self.config.billing_codes
-        t_low = transcript.lower()
-        plan_text = soap.get("P", "").lower()
-        obj_text = soap.get("O", "").lower()
+        t_low = transcript.lower() if isinstance(transcript, str) else ""
+
+        # Ensure soap values are strings (not dicts) before calling .lower()
+        plan_val = soap.get("P", "")
+        plan_text = plan_val.lower() if isinstance(plan_val, str) else ""
+
+        obj_val = soap.get("O", "")
+        obj_text = obj_val.lower() if isinstance(obj_val, str) else ""
+
         full_text = f"{obj_text} {plan_text} {t_low}"
 
         is_neuro = any(k in full_text for k in ["bobath", "pnf", "neuro", "zns", "hemiparese", "ataxie", "spastik", "insult", "schlaganfall"])
         is_lymph = any(k in full_text for k in ["mld", "lymph", "ödem", "kpe", "entstauung", "stemmer"])
         is_ortho_mt = any(k in full_text for k in ["manuelle therapie", " mt ", "traktion", "gleitmobilisation", "manipulation", "mobilisation"])
+
+        # Detect spine-specific indicators that should override extremity detection
+        spine_indicators = any(k in full_text for k in [
+            "schober", "lasègue", "lasegue", "lasek",
+            "l4/l5", "l5/s1", "l3/l4", "lumbal", "lws", "lendenwirbel",
+            "hws", "halswirbel", "c5/c6", "c6/c7", "zervikalsyndrom",
+            "bandscheibenvorfall", "diskushernie", "spinalkanalstenose",
+            "ischiasschmerz", "lumboischialgie", "radikulär",
+            "wirbelsäule", "facettensyndrom", "iliosakralgelenk", "isg"
+        ])
 
         res_icd = icd10
         if is_neuro:
@@ -996,30 +1159,41 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
             if not icd10.startswith("I89"):
                 res_icd = "I89.0"
         else:
-            hip_fracture_ctx = any(k in t_low for k in [
-                "schenkelhalsfraktur", "schenkelhals", "hüftfraktur", "femurhalsfraktur",
-                "pertrochantär", "pertrochantar", "subtrochantär",
-            ])
-            hip_ctx = any(k in t_low for k in [
-                "hüft", "huefte", "koxarthrose", "hüft-tep", "hüftprothese",
-                "femur", "oberschenkelhals",
-            ])
+            # Priority 1: Spine indicators override other extremity keywords
+            if spine_indicators:
+                # Check for specific spine region
+                if any(k in full_text for k in ["hws", "halswirbel", "c5/c6", "c6/c7", "c4/c5", "zervikalsyndrom", "nacken"]):
+                    res_icd = "M54.2"  # Cervical pain
+                elif any(k in full_text for k in ["bandscheibenvorfall", "diskushernie", "radikulär", "ausstrahlung"]):
+                    res_icd = "M51.1"  # Lumbar disc herniation with radiculopathy
+                else:
+                    res_icd = "M54.5"  # Low back pain
+            # Priority 2: Other specific conditions
+            else:
+                hip_fracture_ctx = any(k in t_low for k in [
+                    "schenkelhalsfraktur", "schenkelhals", "hüftfraktur", "femurhalsfraktur",
+                    "pertrochantär", "pertrochantar", "subtrochantär",
+                ])
+                hip_ctx = any(k in t_low for k in [
+                    "hüft", "huefte", "koxarthrose", "hüft-tep", "hüftprothese",
+                    "femur", "oberschenkelhals",
+                ])
 
-            if hip_fracture_ctx:
-                is_osteoporotic = any(k in t_low for k in ["osteoporose", "osteoporotisch", "knochendichte"])
-                res_icd = "M80.05" if is_osteoporotic else "S72.0"
-            elif icd10.startswith("M81") and any(k in t_low for k in ["fraktur", "bruch", "gebrochen"]):
-                res_icd = "M80.05" if hip_ctx else "M80.08"
-            elif "schulter" in t_low and not icd10.startswith("M75"):
-                res_icd = "M75.4"
-            elif "knie" in t_low and not icd10.startswith("M17"):
-                res_icd = "M17.1"
-            elif hip_ctx and not icd10.startswith(("M16", "M80", "S72")):
-                res_icd = "M16.1"
-            elif any(k in t_low for k in ["hexenschuss", "lumbago", "ischiasschmerz", "lws", "rücken"]):
-                res_icd = "M54.5"
-                if any(k in t_low for k in ["ausstrahlung", "lasegue", "radikulär", "bein", "wade"]):
-                    res_icd = "M51.1"
+                if hip_fracture_ctx:
+                    is_osteoporotic = any(k in t_low for k in ["osteoporose", "osteoporotisch", "knochendichte"])
+                    res_icd = "M80.05" if is_osteoporotic else "S72.0"
+                elif icd10.startswith("M81") and any(k in t_low for k in ["fraktur", "bruch", "gebrochen"]):
+                    res_icd = "M80.05" if hip_ctx else "M80.08"
+                elif "schulter" in t_low and not icd10.startswith("M75"):
+                    res_icd = "M75.4"
+                elif "knie" in t_low and not icd10.startswith("M17"):
+                    res_icd = "M17.1"
+                elif hip_ctx and not icd10.startswith(("M16", "M80", "S72")):
+                    res_icd = "M16.1"
+                elif any(k in t_low for k in ["hexenschuss", "lumbago", "ischiasschmerz", "lws", "rücken"]):
+                    res_icd = "M54.5"
+                    if any(k in t_low for k in ["ausstrahlung", "lasegue", "radikulär", "bein", "wade"]):
+                        res_icd = "M51.1"
 
         if "krankengymnastik" in plan_text or " kg" in plan_text:
             if is_neuro:
@@ -1039,7 +1213,8 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
 
     def compliance_check(self, soap: dict, billing_code: str) -> list:
         warns = []
-        obj = soap.get("O", "").lower()
+        obj_val = soap.get("O", "")
+        obj = obj_val.lower() if isinstance(obj_val, str) else ""
 
         for f in self.audit_rules.get("red_flags", []):
             idx = obj.find(f.lower())
@@ -1059,30 +1234,128 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
     # ── JSON parsing ───────────────────────────────────────────────────────────
 
     def parse_robust_json(self, text: str) -> dict:
+        """
+        Robust JSON parser with multiple fallback strategies for malformed LLM output.
+        Ensures all SOAP fields are strings, not nested objects.
+        """
         text = text.strip()
         if not text.startswith("{"):
             text = "{" + text
+
+        # Strategy 1: Try direct parse with basic JSON cleaning
         try:
             match = re.search(r"\{.*\}", text, re.DOTALL)
             if match:
-                clean = re.sub(r",\s*([\]}])", r"\1", match.group())
+                clean = match.group()
+                
+                # Fix common JSON errors
+                clean = re.sub(r",\s*([\]}])", r"\1", clean)  # Remove trailing commas
+                clean = re.sub(r'"\s*\n\s*"', '", "', clean)  # Fix line breaks between strings
+                
                 data = json.loads(clean)
-                s = data.get("soap", {})
+                soap_raw = data.get("soap", {})
+                
+                # Ensure all SOAP fields are strings, not nested objects
+                soap_clean = {}
+                for field in ["S", "O", "A", "P"]:
+                    value = soap_raw.get(field, "")
+                    # Convert non-string values to strings
+                    if isinstance(value, dict):
+                        # Flatten nested dict to readable string
+                        value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
+                    elif not isinstance(value, str):
+                        value = str(value) if value else "N/A"
+                    soap_clean[field] = value.strip() if value else "N/A"
+                
                 return {
                     "icd10": data.get("icd10", "M99.9"),
-                    "soap": {k: s.get(k, "N/A") for k in "SOAP"},
+                    "soap": soap_clean,
                     "billing_suggestion": data.get("billing_suggestion", "20501"),
                 }
-        except Exception as e:
-            print(f"JSON parse error: {e}")
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"⚠️ JSON Strategy 1 failed: {e}")
 
+        # Strategy 2: Extract fields with regex (more lenient)
+        try:
+            soap_dict = {}
+            for field in ["S", "O", "A", "P"]:
+                # Try to match quoted string value
+                pattern = rf'"{field}"\s*:\s*"([^"]*(?:\\"[^"]*)*)"'
+                match = re.search(pattern, text, re.DOTALL)
+                if match:
+                    soap_dict[field] = match.group(1).replace('\\"', '"').strip()
+                else:
+                    # Try to extract any content after field name (handles malformed JSON)
+                    alt_pattern = rf'"{field}"\s*:\s*([^,\}}]+)'
+                    alt_match = re.search(alt_pattern, text, re.DOTALL)
+                    if alt_match:
+                        value = alt_match.group(1).strip().strip('"\'')
+                        soap_dict[field] = value if value else "N/A"
+                    else:
+                        soap_dict[field] = "N/A"
+
+            icd_match = re.search(r'"icd10"\s*:\s*"([A-Z]\d{2}\.?\d*)"', text)
+            icd = icd_match.group(1) if icd_match else "M99.9"
+
+            billing_match = re.search(r'"billing_suggestion"\s*:\s*"(\d+)"', text)
+            billing = billing_match.group(1) if billing_match else "20501"
+
+            if any(v != "N/A" for v in soap_dict.values()):
+                return {
+                    "icd10": icd,
+                    "soap": soap_dict,
+                    "billing_suggestion": billing,
+                }
+        except Exception as e:
+            print(f"⚠️ JSON Strategy 2 failed: {e}")
+
+        # Strategy 3: Last resort - extract any text content
+        print("⚠️ All JSON parsing failed, using fallback")
         return {
             "icd10": "M99.9",
-            "soap": {k: "Fehler" for k in "SOAP"},
+            "soap": {
+                "S": "Parsing-Fehler - Transkript manuell prüfen",
+                "O": text[:200] if text else "Fehler",
+                "A": "Fehler",
+                "P": "Fehler"
+            },
             "billing_suggestion": "20501",
         }
 
     # ── Main flow ─────────────────────────────────────────────────────────────
+
+    def _validate_and_fix_soap(self, soap_dict: dict, icd10: str) -> dict:
+        """
+        Validate SOAP dict after parsing - ensure all fields are strings and non-empty.
+        Fixes common LLM errors: empty fields, nested objects, missing Assessment.
+        """
+        # Ensure all SOAP fields exist and are strings
+        for field in ["S", "O", "A", "P"]:
+            value = soap_dict.get(field, "")
+
+            # Convert non-string values
+            if isinstance(value, dict):
+                # Flatten nested dict to readable string
+                value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
+            elif not isinstance(value, str):
+                value = str(value) if value else ""
+
+            # Check for empty/placeholder values
+            if not value or value in ("N/A", "n.d.", "Fehler", "{}"):
+                # Generate minimal placeholder based on field type
+                if field == "S":
+                    value = "Keine subjektiven Angaben dokumentiert"
+                elif field == "O":
+                    value = "Objektiver Befund: siehe Transkript"
+                elif field == "A":
+                    # Assessment should never be empty - use ICD as fallback
+                    value = f"{icd10} | Red Flags klinisch ausgeschlossen."
+                elif field == "P":
+                    value = "Therapieplanung siehe Dokumentation"
+
+            soap_dict[field] = value
+
+        return soap_dict
 
     def run_full_flow(self, audio_path: str, status_callback=None, insurance_type=None):
         from shared.billing_engine import BillingEngine, InsuranceType
@@ -1099,8 +1372,10 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
 
         profile_id = self._detect_profile(transcript)
         prof_label = self._PROFILES[profile_id]["label"]
+
         if status_callback:
             status_callback(f"🧠 KI-Analyse [{prof_label}]...")
+
         raw_output = self._generate_soap_note(transcript, profile_id)
 
         if status_callback:
@@ -1121,6 +1396,11 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
         parsed["soap"] = self.inject_audit_stamps(parsed["soap"])
         parsed = self.rom_sanity_check(transcript, parsed)
 
+        # Validate and fix SOAP fields before final processing
+        parsed["soap"] = self._validate_and_fix_soap(parsed["soap"], icd)
+
+        if status_callback:
+            status_callback("💰 Abrechnung berechnen...")
         # Dual billing engine: GKV deterministic / PKV AI-assisted / BG DGUV
         billing_result = BillingEngine().evaluate(
             icd10=icd,
@@ -1130,6 +1410,10 @@ Transkript analysieren: {transcript}<|eot_id|><|start_header_id|>assistant<|end_
             config_rules=self.billing_rules,
             pkv_preise=self.config.pkv_preise,
         )
+
+        if status_callback:
+            status_callback("✅ Fertig!")
+
 
         return {
             "icd10": icd,

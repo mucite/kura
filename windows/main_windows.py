@@ -12,6 +12,7 @@ import threading
 import time
 import traceback
 import wave
+import webbrowser
 from datetime import datetime
 
 import numpy as np
@@ -23,7 +24,14 @@ import PySimpleGUI as sg
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from shared.license_manager import LicenseManager
-# KuraEngine imported lazily inside _boot() so scipy/mlx don't block window startup
+# KuraEngine imported lazily inside _boot() so scipy/llama don't block window startup
+
+
+# ── Version & update URLs ──────────────────────────────────────────────────────
+
+APP_VERSION   = "2026.3.2"
+_VERSION_URL  = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/version.json"
+_DOWNLOAD_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/Kura_Windows_v2026.exe"
 
 
 # ── Crash logging ──────────────────────────────────────────────────────────────
@@ -81,7 +89,7 @@ sg.theme("DarkBlue3")
 sg.set_options(font=("Arial", 10))
 
 
-# ── Audio recording (sounddevice — no ffmpeg required) ───────────────────────
+# ── Audio recording (sounddevice — no ffmpeg required on Windows) ─────────────
 
 SAMPLE_RATE = 16000  # Whisper optimal
 
@@ -100,8 +108,10 @@ class KuraApp:
         self.insurance_type = None  # InsuranceType.GKV/PKV/BG — set from UI
         self.temp_audio = os.path.join(USER_DATA_DIR, "session.wav")
         self.last_report = None
+        self.last_billing_result = None
         self.seconds_elapsed = 0
         self._record_thread = None
+        self._audio_chunks = []
 
         # Boot engine in background
         threading.Thread(target=self._boot, daemon=True).start()
@@ -113,8 +123,10 @@ class KuraApp:
             self._post_event("-STATUS-UPDATE-", "⏳ Modelle laden... bitte warten")
             from physio_scribe_crossplatform import KuraEngine
             self.engine = KuraEngine()
-            self._post_event("-STATUS-UPDATE-", "✅ Kura Bereit (Lokal & DSGVO)")
+            self._post_event("-STATUS-UPDATE-", f"✅ Kura Bereit (Lokal & DSGVO) — v{APP_VERSION}")
             self._post_event("-BOOT-DONE-", None)
+            # Silent background update check — same as macOS
+            threading.Thread(target=self._check_update_background, daemon=True).start()
         except MemoryError:
             self._post_event("-STATUS-UPDATE-", "❌ Zu wenig RAM")
             self._post_event("-ERROR-", "Nicht genug Arbeitsspeicher. Bitte schließen Sie andere Programme.")
@@ -143,6 +155,9 @@ class KuraApp:
             return f"{icon} Testphase: {remaining}/{self.license_mgr.max_trials} verbleibend"
         return "❌ Testphase beendet — Upgrade erforderlich"
 
+    def _is_pro(self):
+        return self.license_mgr.verify_locally() is True
+
     # ── Recording ─────────────────────────────────────────────────────────────
 
     def _start_recording(self, patient_name: str, window):
@@ -153,29 +168,26 @@ class KuraApp:
         self.patient_name = patient_name.strip().replace(" ", "_") or "Unbekannt"
         self.recording = True
         self.seconds_elapsed = 0
+        self._audio_chunks = []
 
         window["-START-"].update(disabled=True)
         window["-STOP-"].update(disabled=False)
 
-        # Recording thread
         self._record_thread = threading.Thread(target=self._record_audio, daemon=True)
         self._record_thread.start()
-
-        # Timer thread
         threading.Thread(target=self._timer_thread, args=(window,), daemon=True).start()
 
     def _record_audio(self):
-        chunks = []
         try:
             with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=1024) as stream:
                 while self.recording:
                     data, _ = stream.read(1024)
-                    chunks.append(data.copy())
+                    self._audio_chunks.append(data.copy())
         except Exception as e:
             print(f"Recording error: {e}")
 
-        if chunks:
-            audio = np.concatenate(chunks, axis=0)
+        if self._audio_chunks:
+            audio = np.concatenate(self._audio_chunks, axis=0)
             with wave.open(self.temp_audio, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
@@ -199,6 +211,35 @@ class KuraApp:
 
         window["-STOP-"].update(disabled=True)
         window["-START-"].update(disabled=False)
+
+        # Minimum recording guard (same as macOS: 10 seconds)
+        if self.seconds_elapsed < 10:
+            window["-STATUS-"].update("🩺 Bereit")
+            sg.popup_error(
+                f"Aufnahme zu kurz ({self.seconds_elapsed}s).\n\n"
+                "Bitte mindestens 10 Sekunden sprechen.",
+                title="Kura"
+            )
+            self.seconds_elapsed = 0
+            return
+
+        # Speech detection: check audio has actual signal above silence floor
+        if not self._audio_has_speech():
+            window["-STATUS-"].update("🩺 Bereit")
+            sg.popup_error(
+                "Kein Ton erkannt.\n\n"
+                "Die Aufnahme enthält kein hörbares Sprachsignal.\n"
+                "Prüfen Sie das Mikrofon und versuchen Sie es erneut.",
+                title="Kura"
+            )
+            self.seconds_elapsed = 0
+            try:
+                os.remove(self.temp_audio)
+            except Exception:
+                pass
+            return
+
+        self.seconds_elapsed = 0
         window["-STATUS-"].update("🧠 KI-Analyse läuft...")
 
         status = self.license_mgr.verify_locally()
@@ -207,6 +248,17 @@ class KuraApp:
         else:
             window["-STATUS-"].update("🩺 Bereit")
             self._show_upgrade_dialog()
+
+    def _audio_has_speech(self, silence_threshold: int = 200) -> bool:
+        """Return True if recorded audio chunks contain signal above silence_threshold (RMS)."""
+        if not self._audio_chunks:
+            return False
+        try:
+            audio = np.concatenate(self._audio_chunks, axis=0).astype(np.float32)
+            rms = float(np.sqrt(np.mean(audio ** 2)))
+            return rms > silence_threshold
+        except Exception:
+            return True  # can't determine — let Whisper try
 
     # ── AI pipeline ───────────────────────────────────────────────────────────
 
@@ -221,7 +273,7 @@ class KuraApp:
                 insurance_type=self.insurance_type,
             )
 
-            # DSGVO: delete audio immediately
+            # DSGVO: delete audio immediately after processing
             try:
                 if os.path.exists(self.temp_audio):
                     os.remove(self.temp_audio)
@@ -243,52 +295,67 @@ class KuraApp:
 
     def _show_review_window(self, res):
         """
-        Shows the SOAP note in an editable window — therapist can correct before saving.
-        Matches the macOS rumps.Window review flow.
+        Editable review window — matches macOS rumps.Window review flow.
+        Shows patient, date, audit summary counts, and full SOAP before billing block.
         """
         soap = res.get("soap", {})
-        warnings = res.get("compliance_check", [])
-        warning_str = "\n".join(f"-> {w}" for w in warnings) if warnings else "✅ Dokumentation GKV-konform."
-
         br = res.get("billing_result")
+
         if br:
             billing_line = br.format_billing_line()
-            audit_block = br.format_audit_report()
+            total_items = len([a for a in br.audit_items if a.status != "PASS"])
+            pass_items  = len([a for a in br.audit_items if a.status == "PASS"])
+            if br.audit_status == "PASS":
+                audit_summary = f"✅ AUDIT BESTANDEN — alle {pass_items} Prüfpunkte erfüllt"
+            elif br.audit_status == "BLOCK":
+                audit_summary = "🔴 ABRECHNUNG GESPERRT — ärztliche Abklärung erforderlich"
+            else:
+                audit_summary = f"⚠️ PRÜFUNG ERFORDERLICH — {total_items} Hinweise (vor Abrechnung prüfen)"
+            flagged = [str(i) for i in br.audit_items if i.status in ("WARN", "FAIL", "BLOCK")]
+            audit_block = "\n".join(flagged) if flagged else ""
             if br.optimization_hints:
-                audit_block += "\n\nHINWEISE:\n" + "\n".join(br.optimization_hints)
+                audit_block += ("\n\nHINWEISE:\n" + "\n".join(br.optimization_hints)) if audit_block \
+                    else ("HINWEISE:\n" + "\n".join(br.optimization_hints))
         else:
             billing_line = f"POSITION: {res.get('billing_suggestion', '?')}"
-            audit_block = warning_str
+            ins_label = "GKV"
+            warnings = res.get("compliance_check", [])
+            audit_summary = f"✅ Dokumentation {ins_label}-konform." if not warnings else "⚠️ Prüfung erforderlich"
+            audit_block = "\n".join(f"-> {w}" for w in warnings)
 
+        icd          = res.get("icd10", "–")
         profile_label = res.get("profile_label", "")
-        profile_line = f"PROFIL: {profile_label}\n" if profile_label else ""
+        date_str     = datetime.now().strftime("%d.%m.%Y")
+        patient_display = self.patient_name.replace("_", " ")
+        profile_line = f"Profil: {profile_label}\n" if profile_label else ""
 
-        # SOAP first — immediately visible; billing + tick-box audit below
+        footer = f"{billing_line}  |  ICD-10: {icd}\n{audit_summary}"
+        if audit_block:
+            footer += f"\n{audit_block}"
+
         initial_text = (
+            f"KURA — {patient_display}  |  {date_str}\n"
             f"{profile_line}"
-            f"S: {soap.get('S', '')}\n\n"
-            f"O: {soap.get('O', '')}\n\n"
-            f"A: {soap.get('A', '')}\n\n"
-            f"P: {soap.get('P', '')}\n\n"
-            f"{'━'*44}\n"
-            f"ABRECHNUNG | ICD-10: {res.get('icd10', '?')}\n"
-            f"{billing_line}\n\n"
-            f"AUDIT §106b SGB V\n"
-            f"{audit_block}\n\n"
-            f"PATIENT: {self.patient_name.replace('_', ' ')}"
+            f"{'─'*52}\n\n"
+            f"SUBJEKTIV\n{soap.get('S', '')}\n\n"
+            f"OBJEKTIV\n{soap.get('O', '')}\n\n"
+            f"ASSESSMENT\n{soap.get('A', '')}\n\n"
+            f"PLAN\n{soap.get('P', '')}\n\n"
+            f"{'─'*52}\n"
+            f"{footer}"
         )
 
         layout = [
             [sg.Text("Prüfen und in Abrechnung übernehmen:", font=("Arial", 10, "bold"))],
-            [sg.Multiline(initial_text, size=(72, 22), key="-RESULT-", font=("Courier New", 9))],
+            [sg.Multiline(initial_text, size=(76, 26), key="-RESULT-", font=("Courier New", 9))],
             [
-                sg.Button("✅ KOPIEREN & PDF", key="-SAVE-", button_color=("white", "#1976d2"), size=(18, 1)),
+                sg.Button("✅ KOPIEREN & PDF", key="-SAVE-", button_color=("white", "#1976d2"), size=(20, 1)),
                 sg.Button("Abbrechen", key="-CANCEL-", button_color=("white", "#757575"), size=(12, 1)),
             ],
         ]
 
         window = sg.Window(
-            "KURA v2026 — Befund-Revision",
+            f"KURA v{APP_VERSION} — Befund-Revision",
             layout,
             finalize=True,
             modal=True,
@@ -334,16 +401,18 @@ class KuraApp:
                 except Exception:
                     pass
 
-        # Clipboard: paste clean text (headers/audit notes stripped)
-        clean_text = re.sub(r"---.*?---|->.*?(\n|$)", "", edited_text).strip()
+        # Clipboard: strip KURA header and billing/audit footer — paste clean SOAP
+        soap_only = re.sub(r'^KURA[^\n]*\n[-─]+\n\n?', '', edited_text)
+        soap_only = re.sub(r'\n[-─]{3,}.*', '', soap_only, flags=re.DOTALL).strip()
         try:
             process = subprocess.Popen("clip", stdin=subprocess.PIPE, shell=True)
-            process.communicate(clean_text.encode("utf-8"))
+            process.communicate(soap_only.encode("utf-8"))
         except Exception as e:
             print(f"Clipboard error: {e}")
 
-        # Archive JSON
+        # Archive JSON + PDF
         self.last_report = edited_text
+        self.last_billing_result = res.get("billing_result")
         timestamp = datetime.now().strftime("%Y%m%d-%H%M")
         patient_dir = os.path.join(self.report_dir, self.patient_name)
         os.makedirs(patient_dir, exist_ok=True)
@@ -352,119 +421,370 @@ class KuraApp:
                        "icd10": user_icd or res.get("icd10"), "timestamp": timestamp},
                       f, ensure_ascii=False, indent=4)
 
-        # PDF
         self._save_pdf_to_disk()
 
-        # Trial increment
+        # Trial increment + notification
         if status == "TRIAL":
             count = self.license_mgr.get_trial_count()
             remaining = self.license_mgr.max_trials - (count + 1)
             self.license_mgr.increment_trial()
-            sg.popup_ok(
-                f"Bericht {count + 1} von {self.license_mgr.max_trials} gespeichert.\n"
-                f"Noch {remaining} kostenlose Berichte verbleibend.",
-                title="Kura Testphase"
-            )
+            window["-LICENSE-"].update(self._license_text())
+            if remaining <= 0:
+                sg.popup_ok(
+                    f"Bericht gespeichert.\nTestphase beendet — bitte aktivieren Sie Kura Pro.",
+                    title="Kura Testphase"
+                )
+            else:
+                window["-STATUS-"].update(
+                    f"✅ Gespeichert — noch {remaining} kostenlose Berichte"
+                )
         else:
-            sg.popup_ok("✅ Bericht gespeichert (Desktop + Archiv)", title="Kura")
+            window["-STATUS-"].update("✅ Bericht gespeichert")
 
         window["-LICENSE-"].update(self._license_text())
-        window["-STATUS-"].update("🩺 Bereit")
 
-    # ── PDF export ────────────────────────────────────────────────────────────
+    # ── PDF export (matches macOS rich PDF) ──────────────────────────────────
 
     def _save_pdf_to_disk(self):
         if not self.last_report:
             sg.popup_error("Kein Bericht zum Speichern vorhanden.")
             return
 
-        safe_name = self.patient_name.replace(" ", "_")
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M")
-        desktop = os.path.join(os.path.expanduser("~/Desktop"), f"Kura_{safe_name}.pdf")
+        safe_name   = self.patient_name.replace(" ", "_")
+        timestamp   = datetime.now().strftime("%Y%m%d-%H%M")
+        desktop     = os.path.join(os.path.expanduser("~/Desktop"), f"Kura_{safe_name}.pdf")
         patient_dir = os.path.join(self.report_dir, safe_name)
         os.makedirs(patient_dir, exist_ok=True)
         archive = os.path.join(patient_dir, f"Bericht_{timestamp}.pdf")
 
         try:
+            # ── Character safety (same table as macOS) ────────────────────────
+            _EMOJI_MAP = [
+                ('\u2705', '[PASS]'), ('\u26a0\ufe0f', '[WARN]'), ('\u26a0', '[WARN]'),
+                ('\U0001f534', '[STOP]'), ('\U0001f4cb', '[FEHLT]'), ('\u2753', '[?]'),
+                ('\u274c', '[STOP]'), ('\u2714', '[PASS]'), ('\u2713', '[PASS]'),
+            ]
+            _CHAR_MAP = str.maketrans({
+                '\u20ac': 'EUR',
+                '\u2013': '-', '\u2014': '-',
+                '\u2192': '->', '\u2190': '<-', '\u2194': '<->',
+                '\u2265': '>=', '\u2264': '<=', '\u2260': '!=',
+                '\u00b1': '+/-',
+                '\u201e': '"', '\u201c': '"', '\u201d': '"', '\u2018': "'", '\u2019': "'",
+                '\u2502': '|', '\u2500': '-', '\u2501': '-', '\u2550': '=',
+                '\u2588': '#', '\u25a0': '#',
+                '\xb0': 'Grad',
+            })
+
+            def s(text: str) -> str:
+                if not isinstance(text, str):
+                    text = str(text)
+                for em, rep in _EMOJI_MAP:
+                    text = text.replace(em, rep)
+                text = text.translate(_CHAR_MAP)
+                return text.encode('latin-1', 'replace').decode('latin-1')
+
+            # ── Parse SOAP sections from review text ──────────────────────────
+            text = str(self.last_report)
+
+            def _field(label):
+                m = re.search(rf'{label}\n(.*?)(?=\n[A-Z]{{2,}}|\n-{{3,}}|\n─{{3,}}|\Z)', text, re.S)
+                return m.group(1).strip() if m else ""
+
+            soap_s = _field("SUBJEKTIV")
+            soap_o = _field("OBJEKTIV")
+            soap_a = _field("ASSESSMENT")
+            soap_p = _field("PLAN")
+
+            footer_m   = re.search(r'[─-]{3,}\n(.*)', text, re.S)
+            footer_raw = footer_m.group(1).strip() if footer_m else ""
+            footer_lines  = footer_raw.splitlines()
+            billing_line  = s(footer_lines[0]) if footer_lines else ""
+            audit_lines   = [s(l) for l in footer_lines[1:] if l.strip()]
+
+            # ── Layout constants ───────────────────────────────────────────────
+            now             = datetime.now()
+            patient_display = self.patient_name.replace("_", " ")
+            date_str        = now.strftime("%d.%m.%Y")
+            time_str        = now.strftime("%H:%M")
+            W    = 180
+            COL  = 90
+
+            DARK  = (25,  25,  25)
+            MID   = (90,  90,  90)
+            LIGHT = (140, 140, 140)
+            WHITE = (255, 255, 255)
+            BODY  = (20,  20,  20)
+            RULE  = (210, 210, 210)
+            SHADE = (248, 248, 248)
+
+            # ── Build PDF ──────────────────────────────────────────────────────
             pdf = FPDF()
             pdf.set_margins(15, 15, 15)
             pdf.add_page()
 
-            display_name = self.patient_name.replace("_", " ")
-            display_ts = datetime.now().strftime("%d.%m.%Y | %H:%M")
-
+            # 1. Header
+            pdf.set_fill_color(*DARK)
+            pdf.set_text_color(*WHITE)
             pdf.set_font("Helvetica", "B", 14)
-            pdf.cell(180, 10, f"Physiotherapeutischer Befund: {display_name} | {display_ts}",
-                     new_x="LMARGIN", new_y="NEXT", align="C")
-            pdf.ln(5)
+            pdf.cell(W, 12, s("  KURA  Physiotherapeutischer Befund"),
+                     new_x="LMARGIN", new_y="NEXT", align="L", fill=True)
 
-            clean = (self.last_report
-                     .replace("–", "-").replace("„", '"').replace("\u201c", '"').replace("°", " Grad")
-                     .encode("latin-1", "replace").decode("latin-1"))
+            # 2. Patient info bar
+            pdf.set_fill_color(*SHADE)
+            pdf.set_text_color(*MID)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(COL, 7, s(f"  Patient: {patient_display}"),
+                     new_x="RIGHT", new_y="TOP", fill=True)
+            pdf.cell(COL, 7, s(f"Datum: {date_str}   {time_str} Uhr  "),
+                     new_x="LMARGIN", new_y="NEXT", align="R", fill=True)
+            pdf.ln(6)
 
-            lasegue_pattern = r"(Las.gue[^\.]*?\d+.*?Grad[^\.]*)"
-            for line in clean.split("\n"):
-                if not line.strip():
-                    pdf.ln(5)
+            # 3. SOAP sections
+            for section_title, body in [
+                ("SUBJEKTIV",  soap_s),
+                ("OBJEKTIV",   soap_o),
+                ("ASSESSMENT", soap_a),
+                ("PLAN",       soap_p),
+            ]:
+                if not body:
                     continue
-                if re.search(lasegue_pattern, line, re.IGNORECASE):
-                    parts = re.split(f"({lasegue_pattern})", line, flags=re.IGNORECASE)
-                    pdf.set_x(15)
-                    for part in parts:
-                        if re.match(lasegue_pattern, part, re.IGNORECASE):
-                            pdf.set_font("Helvetica", "B", 11)
-                            pdf.write(8, part)
-                        else:
-                            pdf.set_font("Helvetica", "", 11)
-                            pdf.write(8, part)
-                    pdf.ln(8)
+                pdf.set_fill_color(*SHADE)
+                pdf.set_draw_color(*RULE)
+                pdf.set_text_color(*MID)
+                pdf.set_font("Helvetica", "B", 8)
+                pdf.cell(W, 6, s(f"  {section_title}"),
+                         new_x="LMARGIN", new_y="NEXT", fill=True, border="B")
+                pdf.set_text_color(*BODY)
+                pdf.set_font("Helvetica", "", 10)
+                pdf.ln(2)
+                pdf.multi_cell(W, 5.5, s(body), new_x="LMARGIN", new_y="NEXT")
+                pdf.ln(4)
+
+            # 4. Abrechnung & Audit section
+            pdf.set_fill_color(*SHADE)
+            pdf.set_draw_color(*RULE)
+            pdf.set_text_color(*MID)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(W, 6, "  ABRECHNUNG & AUDIT",
+                     new_x="LMARGIN", new_y="NEXT", fill=True, border=1)
+            pdf.ln(2)
+
+            br_obj = self.last_billing_result
+            if br_obj:
+                pdf.set_text_color(*BODY)
+                pdf.set_font("Helvetica", "B", 9)
+                pdf.multi_cell(W, 5.5, s(br_obj.format_billing_line()),
+                               new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_text_color(*MID)
+                dg_line = (f"Diagnosegruppe: {br_obj.diagnosegruppe} — "
+                           f"{br_obj.diagnosegruppe_desc} | {br_obj.legal_basis}")
+                pdf.multi_cell(W, 4.5, s(dg_line), new_x="LMARGIN", new_y="NEXT")
+                pdf.ln(3)
+
+                STATUS_COLORS = {
+                    "PASS":   (34,  139, 34),
+                    "REVIEW": (200, 100,  0),
+                    "BLOCK":  (180,  20, 20),
+                }
+                STATUS_LABELS = {
+                    "PASS":   "AUDIT BESTANDEN",
+                    "REVIEW": "PRUEFUNG ERFORDERLICH",
+                    "BLOCK":  "ABRECHNUNG GESPERRT",
+                }
+                badge_col = STATUS_COLORS.get(br_obj.audit_status, (90, 90, 90))
+                badge_txt = STATUS_LABELS.get(br_obj.audit_status, br_obj.audit_status)
+
+                pass_count  = sum(1 for a in br_obj.audit_items if a.status == "PASS")
+                total_count = len(br_obj.audit_items)
+                open_count  = total_count - pass_count
+
+                if br_obj.audit_status == "PASS":
+                    badge_detail = f"Alle {total_count} Pruefpunkte erfuellt"
+                elif br_obj.audit_status == "BLOCK":
+                    badge_detail = "Aerztliche Abklaerung vor Therapiefortsetzung erforderlich"
                 else:
-                    pdf.set_font("Helvetica", size=11)
-                    pdf.set_x(15)
-                    pdf.multi_cell(180, 8, line)
+                    badge_detail = f"{open_count} von {total_count} Hinweisen offen"
+
+                pdf.set_fill_color(*badge_col)
+                pdf.set_text_color(*WHITE)
+                pdf.set_font("Helvetica", "B", 9)
+                pdf.cell(W, 7, s(f"  {badge_txt}  —  {badge_detail}"),
+                         new_x="LMARGIN", new_y="NEXT", fill=True)
+                pdf.ln(2)
+
+                if br_obj.audit_status == "PASS":
+                    show_items = [a for a in br_obj.audit_items if a.status in ("FAIL", "BLOCK")]
+                else:
+                    show_items = [a for a in br_obj.audit_items if a.status in ("WARN", "FAIL", "BLOCK")]
+
+                if show_items:
+                    pdf.set_font("Helvetica", "B", 7.5)
+                    pdf.set_text_color(*MID)
+                    pdf.cell(W, 5, "  Offene Pruefpunkte:", new_x="LMARGIN", new_y="NEXT")
+                    pdf.set_font("Helvetica", "", 8)
+                    for item in show_items:
+                        item_col = {
+                            "FAIL":  (180, 20, 20),
+                            "BLOCK": (180, 20, 20),
+                            "WARN":  (180, 100, 0),
+                        }.get(item.status, BODY)
+                        pdf.set_text_color(*item_col)
+                        pdf.multi_cell(W, 4.5,
+                                       s(f"  {item.icon} {item.label}"
+                                         + (f": {item.detail}" if item.detail else "")),
+                                       new_x="LMARGIN", new_y="NEXT")
+            else:
+                # Fallback: plain text (no billing_result object)
+                pdf.set_font("Helvetica", "", 9)
+                pdf.set_text_color(*BODY)
+                if billing_line:
+                    pdf.multi_cell(W, 5, billing_line, new_x="LMARGIN", new_y="NEXT")
+                for al in audit_lines:
+                    pdf.multi_cell(W, 5, al, new_x="LMARGIN", new_y="NEXT")
+
+            pdf.ln(1)
+            pdf.set_draw_color(*RULE)
+            pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+
+            # 5. Footer watermark
+            pdf.set_y(-12)
+            pdf.set_font("Helvetica", "I", 7)
+            pdf.set_text_color(*LIGHT)
+            pdf.cell(W, 5,
+                     s(f"Kura v{APP_VERSION} | Lokale KI-Verarbeitung | DSGVO-konform | {date_str}"),
+                     align="C")
 
             pdf.output(archive)
             pdf.output(desktop)
+
         except Exception as e:
-            sg.popup_error(f"PDF-Fehler: {e}")
+            sg.popup_error(f"PDF-Fehler: {e}", title="Kura")
 
-    # ── Dialogs ───────────────────────────────────────────────────────────────
+    # ── Update check ──────────────────────────────────────────────────────────
 
-    def _show_upgrade_dialog(self):
-        import webbrowser
+    @staticmethod
+    def _version_gt(a: str, b: str) -> bool:
+        try:
+            return tuple(int(x) for x in a.split(".")) > tuple(int(x) for x in b.split("."))
+        except Exception:
+            return False
+
+    def _check_update_background(self):
+        """Silent update check on boot — same as macOS."""
+        try:
+            import requests
+            r = requests.get(_VERSION_URL, timeout=6)
+            if r.status_code != 200:
+                return
+            remote_ver = r.json().get("version", "")
+            if self._version_gt(remote_ver, APP_VERSION):
+                self._post_event("-UPDATE-AVAILABLE-", remote_ver)
+        except Exception:
+            pass
+
+    def _check_update_manual(self, window):
+        """Manual update check triggered by button."""
+        def _run():
+            try:
+                import requests
+                r = requests.get(_VERSION_URL, timeout=6)
+                if r.status_code != 200:
+                    window.write_event_value("-UPDATE-RESULT-", None)
+                    return
+                remote_ver = r.json().get("version", "")
+                window.write_event_value("-UPDATE-RESULT-", remote_ver)
+            except Exception:
+                window.write_event_value("-UPDATE-RESULT-", "ERROR")
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _open_update_page(self):
+        result = sg.popup_yes_no(
+            f"Neue Version verfügbar!\n\n"
+            "Wichtig: Beenden Sie Kura zuerst, bevor Sie die neue Version installieren.\n\n"
+            "Jetzt herunterladen?",
+            title="Kura Update"
+        )
+        if result == "Yes":
+            webbrowser.open(_DOWNLOAD_URL)
+
+    # ── Practice config (Pro only — matches macOS 3-step dialog) ─────────────
+
+    def _config_locked(self):
         if sg.popup_yes_no(
-            "Testphase beendet. Aktivieren Sie Kura Pro für unbegrenzte Berichte.\n\nJetzt upgraden (€39/Monat)?",
+            "Praxis-Einstellungen sind nur mit einem aktiven Kura Pro Abo verfügbar.\n\n"
+            "Aktivieren Sie Ihr Abo, um Praxisname, Betriebsstättennummer\n"
+            "und individuelle Abrechnungsregeln zu konfigurieren.\n\n"
+            "Jetzt aktivieren?",
             title="Kura Pro erforderlich"
         ) == "Yes":
-            webbrowser.open("https://kura.lemonsqueezy.com/checkout/buy/2400563b-a13a-4e42-b734-d79122e7ec92")
+            self._activate_license()
 
-    def _activate_license(self):
-        key = sg.popup_get_text(
-            "Geben Sie Ihren Kura Pro Lizenzschlüssel ein:",
-            title="Kura Pro Aktivierung"
+    def _pc_get(self, section: str, key: str, cfg_path: str) -> str:
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                return json.load(f).get(section, {}).get(key, "")
+        except Exception:
+            return ""
+
+    def _open_practice_config(self):
+        if not self._is_pro():
+            self._config_locked()
+            return
+
+        cfg_path = os.path.expanduser("~/.kura_practice.json")
+
+        # Step 1 — Praxisname
+        name = sg.popup_get_text(
+            "Praxisname (z.B. Physiotherapie Mustermann):",
+            title="Praxis-Einstellungen 1/3",
+            default_text=self._pc_get("practice", "name", cfg_path) or "",
         )
-        if key and key.strip():
-            if self.license_mgr.verify_online(key.strip()):
-                sg.popup_ok("✅ Kura Pro ist jetzt aktiv!", title="Aktivierung erfolgreich")
-                return True
-            else:
-                sg.popup_error("Ungültiger Lizenzschlüssel.\nBitte überprüfen Sie Ihren Schlüssel.")
-        return False
+        if name is None:
+            return
+        name = name.strip() or "Meine Praxis"
 
-    def _reset_trial(self):
-        if sg.popup_yes_no(
-            "Testzähler auf 0 zurücksetzen?\n\n⚠️ Nur für Entwicklungszwecke.",
-            title="Testphase zurücksetzen"
-        ) == "Yes":
-            try:
-                for f in [self.license_mgr.trial_file, self.license_mgr.hardware_id_file]:
-                    if os.path.exists(f):
-                        os.remove(f)
-                sg.popup_ok("Testphase zurückgesetzt. Sie haben wieder 5 kostenlose Berichte.")
-            except Exception as e:
-                sg.popup_error(f"Fehler: {e}")
+        # Step 2 — BSNR
+        bsnr = sg.popup_get_text(
+            "Betriebsstättennummer (BSNR, 9-stellig):",
+            title="Praxis-Einstellungen 2/3",
+            default_text=self._pc_get("practice", "license_number", cfg_path) or "",
+        )
+        if bsnr is None:
+            return
+        bsnr = bsnr.strip()
 
-    def _sync_config(self):
+        # Step 3 — Location
+        location = sg.popup_get_text(
+            "Standort (Stadt / Adresse):",
+            title="Praxis-Einstellungen 3/3",
+            default_text=self._pc_get("practice", "location", cfg_path) or "",
+        )
+        if location is None:
+            return
+
+        try:
+            from shared.practice_config import PracticeConfig
+            pc = PracticeConfig(practice_file=cfg_path)
+            pc.config["practice"]["name"]           = name
+            pc.config["practice"]["license_number"] = bsnr
+            pc.config["practice"]["location"]       = location.strip()
+            pc.save()
+            if sg.popup_yes_no(
+                f"Einstellungen gespeichert: {name} — BSNR {bsnr}\n\n"
+                "Erweiterte Konfiguration (ICD-10-Regeln, Abrechnungscodes) jetzt öffnen?",
+                title="Kura Praxis-Einstellungen"
+            ) == "Yes":
+                os.startfile(cfg_path)
+        except Exception as e:
+            sg.popup_error(f"Konnte Einstellungen nicht speichern:\n{e}", title="Kura Fehler")
+
+    def _open_gist_override(self):
+        """Create / open local config override — Pro only."""
+        if not self._is_pro():
+            self._config_locked()
+            return
         if not self.engine:
             sg.popup_error("KI-Engine nicht geladen.")
             return
@@ -483,13 +803,80 @@ class KuraApp:
                 )
             os.startfile(override_path)
         except Exception as e:
-            sg.popup_error(f"Konfiguration konnte nicht geöffnet werden:\n{e}")
+            sg.popup_error(f"Konfiguration konnte nicht geöffnet werden:\n{e}", title="Kura Fehler")
+
+    # ── License dialogs ───────────────────────────────────────────────────────
+
+    def _show_upgrade_dialog(self):
+        if sg.popup_yes_no(
+            "Testphase beendet. Aktivieren Sie Kura Pro für unbegrenzte Berichte.\n\nJetzt upgraden (€49/Monat)?",
+            title="Kura Pro erforderlich"
+        ) == "Yes":
+            webbrowser.open("https://kura-medical.de/#pricing")
+
+    def _activate_license(self):
+        layout = [
+            [sg.Text("Lizenzschlüssel eingeben (Format: XXXX-XXXX-XXXX-XXXX):", font=("Arial", 10))],
+            [sg.InputText("", key="-KEY-", size=(44, 1), font=("Courier New", 10))],
+            [
+                sg.Button("Aktivieren", key="-ACTIVATE-", button_color=("white", "#1976d2"), size=(14, 1)),
+                sg.Button("Jetzt kaufen", key="-BUY-", button_color=("white", "#388e3c"), size=(14, 1)),
+                sg.Button("Abbrechen", key="-CANCEL-", button_color=("white", "#757575"), size=(12, 1)),
+            ],
+        ]
+        win = sg.Window("Kura Pro aktivieren", layout, finalize=True, modal=True)
+        result = False
+        while True:
+            event, values = win.read()
+            if event in (sg.WINDOW_CLOSED, "-CANCEL-"):
+                break
+            if event == "-BUY-":
+                webbrowser.open("https://kura-medical.de/#pricing")
+            if event == "-ACTIVATE-":
+                key = values["-KEY-"].strip()
+                if not key:
+                    sg.popup_error("Bitte geben Sie einen Lizenzschlüssel ein.")
+                    continue
+                ok, msg = self.license_mgr.activate(key)
+                if ok:
+                    sg.popup_ok(f"✅ {msg}", title="Aktivierung erfolgreich")
+                    result = True
+                    break
+                else:
+                    sg.popup_error(f"Aktivierung fehlgeschlagen:\n{msg}")
+        win.close()
+        return result
+
+    def _deactivate_license(self):
+        if sg.popup_yes_no(
+            "Dies entfernt Kura Pro von diesem Gerät.\n\n"
+            "Der Schlüssel kann danach auf einem anderen Gerät aktiviert werden.\n\n"
+            "Internetverbindung erforderlich.\n\nLizenz deaktivieren?",
+            title="Lizenz deaktivieren?"
+        ) == "Yes":
+            ok, msg = self.license_mgr.deactivate()
+            sg.popup_ok(msg, title="Erledigt" if ok else "Fehler")
+            return ok
+        return False
+
+    def _reset_trial(self):
+        if sg.popup_yes_no(
+            "Testzähler auf 0 zurücksetzen?\n\n⚠️ Nur für Entwicklungszwecke.",
+            title="Testphase zurücksetzen"
+        ) == "Yes":
+            try:
+                for f in [self.license_mgr.trial_file, self.license_mgr.hardware_id_file]:
+                    if os.path.exists(f):
+                        os.remove(f)
+                sg.popup_ok("Testphase zurückgesetzt. Sie haben wieder 5 kostenlose Berichte.")
+            except Exception as e:
+                sg.popup_error(f"Fehler: {e}")
 
     # ── Main window & event loop ──────────────────────────────────────────────
 
     def run(self):
         layout = [
-            [sg.Text("Kura v2026.1.0", font=("Arial", 13, "bold")),
+            [sg.Text(f"Kura v{APP_VERSION}", font=("Arial", 13, "bold")),
              sg.Push(),
              sg.Text(self._license_text(), key="-LICENSE-", font=("Arial", 9))],
             [sg.HSeparator()],
@@ -505,17 +892,21 @@ class KuraApp:
             [sg.Button("🔴 Sitzung starten", key="-START-", size=(20, 1), font=("Arial", 9)),
              sg.Button("⏹ Stoppen & Verarbeiten", key="-STOP-", size=(22, 1), font=("Arial", 9), disabled=True)],
 
-            [sg.Button("📄 PDF exportieren", key="-PDF-", size=(15, 1), font=("Arial", 9)),
-             sg.Button("📂 Archiv öffnen", key="-ARCHIVE-", size=(15, 1), font=("Arial", 9)),
-             sg.Button("🔑 Lizenz", key="-LICENSE-BTN-", size=(10, 1), font=("Arial", 9)),
-             sg.Button("⚙️ Konfig", key="-SYNC-", size=(9, 1), font=("Arial", 9))],
+            [sg.Button("📄 PDF exportieren",     key="-PDF-",      size=(17, 1), font=("Arial", 9)),
+             sg.Button("📂 Archiv öffnen",       key="-ARCHIVE-",  size=(16, 1), font=("Arial", 9)),
+             sg.Button("🔑 Lizenz aktivieren",   key="-LIC-ACT-",  size=(17, 1), font=("Arial", 9)),
+             sg.Button("🔓 Deaktivieren",        key="-LIC-DEACT-",size=(14, 1), font=("Arial", 9))],
 
-            [sg.Button("ℹ Über Kura", key="-ABOUT-", size=(12, 1), font=("Arial", 9)),
-             sg.Button("🔧 System Info", key="-SYSINFO-", size=(13, 1), font=("Arial", 9)),
-             sg.Button("🔄 Trial Reset", key="-TRIAL-RESET-", size=(13, 1), font=("Arial", 9))],
+            [sg.Button("🏥 Praxis-Einstellungen", key="-PRACTICE-", size=(20, 1), font=("Arial", 9)),
+             sg.Button("⚙️ Konfiguration",       key="-CONFIG-",   size=(16, 1), font=("Arial", 9)),
+             sg.Button("🔄 Update prüfen",       key="-UPDATE-",   size=(15, 1), font=("Arial", 9))],
+
+            [sg.Button("ℹ Über Kura",            key="-ABOUT-",    size=(12, 1), font=("Arial", 9)),
+             sg.Button("🔧 System Info",          key="-SYSINFO-",  size=(13, 1), font=("Arial", 9)),
+             sg.Button("🔄 Trial Reset",          key="-TRIAL-RESET-", size=(13, 1), font=("Arial", 9))],
 
             [sg.HSeparator()],
-            [sg.Multiline(size=(72, 12), key="-OUTPUT-", disabled=True, font=("Courier New", 8),
+            [sg.Multiline(size=(76, 12), key="-OUTPUT-", disabled=True, font=("Courier New", 8),
                           background_color="#1e1e1e", text_color="#d4d4d4")],
 
             [sg.Text("🩺 Bereit", key="-STATUS-", font=("Arial", 9)),
@@ -525,10 +916,10 @@ class KuraApp:
         ]
 
         window = sg.Window(
-            "Kura v2026 — Medizinische KI-Dokumentation",
+            f"Kura v{APP_VERSION} — Medizinische KI-Dokumentation",
             layout,
             finalize=True,
-            size=(720, 560),
+            size=(760, 600),
             resizable=True,
         )
         self._window = window
@@ -539,23 +930,40 @@ class KuraApp:
             if event in (sg.WINDOW_CLOSED, "-QUIT-"):
                 break
 
-            # ── Background events ──────────────────────────────────────────────
+            # ── Background / async events ──────────────────────────────────────
             elif event == "-STATUS-UPDATE-":
                 window["-STATUS-"].update(values[event])
 
             elif event == "-BOOT-DONE-":
-                window["-OUTPUT-"].update("✅ KI-Modelle geladen. Kura ist einsatzbereit.\n")
+                window["-OUTPUT-"].update(
+                    f"✅ KI-Modelle geladen. Kura v{APP_VERSION} ist einsatzbereit.\n"
+                )
 
             elif event == "-TIMER-":
                 window["-STATUS-"].update(values[event])
+
+            elif event == "-UPDATE-AVAILABLE-":
+                remote_ver = values[event]
+                window["-STATUS-"].update(f"🆕 Update v{remote_ver} verfügbar — 'Update prüfen' klicken")
+
+            elif event == "-UPDATE-RESULT-":
+                remote_ver = values[event]
+                if remote_ver == "ERROR" or remote_ver is None:
+                    sg.popup_ok("Update-Prüfung fehlgeschlagen.\nKeine Verbindung — bitte später erneut versuchen.",
+                                title="Kura Update")
+                elif self._version_gt(remote_ver, APP_VERSION):
+                    self._open_update_page()
+                else:
+                    sg.popup_ok(f"Kura ist aktuell (v{APP_VERSION}).", title="Kura Update")
+                window["-STATUS-"].update("🩺 Bereit")
 
             elif event == "-AI-DONE-":
                 res = values[event]
                 window["-STATUS-"].update("✅ Analyse abgeschlossen — Bericht prüfen")
                 soap = res.get("soap", {})
                 br = res.get("billing_result")
-                billing_line = br.format_billing_line() if br else res.get("billing_suggestion", "")
-                audit_status = f"AUDIT: {br.audit_status}" if br else ""
+                billing_line  = br.format_billing_line() if br else res.get("billing_suggestion", "")
+                audit_status  = f"AUDIT: {br.audit_status}" if br else ""
                 profile_label = res.get("profile_label", "")
                 summary = (
                     f"ICD-10: {res.get('icd10')}  |  {billing_line}\n"
@@ -566,7 +974,6 @@ class KuraApp:
                 )
                 window["-OUTPUT-"].update(summary)
 
-                # Open review/edit window immediately
                 edited = self._show_review_window(res)
                 if edited:
                     self._finalize(edited, res, window)
@@ -607,20 +1014,31 @@ class KuraApp:
                 except Exception as e:
                     sg.popup_error(f"Ordner konnte nicht geöffnet werden:\n{e}")
 
-            elif event == "-LICENSE-BTN-":
+            elif event == "-LIC-ACT-":
                 if self._activate_license():
                     window["-LICENSE-"].update(self._license_text())
 
-            elif event == "-SYNC-":
-                self._sync_config()
+            elif event == "-LIC-DEACT-":
+                if self._deactivate_license():
+                    window["-LICENSE-"].update(self._license_text())
+
+            elif event == "-PRACTICE-":
+                self._open_practice_config()
+
+            elif event == "-CONFIG-":
+                self._open_gist_override()
+
+            elif event == "-UPDATE-":
+                window["-STATUS-"].update("🔍 Prüfe auf Updates...")
+                self._check_update_manual(window)
 
             elif event == "-ABOUT-":
                 sg.popup(
-                    "Kura v2026.1.0\n\n"
+                    f"Kura v{APP_VERSION}\n\n"
                     "Medizinische KI-Dokumentation\n\n"
                     "• 100% Lokale Verarbeitung (DSGVO-sicher)\n"
                     "• Professionelle medizinische Dokumentation\n"
-                    "• § 84 Abs. 6/7 SGB V konform\n\n"
+                    "• § 125 Abs. 1 SGB V konform\n\n"
                     "© 2026 Kura Medical",
                     title="Über Kura",
                     button_color=("white", "#1976d2"),
@@ -628,8 +1046,8 @@ class KuraApp:
 
             elif event == "-SYSINFO-":
                 trial_count = self.license_mgr.get_trial_count()
-                remaining = self.license_mgr.max_trials - trial_count
-                status = self.license_mgr.verify_locally()
+                remaining   = self.license_mgr.max_trials - trial_count
+                status      = self.license_mgr.verify_locally()
                 license_status = (
                     "Kura Pro: Aktiv" if status is True
                     else (f"Testphase: {remaining}/{self.license_mgr.max_trials} verbleibend"
@@ -637,11 +1055,11 @@ class KuraApp:
                 )
                 sg.popup(
                     f"System Information\n\n"
-                    f"Lizenz: {license_status}\n"
+                    f"Version:     v{APP_VERSION}\n"
+                    f"Lizenz:      {license_status}\n"
                     f"Hardware ID: {self.license_mgr.hardware_id}\n"
-                    f"Version: v2026.1.0\n"
-                    f"Daten: {USER_DATA_DIR}\n"
-                    f"Log: {CRASH_LOG}",
+                    f"Daten:       {USER_DATA_DIR}\n"
+                    f"Log:         {CRASH_LOG}",
                     title="System Info",
                     button_color=("white", "#1976d2"),
                 )

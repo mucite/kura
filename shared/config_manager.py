@@ -17,7 +17,7 @@ _GIST_URL = (
 
 _FALLBACK = {
     "version": "2026.0.0",
-    "billing_codes": {"MT": "20701", "KG": "20501", "KPE": "21101"},
+    "billing_codes": {"MT": "21201", "KG": "20501", "KPE": "21100"},
     "context": {"audit_standard": "§ 106b SGB V", "special_focus": ["Allgemein"]},
     "billing_rules": {},
     "audit_rules": {},
@@ -142,16 +142,16 @@ class ConfigManager:
                     "Diese ueberschreiben die GebueeTh-Orientierungswerte in der Kura-Ausgabe. "
                     "GKV-Festpreise (§125 SGB V) werden hierdurch NICHT veraendert."
                 ),
-                "20501": 0.0,
-                "20511": 0.0,
-                "20560": 0.0,
-                "20700": 0.0,
-                "20701": 0.0,
-                "21100": 0.0,
-                "21101": 0.0,
-                "21102": 0.0,
-                "21110": 0.0,
-                "21111": 0.0,
+                "20501": 0.0,   # KG Einzelbehandlung 20 min
+                "20511": 0.0,   # KG-ZNS 45 min
+                "20560": 0.0,   # KG atemtherapeutisch 20 min
+                "21200": 0.0,   # MT Erstbefundung 30 min
+                "21201": 0.0,   # MT Folgebehandlung 20 min
+                "20205": 0.0,   # MLD 30 min
+                "20201": 0.0,   # MLD 45 min
+                "20202": 0.0,   # MLD 60 min
+                "21110": 0.0,   # KPE Phase I 60 min
+                "21111": 0.0,   # KPE Phase II 30 min
             }
         with open(_LOCAL_OVERRIDE, "w", encoding="utf-8") as f:
             json.dump(template, f, indent=2, ensure_ascii=False)
@@ -210,7 +210,7 @@ class ConfigManager:
         """
         Praxiseigene PKV-Preise (Positionsnummer → Betrag in €).
         Aus config_override.json unter dem Schlüssel 'pkv_preise'.
-        Beispiel: {"20701": 72.00, "20501": 55.00}
+        Beispiel: {"21201": 72.00, "20501": 55.00}
         GKV-Festpreise §125 SGB V werden hierdurch nicht berührt.
         """
         # Nur tatsächlich gesetzte Preise zurückgeben (0.0 = nicht konfiguriert → GebüTh-Fallback)

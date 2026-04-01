@@ -61,7 +61,6 @@ archive/
 reports/
 
 # MacOS specific
-.DS_Store
 .AppleDouble
 .LSOverride
 ._*

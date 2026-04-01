@@ -289,7 +289,7 @@ class KuraEngine:
         },
         "LY": {
             "label":    "Lymphologie / Entstauung",
-            "billing":  "21101",
+            "billing":  "20201",
             "priority": 70,
             "triggers": [
                 "lymphoedem", "lymph", "mld", "kpe", "entstauung", "stemmer",
@@ -326,7 +326,7 @@ class KuraEngine:
         },
         "EX_SCHULTER": {
             "label":    "Extremitaeten Schulter (EX2)",
-            "billing":  "20701",
+            "billing":  "21201",
             "priority": 45,
             "triggers": [
                 "schulter", "rotatorenmanschette", "impingement", "supraspinatus",
@@ -344,7 +344,7 @@ class KuraEngine:
         },
         "EX_KNIE": {
             "label":    "Extremitaeten Knie (EX3)",
-            "billing":  "20701",
+            "billing":  "21201",
             "priority": 44,
             "triggers": [
                 "knie", "gonarthrose", "vkb", "kreuzband", "hkb",
@@ -361,7 +361,7 @@ class KuraEngine:
         },
         "MT": {
             "label":    "Manuelle Therapie WS (Facette / ISG)",
-            "billing":  "20701",
+            "billing":  "21201",
             "priority": 50,
             "triggers": [
                 "manuelle therapie", " mt ", "traktion", "gleitmobilisation",
@@ -370,7 +370,7 @@ class KuraEngine:
             ],
             "icd_prefix": ["M54", "M51", "M47", "M45"],
             "checklist": [
-                "Behandeltes Segment: z.B. L4/L5 oder C5/C6 (MT-Pflichtangabe fuer 20701)",
+                "Behandeltes Segment: z.B. L4/L5 oder C5/C6 (MT-Pflichtangabe fuer 21201)",
                 "ROM Neutral-Null je Bewegungsebene: [Ext]-[0]-[Flex]",
                 "Endgefuehl: fest-elastisch / fest / leer / hart (je Richtung)",
                 "Palpation: Druckdolenz + exakte Lokalisation",
@@ -381,7 +381,7 @@ class KuraEngine:
         },
         "EX_HWS": {
             "label":    "HWS / Zervikalsyndrom",
-            "billing":  "20701",
+            "billing":  "21201",
             "priority": 43,
             "triggers": [
                 "hws", "halswirbel", "zervikalsyndrom", "cervical", "nacken",
@@ -389,7 +389,7 @@ class KuraEngine:
             ],
             "icd_prefix": ["M54.2", "M50", "G44"],
             "checklist": [
-                "Behandeltes Segment: C__/C__ oder C__/Th__ (MT-Pflichtangabe fuer 20701)",
+                "Behandeltes Segment: C__/C__ oder C__/Th__ (MT-Pflichtangabe fuer 21201)",
                 "ROM HWS: Flexion / Extension / Latflex re+li / Rotation re+li (Grad)",
                 "Endgefuehl: fest-elastisch / fest / leer / muskulaer (je Richtung)",
                 "Spurling-Test: positiv / negativ (mit Seitenangabe)",
@@ -400,7 +400,7 @@ class KuraEngine:
         },
         "EX_LWS": {
             "label":    "LWS / Lumbalgie",
-            "billing":  "20701",
+            "billing":  "21201",
             "priority": 42,
             "triggers": [
                 "lws", "lendenwirbel", "lumbalgie", "lumboischialgie", "ischiasschmerz",
@@ -408,7 +408,7 @@ class KuraEngine:
             ],
             "icd_prefix": ["M54.4", "M54.5", "M51"],
             "checklist": [
-                "Behandeltes Segment: L__/L__ oder L__/S__ (MT-Pflichtangabe fuer 20701)",
+                "Behandeltes Segment: L__/L__ oder L__/S__ (MT-Pflichtangabe fuer 21201)",
                 "Lasegue-Test: Grad + Seite (z.B. re. positiv bei 45 Grad)",
                 "Schober-Zeichen: X cm zu Y cm",
                 "FBA (Finger-Boden-Abstand): X cm",
@@ -420,7 +420,7 @@ class KuraEngine:
         },
         "EX_HUefte": {
             "label":    "Extremitaeten Huefte (EX4)",
-            "billing":  "20701",
+            "billing":  "21201",
             "priority": 41,
             "triggers": [
                 "huefte", "coxarthrose", "hüftprothese", "htep", "trochanter",
@@ -437,7 +437,7 @@ class KuraEngine:
         },
         "EX_HAND": {
             "label":    "Extremitaeten Hand / Handgelenk / Finger",
-            "billing":  "20701",
+            "billing":  "21201",
             "priority": 44,   # above EX_FUSS (40) and EX_HUefte (41), below MT (50)
             "triggers": [
                 "handgelenk", "handwurzel", "radiokarpal", "radiusfraktur",
@@ -459,7 +459,7 @@ class KuraEngine:
         },
         "EX_FUSS": {
             "label":    "Extremitaeten Fuss / Sprunggelenk (EX5)",
-            "billing":  "20701",
+            "billing":  "21201",
             "priority": 40,
             "triggers": [
                 "fuss", "sprunggelenk", "osg", "usg", "achillessee", "plantarfasziitis",
@@ -1152,8 +1152,8 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             return res_icd, codes.get("KG", "20501")
 
         if is_neuro: return res_icd, codes.get("KG_ZNS", "20511")
-        if is_ortho_mt: return res_icd, codes.get("MT", "20701")
-        if is_lymph: return res_icd, codes.get("MLD", "21101")
+        if is_ortho_mt: return res_icd, codes.get("MT", "21201")
+        if is_lymph: return res_icd, codes.get("MLD", "20201")
 
         return res_icd, codes.get("KG", "20501")
 
@@ -1249,7 +1249,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 if not any(n in after for n in ['neg', 'ausg', 'kein', 'ohne', 'unauffällig']):
                     warns.append(f"🔴 NOTFALL: {f.upper()}!")
         # 2026 Density
-        if billing_code in ["20701", "20511"] and len(obj) < 60:
+        if billing_code in ["21201", "20511"] and len(obj) < 60:
             warns.append(f"📋 DOKU: Befunddichte zu gering für {billing_code}.")
         if "°" in obj and not re.search(r"\d+-\d+-\d+", obj):
             warns.append("⚠️ HINWEIS: Bitte Neutral-Null-Methode nutzen.")

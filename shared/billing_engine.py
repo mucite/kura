@@ -149,7 +149,7 @@ _HMK: dict[str, dict] = {
     },
     "EX2": {
         "desc": "Schultergelenk – Kapsel-/Sehnenläsionen, Impingementsyndrom",
-        "heilmittel": "MT", "position": "20701",
+        "heilmittel": "MT", "position": "21201",
         "name": "Manuelle Therapie",
         "duration": 20, "regelfall": 6, "langfristig": False,
         "icd": ["M75"],
@@ -197,7 +197,7 @@ _HMK: dict[str, dict] = {
 
     "WS1a": {
         "desc": "HWS/BWS – segmentale Funktionsstörung, Zervikalsyndrom",
-        "heilmittel": "MT", "position": "20701",
+        "heilmittel": "MT", "position": "21201",
         "name": "Manuelle Therapie",
         "duration": 20, "regelfall": 6, "langfristig": False,
         "icd": ["M50", "M53", "M54.0", "M54.1", "M54.2", "M99.0", "M99.1"],
@@ -205,7 +205,7 @@ _HMK: dict[str, dict] = {
     },
     "WS1b": {
         "desc": "LWS/ISG – segmentale Funktionsstörung, Lumbago, Ischialgie",
-        "heilmittel": "MT", "position": "20701",
+        "heilmittel": "MT", "position": "21201",
         "name": "Manuelle Therapie",
         "duration": 20, "regelfall": 6, "langfristig": False,
         "icd": ["M54.3", "M54.4", "M54.5", "M99.3", "M99.4", "M99.5"],
@@ -283,7 +283,7 @@ _HMK: dict[str, dict] = {
 
     "LY1": {
         "desc": "Primäres Lymphödem (kongenital/idiopathisch)",
-        "heilmittel": "MLD", "position": "21101",
+        "heilmittel": "MLD", "position": "20201",
         "name": "Manuelle Lymphdrainage 45 Min",
         "duration": 45, "regelfall": 6, "langfristig": True,
         "icd": ["Q82.0", "I89.0"],
@@ -299,7 +299,7 @@ _HMK: dict[str, dict] = {
     },
     "LY3": {
         "desc": "Lipödem (kombiniert mit Lymphödem)",
-        "heilmittel": "MLD", "position": "21101",
+        "heilmittel": "MLD", "position": "20201",
         "name": "Manuelle Lymphdrainage 45 Min",
         "duration": 45, "regelfall": 6, "langfristig": True,
         "icd": ["E88.2"],
@@ -381,19 +381,20 @@ def _match_dg(icd10: str) -> Optional[str]:
 
 _GKV_PRICES: dict[str, float] = {
     "20500": 30.83,   # KG Erstbefundung 30 min (ab 01.01.2026)
-    "20501": 24.57,   # KG Einzelbehandlung 20 min (ab 01.01.2026)
-    "20502": 24.57,   # KG Hausbesuch 20 min
+    "20501": 29.63,   # KG Einzelbehandlung 20 min (ab 01.01.2026)
+    "20502": 29.63,   # KG Hausbesuch 20 min
     "20503": 13.76,   # KG Gruppe 2–5 Pat. 25 min
     "20504": 10.29,   # KG Gruppe 6–8 Pat. 45 min
     "20510": 36.87,   # KG-ZNS Erstbefundung 30 min
     "20511": 42.69,   # KG-ZNS Einzelbehandlung 45 min
     "20512": 42.69,   # KG-ZNS Hausbesuch 45 min
-    "20560": 24.57,   # KG atemtherapeutisch 20 min
-    "20700": 36.87,   # MT Erstbefundung 30 min
-    "20701": 29.23,   # MT Folgebehandlung 20 min
-    "21100": 24.57,   # MLD Teilbehandlung 30 min
-    "21101": 36.87,   # MLD Standardbehandlung 45 min
-    "21102": 46.26,   # MLD Ganzbehandlung 60 min
+    "20560": 29.63,   # KG atemtherapeutisch 20 min
+    "21200": 42.71,   # MT Erstbefundung 30 min
+    "21201": 35.59,   # MT Folgebehandlung 20 min (Manuelle Therapie, § 125 SGB V X1201)
+    "20201": 53.94,   # MLD Standardbehandlung 45 min (ab 01.01.2026)
+    "20202": 71.94,   # MLD Ganzbehandlung 60 min
+    "20205": 35.97,   # MLD Teilbehandlung 30 min
+    "21100": 53.94,   # KPE Phase I — MLD-Anteil
     "21110": 58.42,   # KPE Phase I 60 min
     "21111": 46.26,   # KPE Phase II 30 min
 }
@@ -402,17 +403,18 @@ _GKV_PRICES: dict[str, float] = {
 # ⚠️ Orientierungswerte — kein Rechtsanspruch, Erstattung vertragsabhängig
 
 _PKV_RANGES: dict[str, tuple] = {
-    "20501": (25.0,  70.0),
+    "20501": (30.0,  80.0),
     "20502": (30.0,  80.0),
     "20503": (15.0,  35.0),
     "20510": (40.0,  90.0),
     "20511": (48.0, 100.0),
-    "20560": (25.0,  65.0),
-    "20700": (42.0,  95.0),
-    "20701": (32.0,  80.0),
-    "21100": (25.0,  55.0),
-    "21101": (38.0,  80.0),
-    "21102": (52.0, 115.0),
+    "20560": (30.0,  75.0),
+    "21200": (48.0, 100.0),
+    "21201": (38.0,  90.0),
+    "20201": (55.0, 120.0),
+    "20202": (72.0, 150.0),
+    "20205": (36.0,  80.0),
+    "21100": (55.0, 120.0),
     "21110": (65.0, 140.0),
     "21111": (52.0, 115.0),
 }
@@ -420,8 +422,8 @@ _PKV_RANGES: dict[str, tuple] = {
 # ── BG surcharges (DGUV typical, varies by Träger) ────────────────────────────
 
 _BG_SURCHARGE_PCT: dict[str, float] = {
-    "20501": 18.0, "20511": 20.0, "20701": 22.0,
-    "21101": 18.0, "21110": 20.0, "20560": 18.0,
+    "20501": 18.0, "20511": 20.0, "21201": 22.0,
+    "20201": 18.0, "21110": 20.0, "20560": 18.0,
 }
 
 _BG_EXTRA_DOCS = [
@@ -580,7 +582,7 @@ class _GKVEngine:
                                    "PASS", f"Position {position} aus Gist-Konfig übernommen"))
 
         # ── 3. MT indication detected — WARN, never auto-upgrade ─────────────
-        # §125 SGB V: only the doctor's prescription authorises MT (20701).
+        # §125 SGB V: only the doctor's prescription authorises MT (21201).
         # The therapist cannot self-authorise the upgrade; auto-upgrading from
         # KG to MT based on transcript content is Abrechnungsbetrug.
         # We flag it so the therapist can check their prescription.
@@ -589,7 +591,7 @@ class _GKVEngine:
                 "MT_UPGRADE", "MT-Techniken dokumentiert",
                 "WARN",
                 "Prüfen Sie Ihr Rezept: Ist 'Manuelle Therapie' explizit verordnet? "
-                "Nur dann ist 20701 abrechenbar. Rezept KG -> bleibt 20501."
+                "Nur dann ist 21201 abrechenbar. Rezept KG -> bleibt 20501."
             ))
 
         # ── 4. Mandatory SOAP fields ───────────────────────────────────────────
@@ -609,7 +611,7 @@ class _GKVEngine:
                                "" if len(plan) > 15 else "Therapieplan fehlt oder zu unspezifisch"))
 
         # ── 5. Befunddichte §106b ──────────────────────────────────────────────
-        min_len = 60 if position in ("20701", "20511", "20510") else 20
+        min_len = 60 if position in ("21201", "20511", "20510") else 20
         if len(obj) >= min_len:
             audit.append(AuditItem("OBJ_DENSITY", f"O-Feld Mindestdichte (>={min_len} Zeichen)",
                                    "PASS", f"{len(obj)} Zeichen"))
@@ -619,7 +621,7 @@ class _GKVEngine:
             risk = "WARN"
 
         # ── 6. Neutral-Null ROM ────────────────────────────────────────────────
-        if position in ("20701", "20501") and "°" in obj:
+        if position in ("21201", "20501") and "°" in obj:
             has_nn = bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", obj))
             audit.append(AuditItem("ROM_FORMAT", "ROM Neutral-Null-Methode",
                                    "PASS" if has_nn else "WARN",
@@ -656,15 +658,15 @@ class _GKVEngine:
             if not present:
                 risk = "WARN"
 
-        # ── 10a. MT segment documentation — mandatory for 20701 ───────────────
-        if position == "20701":
+        # ── 10a. MT segment documentation — mandatory for 21201 ───────────────
+        if position == "21201":
             seg_checker = _DOC_CHECKERS["Behandeltes Segment"]
             has_seg = seg_checker(obj.lower() + " " + assess.lower())
             audit.append(AuditItem(
                 "MT_SEGMENT", "Behandeltes Segment (MT §125 SGB V Pflicht)",
                 "PASS" if has_seg else "FAIL",
                 "" if has_seg else
-                "Fehlendes Segment (z.B. L4/L5, C5/C6) — 20701 ohne Segmentangabe nicht abrechenbar."
+                "Fehlendes Segment (z.B. L4/L5, C5/C6) — 21201 ohne Segmentangabe nicht abrechenbar."
             ))
             if not has_seg:
                 risk = "WARN"
@@ -672,7 +674,7 @@ class _GKVEngine:
         # ── 10b. Blasen-/Mastdarmfunktion in O-Feld — Cauda-equina screening ─
         # LWS and MT cases: documenting that bladder/bowel was checked is a
         # clinical safety standard (Cauda equina exclusion). It must appear in O.
-        is_ws_mt = position == "20701" and any(
+        is_ws_mt = position == "21201" and any(
             k in (obj + subj + assess).lower()
             for k in ["lws", "lumbal", "l4", "l5", "s1", "ischias", "bandscheib"]
         )
@@ -803,7 +805,7 @@ class _PKVEngine:
     ) -> BillingResult:
         """
         pkv_preise: dict[Positionsnummer → float] aus config_override.json.
-        Beispiel: {"20701": 72.00, "20501": 55.00}
+        Beispiel: {"21201": 72.00, "20501": 55.00}
         Wenn gesetzt, gilt der Praxispreis statt des GebüTh-Orientierungswerts.
         GKV-Festpreise werden dadurch nicht berührt.
         """
@@ -820,9 +822,9 @@ class _PKVEngine:
         position = entry["position"]
 
         if entry.get("optional_mt") and self._mt_indicated(soap, transcript):
-            position = "20701"
+            position = "21201"
             audit.append(AuditItem("MT_UPGRADE", "MT-Erstbefundung empfohlen", "PASS",
-                                   "20700 (30 Min) bei Neupatient separat abrechenbar (~€7 Aufschlag)"))
+                                   "21200 (30 Min) bei Neupatient separat abrechenbar"))
 
         # Praxispreis hat Vorrang — GebüTh nur als Orientierungswert wenn kein Praxispreis gesetzt
         praxispreis = pkv_preise.get(position)
@@ -917,8 +919,8 @@ class _PKVEngine:
             hints.append("💡 VAS-Score im S-Feld — PKV prüft Schmerzquantifizierung.")
         if len(p) < 60:
             hints.append("💡 P-Feld präzisieren — PKV erwartet konkretes Outcome-Ziel.")
-        if position == "20701":
-            hints.append("💡 MT-Erstbefundung (20700, 30 Min) bei Neupatient separat abrechenbar.")
+        if position == "21201":
+            hints.append("💡 MT-Erstbefundung (21200, 30 Min) bei Neupatient separat abrechenbar.")
         if len(obj) < 80:
             hints.append("💡 Ausführlicheres O-Feld reduziert Retaxationsrisiko.")
         return hints
@@ -992,7 +994,7 @@ class BillingEngine:
         """
         config_rules : aus ConfigManager.billing_rules  (GKV/BG)
         pkv_preise   : aus ConfigManager.pkv_preise     (PKV — praxiseigene Preise)
-                       z.B. {"20701": 72.00, "20501": 55.00}
+                       z.B. {"21201": 72.00, "20501": 55.00}
                        GKV-Festpreise werden dadurch nicht verändert.
         """
         rules = config_rules or {}

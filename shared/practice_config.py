@@ -1,6 +1,6 @@
 """
 Practice Configuration Manager
-Handles multi-practice deployment with § 84 Abs. 6/7 SGB V compliance
+Handles multi-practice deployment with § 125 Abs. 1 SGB V compliance
 """
 import json
 import os
@@ -36,7 +36,7 @@ class PracticeConfig:
         """Default multi-practice compliant configuration"""
         return {
             "version": "2026.1.0-multi-practice",
-            "compliance_standard": "§ 84 Abs. 6/7 SGB V",
+            "compliance_standard": "§ 125 Abs. 1 SGB V",
             "practice": {
                 "name": self.practice_name or "Standard Praxis",
                 "license_number": "",  # Betriebsstättennummer
@@ -44,16 +44,16 @@ class PracticeConfig:
                 "therapist_ids": []
             },
             "billing": {
-                "MT": "20701",  # Manuelle Therapie
+                "MT": "21201",  # Manuelle Therapie
                 "KG": "20501",  # Krankengymnastik
-                "KPE": "21101"  # Lymphdrainage
+                "KPE": "21110"  # KPE Phase I
             },
             "icd10_rules": {
                 "HWS": {
                     "keywords": ["Nacken", "Hals", "Kopfschmerz", "Spannungskopfschmerz"],
                     "primary_code": "M54.2",
                     "alternative_code": "G44.2",
-                    "billing_default": "20701"
+                    "billing_default": "21201"
                 },
                 "LWS": {
                     "keywords": ["Rücken", "Lumbal", "Lendenwirbel"],
@@ -65,7 +65,7 @@ class PracticeConfig:
                     "keywords": ["Schulter", "Arm", "Impingement"],
                     "primary_code": "M75.5",
                     "alternative_code": "M75.0",
-                    "billing_default": "20701"
+                    "billing_default": "21201"
                 }
             },
             "audit_rules": {
@@ -142,7 +142,7 @@ class PracticeConfig:
         }
     
     def validate_compliance(self, soap_dict: dict):
-        """Validate SOAP note for § 84 compliance"""
+        """Validate SOAP note for § 125 SGB V compliance"""
         issues = []
         
         # Check mandatory fields
@@ -165,7 +165,7 @@ class PracticeConfig:
             "compliant": len(issues) == 0,
             "issues": issues,
             "practice": self.practice_name,
-            "compliance_standard": "§ 84 Abs. 6/7 SGB V"
+            "compliance_standard": "§ 125 Abs. 1 SGB V"
         }
 
 

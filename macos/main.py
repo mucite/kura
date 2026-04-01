@@ -1074,12 +1074,17 @@ class KuraApp(rumps.App):
 
             # 2. Re-construct self.last_report for PDF/Clipboard
             version = self.engine.config.version
+            br = edited_res.get('billing_result')
+            if br:
+                billing_line = br.format_billing_line()
+            else:
+                billing_line = edited_res.get('billing_suggestion', '20501')
             self.last_report = (
                 f"--- KURA PHYSIO-PROTOKOLL v{version} ---\n"
                 f"ID: {timestamp} | PATIENT: {display_name}\n"
                 f"ICD-10: {edited_res.get('icd10')}\n\n"
                 f"SOAP-BEFUND:\n{soap_text}\n\n"
-                f"ABRECHNUNG: {edited_res.get('billing_suggestion', '20701')}"
+                f"ABRECHNUNG: {billing_line}"
             )
 
             # 3. Save JSON Archive

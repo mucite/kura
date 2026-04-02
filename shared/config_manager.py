@@ -1,11 +1,17 @@
 import copy
 import json
 import os
+import platform
 
 from .practice_config import PracticeConfig
 
-# Paths
-_DATA_DIR       = os.path.expanduser("~/Library/Application Support/Kura")
+# Paths - platform-specific
+if platform.system() == "Windows":
+    _DATA_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "Kura")
+else:
+    # macOS and Linux
+    _DATA_DIR = os.path.expanduser("~/Library/Application Support/Kura")
+
 _GIST_CACHE     = os.path.join(_DATA_DIR, "gist_config_cache.json")
 _LOCAL_OVERRIDE = os.path.join(_DATA_DIR, "config_override.json")
 

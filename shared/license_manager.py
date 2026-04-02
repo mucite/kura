@@ -39,7 +39,13 @@ _KEY_RE = re.compile(r'^[A-Z0-9]{5}(-[A-Z0-9]{5}){7}$')
 class LicenseManager:
 
     def __init__(self):
-        data_dir = os.path.expanduser("~/Library/Application Support/Kura")
+        # Platform-specific data directory
+        if platform.system() == "Windows":
+            data_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "Kura")
+        else:
+            # macOS and Linux
+            data_dir = os.path.expanduser("~/Library/Application Support/Kura")
+
         os.makedirs(data_dir, exist_ok=True)
 
         self.license_file     = os.path.join(data_dir, "license.json")

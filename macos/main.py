@@ -491,14 +491,18 @@ class KuraApp(rumps.App):
 
             # Save full data for future "Reflective Learning"
             json_path = os.path.join(day_folder, f"{time_str}_{self.patient_name}.json")
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump({
-                    "text": edited_text,
-                    "patient": self.patient_name,
-                    "icd10": user_icd if icd_match else "Unknown",
-                    "timestamp": now.strftime("%Y%m%d-%H%M"),
-                    "date": date_folder,
-                }, f, ensure_ascii=False, indent=4)
+            try:
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    if f is not None:
+                        json.dump({
+                            "text": edited_text,
+                            "patient": self.patient_name,
+                            "icd10": user_icd if icd_match else "Unknown",
+                            "timestamp": now.strftime("%Y%m%d-%H%M"),
+                            "date": date_folder,
+                        }, f, ensure_ascii=False, indent=4)
+            except Exception as json_err:
+                print(f"JSON archive save error: {json_err}")
 
             self.update_license_display()
 

@@ -89,6 +89,8 @@ VersionInfoProductVersion={#AppVersion}
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#AppExeName}
 CreateUninstallRegKey=yes
+Uninstallable=yes
+UninstallFilesDir={app}\uninstall
 
 ; ── System requirement ────────────────────────────────────────────────────────
 MinVersion=10.0
@@ -147,9 +149,24 @@ Filename: "{app}\{#AppExeName}"; \
 
 ; ============================================================
 [UninstallDelete]
-; App cache / logs under %LOCALAPPDATA%\Kura — always removed automatically.
-; Reports under Documents\Kura\ — user is asked in CurUninstallStepChanged.
+; Complete cleanup of all application traces
+; Application folder and all contents
+Type: dirifempty; Name: "{app}"
+Type: filesandordirs; Name: "{app}\models"
+Type: filesandordirs; Name: "{app}\shared"
+Type: filesandordirs; Name: "{app}\assets"
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\uninstall"
+Type: files; Name: "{app}\*.exe"
+Type: files; Name: "{app}\*.dll"
+Type: files; Name: "{app}\*.pyd"
+Type: files; Name: "{app}\*.so"
+
+; Cache and logs under %LOCALAPPDATA%\Kura — removed automatically
 Type: filesandordirs; Name: "{localappdata}\Kura"
+
+; Application data
+Type: filesandordirs; Name: "{localappdata}\Programs\{#AppName}"
 
 ; ============================================================
 [Code]
@@ -229,25 +246,53 @@ begin
 end;
 
 // ── Post-uninstall: clean up all resources ────────────────────────────────
-// %LOCALAPPDATA%\Kura  → removed automatically via [UninstallDelete].
-// Documents\Kura\      → user is asked; default is NO to protect reports.
+// Removes all application traces:
+// 1. %LOCALAPPDATA%\Kura  → cache/logs (automatic via UninstallDelete)
+// 2. Documents\Kura\      → user reports (optional)
+// 3. Registry entries     → cleaned automatically by Inno
+// 4. Shortcuts            → removed from Start Menu and Desktop
+// 5. Installation folder  → removed completely
 
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+procedure CleanupDocsFolder();
 var
   DocsDir: String;
 begin
-  if CurUninstallStep <> usPostUninstall then Exit;
-
   DocsDir := ExpandConstant('{userdocs}\Kura');
-  if not DirExists(DocsDir) then Exit;
+  if DirExists(DocsDir) then begin
+    if MsgBox(
+      'Sollen Ihre Berichte und Einstellungen ebenfalls gelöscht werden?' + #13#10 +
+      #13#10 +
+      DocsDir + #13#10 +
+      #13#10 +
+      'Wählen Sie "Ja" zum vollständigen Löschen, "Nein" um die Berichte zu behalten.',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2
+    ) = IDYES then begin
+      DelTree(DocsDir, True, True, True);
+    end;
+  end;
+end;
 
-  if MsgBox(
-    'Sollen Ihre Berichte und Einstellungen ebenfalls gelöscht werden?' + #13#10 +
-    #13#10 +
-    DocsDir + #13#10 +
-    #13#10 +
-    'Wählen Sie "Nein", um die Berichte zu behalten.',
-    mbConfirmation, MB_YESNO or MB_DEFBUTTON2
-  ) = IDYES then
-    DelTree(DocsDir, True, True, True);
+procedure CleanupRegistryKeys();
+var
+  ResultCode: Integer;
+begin
+  // Remove any remaining registry keys
+  Exec(
+    ExpandConstant('{sys}\reg.exe'),
+    'delete "HKEY_CURRENT_USER\Software\Kura Medical" /f',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode
+  );
+  Exec(
+    ExpandConstant('{sys}\reg.exe'),
+    'delete "HKEY_CURRENT_USER\Software\Kura" /f',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode
+  );
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then begin
+    CleanupDocsFolder();
+    CleanupRegistryKeys();
+  end;
 end;

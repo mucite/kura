@@ -1,2 +1,0 @@
-# Windows version of Kura
-

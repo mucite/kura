@@ -32,8 +32,12 @@ class LearningManager:
                 self.memory["icd_preferences"][k] = user_icd
                 break
 
-        with open(self.memory_path, "w") as f:
-            json.dump(self.memory, f, indent=2)
+        try:
+            with open(self.memory_path, "w") as f:
+                if f is not None:
+                    json.dump(self.memory, f, indent=2)
+        except Exception as mem_err:
+            print(f"Learning memory save error: {mem_err}")
 
     def get_relevant_prefs(self, transcript):
         """Returns a string of preferences to inject into the AI prompt."""

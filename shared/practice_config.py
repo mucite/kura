@@ -100,10 +100,14 @@ class PracticeConfig:
     def save(self):
         """Save practice config to file"""
         self.config["last_modified"] = datetime.now().isoformat()
-        with open(self.practice_file, 'w', encoding='utf-8') as f:
-            json.dump(self.config, f, indent=2, ensure_ascii=False)
-        print(f"✅ Practice config saved: {self.practice_file}")
-    
+        try:
+            with open(self.practice_file, 'w', encoding='utf-8') as f:
+                if f is not None:
+                    json.dump(self.config, f, indent=2, ensure_ascii=False)
+            print(f"✅ Practice config saved: {self.practice_file}")
+        except Exception as write_err:
+            print(f"Practice config save error: {write_err}")
+
     def add_user(self, user_id: str, username: str, role: str = "therapist"):
         """Add therapist user to practice"""
         if "multi_user" not in self.config:

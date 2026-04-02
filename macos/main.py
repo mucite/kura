@@ -23,25 +23,35 @@ def setup_crash_logging():
     # faulthandler catches C-level crashes (SIGSEGV, SIGABRT, Metal assertion failures)
     # and writes a native Python traceback — bypasses sys.excepthook which only catches Python exceptions
     fault_file = os.path.join(log_dir, "fault.log")
-    _fh = open(fault_file, 'a')
-    faulthandler.enable(file=_fh)
+    try:
+        _fh = open(fault_file, 'a')
+        if _fh is not None:
+            faulthandler.enable(file=_fh)
+    except Exception:
+        # If fault handler setup fails, continue without it
+        pass
 
     def log_crash(exc_type, exc_value, exc_traceback):
-        with open(log_file, 'w') as f:
-            f.write(f"Kura Crash Report - {datetime.now()}\n")
-            f.write("="*60 + "\n\n")
-            f.write("Exception:\n")
-            traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
-            f.write("\n" + "="*60 + "\n")
-            f.write("Environment:\n")
-            f.write(f"Python: {sys.version}\n")
-            f.write(f"Base path: {os.path.dirname(os.path.realpath(__file__))}\n")
-            if getattr(sys, 'frozen', False):
-                _mpath = os.path.join(getattr(sys, '_MEIPASS', os.path.dirname(sys.executable)), 'models')
-            else:
-                _mpath = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../models')
-            f.write(f"Models path: {_mpath}\n")
-            f.write(f"Models exist: {os.path.exists(_mpath)}\n")
+        try:
+            with open(log_file, 'w') as f:
+                if f is not None:
+                    f.write(f"Kura Crash Report - {datetime.now()}\n")
+                    f.write("="*60 + "\n\n")
+                    f.write("Exception:\n")
+                    if exc_type is not None:
+                        traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+                    f.write("\n" + "="*60 + "\n")
+                    f.write("Environment:\n")
+                    f.write(f"Python: {sys.version}\n")
+                    f.write(f"Base path: {os.path.dirname(os.path.realpath(__file__))}\n")
+                    if getattr(sys, 'frozen', False):
+                        _mpath = os.path.join(getattr(sys, '_MEIPASS', os.path.dirname(sys.executable)), 'models')
+                    else:
+                        _mpath = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../models')
+                    f.write(f"Models path: {_mpath}\n")
+                    f.write(f"Models exist: {os.path.exists(_mpath)}\n")
+        except Exception as log_err:
+            print(f"Error writing crash log: {log_err}")
 
         # Show user-friendly error
         os.system(f'osascript -e \'display alert "Kura Fehler" message "App konnte nicht starten. Log: {log_file}" buttons {{"OK"}} default button "OK"\'')
@@ -82,19 +92,26 @@ if not os.path.exists(user_env_file):
     
     # Copy example if it exists, otherwise create template
     if os.path.exists(example_file):
-        import shutil
-        shutil.copy(example_file, user_env_file)
-        print(f"📝 Created user .env from example: {user_env_file}")
+        try:
+            import shutil
+            shutil.copy(example_file, user_env_file)
+            print(f"📝 Created user .env from example: {user_env_file}")
+        except Exception as copy_err:
+            print(f"Error copying .env.example: {copy_err}")
     else:
         # Create basic .env template
-        with open(user_env_file, 'w') as f:
-            f.write("# Kura Configuration\n")
-            f.write("# Get HF_TOKEN at: https://huggingface.co/settings/tokens\n")
-            f.write("HF_TOKEN=your_token_here\n\n")
-            f.write("# Digistore24 License API\n")
-            f.write("DS24_API_KEY=\n")
-            f.write("DS24_PRODUCT_ID=\n")
-        print(f"📝 Created template .env: {user_env_file}")
+        try:
+            with open(user_env_file, 'w') as f:
+                if f is not None:
+                    f.write("# Kura Configuration\n")
+                    f.write("# Get HF_TOKEN at: https://huggingface.co/settings/tokens\n")
+                    f.write("HF_TOKEN=your_token_here\n\n")
+                    f.write("# Digistore24 License API\n")
+                    f.write("DS24_API_KEY=\n")
+                    f.write("DS24_PRODUCT_ID=\n")
+            print(f"📝 Created template .env: {user_env_file}")
+        except Exception as env_err:
+            print(f"Error creating .env file: {env_err}")
 
 # Load from user Documents folder
 load_dotenv(user_env_file)

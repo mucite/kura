@@ -64,8 +64,12 @@ class ConfigManager:
                 remote = r.json()
                 self.data = remote
                 # Save as local cache so override can reference real keys
-                with open(_GIST_CACHE, "w", encoding="utf-8") as f:
-                    json.dump(remote, f, indent=2, ensure_ascii=False)
+                try:
+                    with open(_GIST_CACHE, "w", encoding="utf-8") as f:
+                        if f is not None:
+                            json.dump(remote, f, indent=2, ensure_ascii=False)
+                except Exception as write_err:
+                    print(f"Cache-Schreibfehler: {write_err}")
                 print(f"Gist-Sync OK: v{self.data.get('version')}")
                 return
         except Exception as e:
@@ -153,8 +157,13 @@ class ConfigManager:
                 "21110": 0.0,   # KPE Phase I 60 min
                 "21111": 0.0,   # KPE Phase II 30 min
             }
-        with open(_LOCAL_OVERRIDE, "w", encoding="utf-8") as f:
-            json.dump(template, f, indent=2, ensure_ascii=False)
+        try:
+            with open(_LOCAL_OVERRIDE, "w", encoding="utf-8") as f:
+                if f is not None:
+                    json.dump(template, f, indent=2, ensure_ascii=False)
+        except Exception as write_err:
+            print(f"Override-Template Schreibfehler: {write_err}")
+            return None
         return _LOCAL_OVERRIDE
 
     @property

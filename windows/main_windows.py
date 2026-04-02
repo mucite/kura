@@ -46,10 +46,15 @@ def setup_crash_logging():
     log_file = os.path.join(log_dir, f"crash_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
     def log_crash(exc_type, exc_value, exc_traceback):
-        with open(log_file, "w", encoding="utf-8") as f:
-            f.write(f"Kura Crash Report — {datetime.now()}\n{'='*60}\n\n")
-            traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
-            f.write(f"\nPython: {sys.version}\nBase path: {os.path.dirname(os.path.realpath(__file__))}\n")
+        try:
+            with open(log_file, "w", encoding="utf-8") as f:
+                if f is not None:
+                    f.write(f"Kura Crash Report — {datetime.now()}\n{'='*60}\n\n")
+                    if exc_type is not None:
+                        traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+                    f.write(f"\nPython: {sys.version}\nBase path: {os.path.dirname(os.path.realpath(__file__))}\n")
+        except Exception as log_err:
+            print(f"Error writing crash log: {log_err}")
         messagebox.showerror("Kura Fehler", f"Kura ist abgestürzt.\nLog-Datei: {log_file}")
         sys.exit(1)
 
@@ -71,13 +76,20 @@ if not os.path.exists(user_env_file):
         base = os.path.join(os.path.dirname(__file__), "..")
     example = os.path.join(base, ".env.example")
     if os.path.exists(example):
-        shutil.copy(example, user_env_file)
+        try:
+            shutil.copy(example, user_env_file)
+        except Exception as copy_err:
+            print(f"Error copying .env.example: {copy_err}")
     else:
-        with open(user_env_file, "w") as f:
-            f.write("# Kura Configuration\n")
-            f.write("HF_TOKEN=your_token_here\n")
-            f.write("DS24_API_KEY=\n")
-            f.write("DS24_PRODUCT_ID=\n")
+        try:
+            with open(user_env_file, "w", encoding="utf-8") as f:
+                if f is not None:
+                    f.write("# Kura Configuration\n")
+                    f.write("HF_TOKEN=your_token_here\n")
+                    f.write("DS24_API_KEY=\n")
+                    f.write("DS24_PRODUCT_ID=\n")
+        except Exception as env_err:
+            print(f"Error creating .env file: {env_err}")
 
 load_dotenv(user_env_file)
 

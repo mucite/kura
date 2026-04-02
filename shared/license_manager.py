@@ -116,7 +116,8 @@ class LicenseManager:
         self._cache = data
         try:
             with open(self.license_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+                if f is not None:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"License save error: {e}")
 
@@ -273,7 +274,8 @@ class LicenseManager:
         mac       = self._trial_hmac(payload)
         try:
             with open(self.trial_file, "w") as f:
-                f.write(f"{payload}:{mac}")
+                if f is not None:
+                    f.write(f"{payload}:{mac}")
         except Exception as e:
             print(f"Trial increment error: {e}")
 

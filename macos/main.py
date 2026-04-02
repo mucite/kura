@@ -91,9 +91,9 @@ if not os.path.exists(user_env_file):
             f.write("# Kura Configuration\n")
             f.write("# Get HF_TOKEN at: https://huggingface.co/settings/tokens\n")
             f.write("HF_TOKEN=your_token_here\n\n")
-            f.write("# Lemon Squeezy API (pre-configured)\n")
-            f.write("LEMON_SQUEEZY_API_URL=https://api.lemonsqueezy.com/v1/licenses/activate\n")
-            f.write("LEMON_SQUEEZY_API_KEY=\n")
+            f.write("# Digistore24 License API\n")
+            f.write("DS24_API_KEY=\n")
+            f.write("DS24_PRODUCT_ID=\n")
         print(f"📝 Created template .env: {user_env_file}")
 
 # Load from user Documents folder
@@ -1115,7 +1115,7 @@ class KuraApp(rumps.App):
         import webbrowser
         msg = "Ihre Testphase ist beendet.\nAktivieren Sie Kura Pro fuer unbegrenzte Berichte."
         if rumps.alert("Kura Pro", msg, ok="Abo starten", cancel="Spaeter") == 1:
-            webbrowser.open("https://kura.lemonsqueezy.com/checkout/buy/2400563b-a13a-4e42-b734-d79122e7ec92")
+            webbrowser.open("https://kura-medical.de/#pricing")
             self.activate_license(None)
 
     # --- Activate License ---

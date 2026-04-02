@@ -76,8 +76,8 @@ if not os.path.exists(user_env_file):
         with open(user_env_file, "w") as f:
             f.write("# Kura Configuration\n")
             f.write("HF_TOKEN=your_token_here\n")
-            f.write("LEMON_SQUEEZY_API_URL=https://api.lemonsqueezy.com/v1/licenses/activate\n")
-            f.write("LEMON_SQUEEZY_API_KEY=\n")
+            f.write("DS24_API_KEY=\n")
+            f.write("DS24_PRODUCT_ID=\n")
 
 load_dotenv(user_env_file)
 

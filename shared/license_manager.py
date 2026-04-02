@@ -22,7 +22,7 @@ import requests
 # ── Digistore24 REST API ──────────────────────────────────────────────────────
 # Docs: https://www.digistore24.com/app/tools.api
 # All calls: GET https://api.digistore24.com/api/call/{SELLER_API_KEY}/json/{action}
-_DS24_BASE = "https://api.digistore24.com/api/call"
+_DS24_BASE = "https://api.digistore24.com/api/call"  # append /{action}, auth via X-DS-API-KEY header
 
 # Loaded from environment — set in .env or system env vars
 _DS24_API_KEY   = os.environ.get("DS24_API_KEY", "")
@@ -33,7 +33,7 @@ _GRACE_DAYS       = 3     # offline grace period
 
 # Digistore24 serial/license key format: groups of alphanumeric chars
 # e.g.  DS24-XXXX-XXXX-XXXX  or  XXXX-XXXX-XXXX-XXXX
-_KEY_RE = re.compile(r'^[A-Z0-9]{4,8}(-[A-Z0-9]{4,8}){2,5}$')
+_KEY_RE = re.compile(r'^[A-Z0-9]{4,8}(-[A-Z0-9]{4,8}){2,9}$')
 
 
 class LicenseManager:
@@ -124,11 +124,13 @@ class LicenseManager:
 
     def _ds24_get(self, action: str, params: dict = None, timeout: int = 10):
         """
-        GET https://api.digistore24.com/api/call/{API_KEY}/json/{action}
-        Docs: https://www.digistore24.com/app/tools.api
+        GET https://api.digistore24.com/api/call/{action}
+        API key passed via X-DS-API-KEY header.
+        Docs: https://dev.digistore24.com/hc/en-us/articles/32479630493585-API-basics
         """
-        url = f"{_DS24_BASE}/{_DS24_API_KEY}/json/{action}"
-        return requests.get(url, params=params or {}, timeout=timeout)
+        url = f"{_DS24_BASE}/{action}"
+        headers = {"X-DS-API-KEY": _DS24_API_KEY}
+        return requests.get(url, params=params or {}, headers=headers, timeout=timeout)
 
     # ── Activate ──────────────────────────────────────────────────────────────
 
@@ -144,8 +146,8 @@ class LicenseManager:
 
         try:
             resp = self._ds24_get(
-                "getOrderBySerialNumber",
-                {"serial_number": key, "product_id": _DS24_PRODUCT},
+                "validateLicenseKey",
+                {"purchase_id": key, "license_key": key},
             )
         except requests.exceptions.ConnectionError:
             return False, "Keine Internetverbindung. Bitte Netzwerk prüfen und erneut versuchen."
@@ -158,24 +160,19 @@ class LicenseManager:
             return False, f"Ungültige Serverantwort (HTTP {resp.status_code})."
 
         if resp.status_code == 200 and data.get("result") == "success":
-            order = data.get("data", {})
-            order_status = order.get("order_status", "")
-            if order_status in ("complete", "paid"):
-                self._save({
-                    "key":          key,
-                    "hardware_id":  self.hardware_id,
-                    "mac":          self.mac_address,
-                    "status":       "active",
-                    "validated_at": datetime.utcnow().isoformat(),
-                    "activated_at": datetime.utcnow().isoformat(),
-                    "order_id":     order.get("order_id", ""),
-                })
-                return True, "Kura Pro wurde erfolgreich aktiviert."
-            return False, f"Bestellung nicht abgeschlossen (Status: {order_status})."
+            self._save({
+                "key":          key,
+                "hardware_id":  self.hardware_id,
+                "mac":          self.mac_address,
+                "status":       "active",
+                "validated_at": datetime.utcnow().isoformat(),
+                "activated_at": datetime.utcnow().isoformat(),
+            })
+            return True, "Kura Pro wurde erfolgreich aktiviert."
 
         error = data.get("message") or data.get("error") or str(data)
         print(f"DS24 activate failed {resp.status_code}: {resp.text}")
-        return False, f"Aktivierung fehlgeschlagen:\n{error}"
+        return False, f"Lizenzschlüssel ungültig oder nicht gefunden:\n{error}"
 
     # ── Validate ──────────────────────────────────────────────────────────────
 
@@ -198,18 +195,16 @@ class LicenseManager:
         key = cache.get("key", "")
         try:
             resp = self._ds24_get(
-                "getOrderBySerialNumber",
-                {"serial_number": key, "product_id": _DS24_PRODUCT},
+                "validateLicenseKey",
+                {"purchase_id": key, "license_key": key},
                 timeout=8,
             )
             data = resp.json()
             if resp.status_code == 200 and data.get("result") == "success":
-                order_status = data.get("data", {}).get("order_status", "")
-                if order_status in ("complete", "paid"):
-                    cache["status"]       = "active"
-                    cache["validated_at"] = datetime.utcnow().isoformat()
-                    self._save(cache)
-                    return True
+                cache["status"]       = "active"
+                cache["validated_at"] = datetime.utcnow().isoformat()
+                self._save(cache)
+                return True
             cache["status"] = "invalid"
             self._save(cache)
             return False

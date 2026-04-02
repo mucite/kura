@@ -827,22 +827,38 @@ class KuraApp:
         """License activation dialog."""
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Kura Pro aktivieren")
-        dialog.geometry("560x240")
+        dialog.geometry("560x260")
         dialog.transient(self.root)
         dialog.grab_set()
 
         ctk.CTkLabel(dialog, text="Lizenzschlüssel aus der Kaufbestätigung eingeben:",
                     font=("Arial", 12)).pack(pady=(20, 4))
         ctk.CTkLabel(dialog, text="Format: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
-                    font=("Arial", 10), text_color="#888888").pack(pady=(0, 10))
+                    font=("Arial", 10), text_color="#888888").pack(pady=(0, 6))
 
-        key_entry = ctk.CTkEntry(dialog, width=500, font=("Courier New", 11))
-        key_entry.pack(pady=10)
+        key_var = ctk.StringVar()
+        key_entry = ctk.CTkEntry(dialog, width=500, font=("Courier New", 12),
+                                 textvariable=key_var, placeholder_text="z.B. RMEL3-3UDDC-YHJHF-C7TH9-QRYJK-FHZSV-KU26F-NS3CC")
+        key_entry.pack(pady=6)
+
+        def _on_key_change(*_):
+            raw = key_var.get().upper().replace(" ", "")
+            # Strip all hyphens, keep only alphanumeric
+            chars = [c for c in raw if c.isalnum()][:40]
+            # Re-insert hyphens every 5 chars
+            groups = [(''.join(chars[i:i+5])) for i in range(0, len(chars), 5)]
+            formatted = '-'.join(groups)
+            # Only update if changed to avoid recursive loop
+            if formatted != key_var.get():
+                key_var.set(formatted)
+                key_entry.icursor(len(formatted))
+
+        key_var.trace_add("write", _on_key_change)
 
         result = {"success": False}
 
         def on_activate():
-            key = key_entry.get().strip()
+            key = key_var.get().strip()
             if not key:
                 messagebox.showerror("Fehler", "Bitte geben Sie einen Lizenzschlüssel ein.")
                 return

@@ -31,9 +31,9 @@ _DS24_PRODUCT   = os.environ.get("DS24_PRODUCT_ID", "")
 _REVALIDATE_HOURS = 12    # re-ping DS24 every 12h
 _GRACE_DAYS       = 3     # offline grace period
 
-# Digistore24 serial/license key format: groups of alphanumeric chars
-# e.g.  DS24-XXXX-XXXX-XXXX  or  XXXX-XXXX-XXXX-XXXX
-_KEY_RE = re.compile(r'^[A-Z0-9]{4,8}(-[A-Z0-9]{4,8}){2,9}$')
+# Digistore24 license key format: 8 groups of 5 alphanumeric chars
+# e.g.  RMEL3-3UDDC-YHJHF-C7TH9-QRYJK-FHZSV-KU26F-NS3CC
+_KEY_RE = re.compile(r'^[A-Z0-9]{5}(-[A-Z0-9]{5}){7}$')
 
 
 class LicenseManager:

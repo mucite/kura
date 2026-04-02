@@ -1123,14 +1123,14 @@ class KuraApp(rumps.App):
         win = rumps.Window(
             message=(
                 "Geben Sie Ihren Kura Pro Lizenzschluessel ein:\n\n"
-                "Format: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX\n"
-                "(aus Ihrer Kaufbestaetigung kopieren)"
+                "Format: RMEL3-3UDDC-YHJHF-C7TH9-QRYJK-FHZSV-KU26F-NS3CC\n"
+                "(8 Gruppen mit je 5 Zeichen, aus Kaufbestaetigung kopieren)"
             ),
             title="Kura Pro aktivieren",
             default_text="",
             ok="Aktivieren",
             cancel="Abbrechen",
-            dimensions=(420, 24),
+            dimensions=(480, 24),
         )
         win.add_button("Jetzt kaufen")
         res = win.run()

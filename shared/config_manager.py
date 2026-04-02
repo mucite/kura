@@ -45,7 +45,10 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 class ConfigManager:
     def __init__(self, practice_name: str = None):
-        os.makedirs(_DATA_DIR, exist_ok=True)
+        try:
+            os.makedirs(_DATA_DIR, exist_ok=True)
+        except Exception as dir_err:
+            print(f"Warning: Could not create data directory: {dir_err}")
 
         self.practice_config = PracticeConfig(practice_name=practice_name)
         self.data = copy.deepcopy(_FALLBACK)

@@ -4,6 +4,7 @@ Handles multi-practice deployment with § 125 Abs. 1 SGB V compliance
 """
 import json
 import os
+import platform
 from datetime import datetime
 
 class PracticeConfig:
@@ -17,7 +18,21 @@ class PracticeConfig:
             practice_name: Name of the practice
             practice_file: Path to practice config JSON
         """
-        self.practice_file = practice_file or os.path.expanduser("~/.kura_practice.json")
+        # Platform-specific default path
+        if practice_file is None:
+            if platform.system() == "Windows":
+                practice_file = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "Kura", "kura_practice.json")
+            else:
+                practice_file = os.path.expanduser("~/.kura_practice.json")
+
+        # Ensure directory exists
+        practice_dir = os.path.dirname(practice_file)
+        try:
+            os.makedirs(practice_dir, exist_ok=True)
+        except Exception as dir_err:
+            print(f"Warning: Could not create practice config directory: {dir_err}")
+
+        self.practice_file = practice_file
         self.practice_name = practice_name
         self.config = self._load_or_create_config()
         

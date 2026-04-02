@@ -1123,14 +1123,14 @@ class KuraApp(rumps.App):
         win = rumps.Window(
             message=(
                 "Geben Sie Ihren Kura Pro Lizenzschluessel ein:\n\n"
-                "Format: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX\n"
+                "Format: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX\n"
                 "(aus Ihrer Kaufbestaetigung kopieren)"
             ),
             title="Kura Pro aktivieren",
             default_text="",
             ok="Aktivieren",
             cancel="Abbrechen",
-            dimensions=(340, 24),
+            dimensions=(420, 24),
         )
         win.add_button("Jetzt kaufen")
         res = win.run()
@@ -1144,7 +1144,7 @@ class KuraApp(rumps.App):
                 rumps.alert("Aktivierung fehlgeschlagen", msg)
         elif res.clicked == 2:  # Jetzt kaufen
             import webbrowser
-            webbrowser.open("https://kura-medical.de/#pricing")
+            webbrowser.open("https://www.checkout-ds24.com/product/681469")
 
     def deactivate_license(self, _):
         if rumps.alert(

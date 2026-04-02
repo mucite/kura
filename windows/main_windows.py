@@ -827,14 +827,16 @@ class KuraApp:
         """License activation dialog."""
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Kura Pro aktivieren")
-        dialog.geometry("500x200")
+        dialog.geometry("560x240")
         dialog.transient(self.root)
         dialog.grab_set()
 
-        ctk.CTkLabel(dialog, text="Lizenzschlüssel eingeben (Format: XXXX-XXXX-XXXX-XXXX):",
-                    font=("Arial", 12)).pack(pady=20)
+        ctk.CTkLabel(dialog, text="Lizenzschlüssel aus der Kaufbestätigung eingeben:",
+                    font=("Arial", 12)).pack(pady=(20, 4))
+        ctk.CTkLabel(dialog, text="Format: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
+                    font=("Arial", 10), text_color="#888888").pack(pady=(0, 10))
 
-        key_entry = ctk.CTkEntry(dialog, width=400, font=("Courier New", 12))
+        key_entry = ctk.CTkEntry(dialog, width=500, font=("Courier New", 11))
         key_entry.pack(pady=10)
 
         result = {"success": False}
@@ -853,7 +855,7 @@ class KuraApp:
                 messagebox.showerror("Aktivierung fehlgeschlagen", msg)
 
         def on_buy():
-            webbrowser.open("https://kura-medical.de/#pricing")
+            webbrowser.open("https://www.checkout-ds24.com/product/681469")
 
         button_frame = ctk.CTkFrame(dialog)
         button_frame.pack(pady=10)

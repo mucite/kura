@@ -1057,7 +1057,7 @@ class KuraApp:
         output_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.output_text = ctk.CTkTextbox(output_frame, width=860, height=250,
-                                         font=("Courier New", 10))
+                                         font=("Courier New", 13))
         self.output_text.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Status bar
@@ -1065,7 +1065,7 @@ class KuraApp:
         status_frame.pack(fill="x", padx=10, pady=10)
 
         self.status_label = ctk.CTkLabel(status_frame, text="🩺 Bereit",
-                                         font=("Arial", 11))
+                                         font=("Arial", 12))
         self.status_label.pack(side="left", padx=10)
 
         ctk.CTkButton(status_frame, text="Beenden", command=self.root.quit,

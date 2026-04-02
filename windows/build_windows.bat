@@ -15,7 +15,7 @@ echo.
 echo Building Kura.exe with PyInstaller...
 echo.
 
-pyinstaller Kura_windows.spec --noconfirm
+py -3.12 -m PyInstaller Kura_windows.spec --noconfirm
 
 if not exist "dist\Kura\Kura.exe" (
   echo.

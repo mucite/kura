@@ -686,6 +686,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         """
         Transcribe audio using local openai-whisper model (runs on CPU).
         Model is cached locally, no internet required after first download.
+        Falls back to Python-based audio loading if FFmpeg is not available.
         """
         import traceback
 
@@ -695,18 +696,51 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         try:
             print(f"🎙️ Transcribing with local Whisper model...")
             
-            result = self.whisper.transcribe(
-                audio_path,
-                language="de",
-                fp16=False,  # CPU mode (no GPU)
-                temperature=self.whisper_config.get("temperature", 0.0),
-                initial_prompt=self.whisper_config.get("initial_prompt", 
-                              "Physiotherapie Befund. Neutral-Null-Methode. VAS Schmerzskala.")
-            )
-            
-            result_text = result["text"].strip()
-            print(f"✅ Transcription complete ({len(result_text)} characters)")
-            return result_text
+            # First attempt: Try with Whisper's default FFmpeg approach
+            try:
+                result = self.whisper.transcribe(
+                    audio_path,
+                    language="de",
+                    fp16=False,  # CPU mode (no GPU)
+                    temperature=self.whisper_config.get("temperature", 0.0),
+                    initial_prompt=self.whisper_config.get("initial_prompt",
+                                  "Physiotherapie Befund. Neutral-Null-Methode. VAS Schmerzskala.")
+                )
+
+                result_text = result["text"].strip()
+                print(f"✅ Transcription complete ({len(result_text)} characters)")
+                return result_text
+
+            except FileNotFoundError as ffe:
+                # FFmpeg not found - try Python-based audio loading
+                if "system cannot find the file" in str(ffe) or "ffmpeg" in str(ffe).lower():
+                    print(f"⚠️ FFmpeg not found, switching to Python-based audio loading...")
+                    try:
+                        # Load audio using Python libraries instead
+                        audio = self._load_audio_without_ffmpeg(audio_path)
+
+                        # Use Whisper with pre-loaded audio
+                        result = self.whisper.transcribe(
+                            audio,
+                            language="de",
+                            fp16=False,
+                            temperature=self.whisper_config.get("temperature", 0.0),
+                            initial_prompt=self.whisper_config.get("initial_prompt",
+                                          "Physiotherapie Befund. Neutral-Null-Methode. VAS Schmerzskala.")
+                        )
+
+                        result_text = result["text"].strip()
+                        print(f"✅ Transcription complete ({len(result_text)} characters)")
+                        return result_text
+                    except ImportError as ie:
+                        raise RuntimeError(
+                            f"FFmpeg is not installed and Python audio libraries are missing.\n"
+                            f"Install FFmpeg (https://ffmpeg.org/download.html) or run:\n"
+                            f"  pip install soundfile librosa\n"
+                            f"Error: {ie}"
+                        ) from ie
+                else:
+                    raise
 
         except Exception as e:
             error_details = traceback.format_exc()

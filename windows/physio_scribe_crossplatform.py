@@ -546,6 +546,107 @@ class KuraEngine:
                 "Schmerzfreiheit bei Belastung: ja / nein (VAS)",
             ],
         },
+        "MASSE": {
+            "label":    "Massagetherapie (KMT / BGM / Segmentmassage)",
+            "billing":  "20106",
+            "priority": 25,
+            "triggers": [
+                "klassische massage", "kmt", "bindegewebsmassage", "bgm",
+                "segmentmassage", "myogelose", "triggerpunkt-massage",
+                "massage therapie", "weichteilmassage",
+            ],
+            "icd_prefix": ["M54", "M79.1", "M62"],
+            "checklist": [
+                "Massageform: KMT / BGM / Segment (je nach Verordnung)",
+                "Lokalisation: Muskeln + Befund (Myogelosen / Tonuserhoehung)",
+                "Druckdolenz: Palpationsbefund (Lokalisation + Intensitaet)",
+                "Wirkung: Tonussenkung / Durchblutungsfoerderung (subjektiv + palpatorisch)",
+            ],
+        },
+        "UWM": {
+            "label":    "Unterwasserdruckstrahlmassage (UWM)",
+            "billing":  "20102",
+            "priority": 24,
+            "triggers": [
+                "unterwasserdruckstrahl", "uw-massage", "uwm", "unterwassermassage",
+                "druckstrahlmassage", "whirlpool massage",
+            ],
+            "icd_prefix": ["M54", "M79", "G82"],
+            "checklist": [
+                "Wassertemperatur (°C)",
+                "Druck (bar) + Behandlungsabstand (cm)",
+                "Behandlungsregion: genaue Lokalisation",
+                "Wirkung: Tonussenkung / Oedemmobilisation (dokumentieren)",
+            ],
+        },
+        "AQUA": {
+            "label":    "Krankengymnastik im Bewegungsbad (Aquatherapie)",
+            "billing":  "20902",
+            "priority": 32,
+            "triggers": [
+                "bewegungsbad", "aquatherapie", "wassergymnastik",
+                "unterwassergymnastik", "hydrotherapie", "pool therapie",
+                "warmwasserbecken", "kg im wasser",
+            ],
+            "icd_prefix": ["M16", "M17", "M05", "G82", "M80"],
+            "checklist": [
+                "Wassertemperatur (°C)",
+                "Auftriebshilfen: Schwimmnudel / Schwimmflossen / keine",
+                "Belastungsstatus im Wasser: Vollbelastung / Entlastung X%",
+                "ROM und Gangbild im Vergleich zur Trockenuebung",
+            ],
+        },
+        "ELEKTRO": {
+            "label":    "Elektrotherapie (TENS / IFC / EMS / Galvano)",
+            "billing":  "21302",
+            "priority": 22,
+            "triggers": [
+                "elektrotherapie", "tens", "interferenzstrom", "ifc", "galvano",
+                "diadynamisch", "reizstrom", "elektrostimulation", "ems therapie",
+                "transkutane elektrische",
+            ],
+            "icd_prefix": ["M54", "M79.1", "M25.5", "G57"],
+            "checklist": [
+                "Stromform: TENS / IFC / Galvano / Diadyn (je nach Verordnung)",
+                "Frequenz (Hz) + Intensitaet (mA) — unter Wahrnehmungsgrenze / Kontraktionsschwelle",
+                "Elektroden-Platzierung: Lokalisation (Dermatom / Muskelbauch / Trigger)",
+                "Patientenreaktion: Kribbeln / Waerme / Zucken (erwartet vs. tatsaechlich)",
+            ],
+        },
+        "THERMO": {
+            "label":    "Thermotherapie (Fango / Waerme / Kaelte)",
+            "billing":  "21501",
+            "priority": 20,
+            "triggers": [
+                "fango", "heiße rolle", "heisse rolle", "warmpackung",
+                "waermetherapie", "waermestrahler", "rotlicht",
+                "kaeltetherapie", "eispack", "kryotherapie", "kryopack",
+                "ultraschall waerme",
+            ],
+            "icd_prefix": ["M54", "M79.1", "M25.5", "S00"],
+            "checklist": [
+                "Modalitaet: Fango / Heisse Rolle / Strahler / Eispack / Kryopack",
+                "Temperatur (°C) oder Stufe (subjektiv: angenehm warm / kuehl)",
+                "Behandlungsregion + Dauer (Minuten)",
+                "Kontraindikationsausschluss: Sensibilitaetstoerung nein / Durchblutungstoerung nein",
+            ],
+        },
+        "GRUPPE": {
+            "label":    "Gruppentherapie (KG-Gruppe)",
+            "billing":  "20601",
+            "priority": 18,
+            "triggers": [
+                "gruppentherapie", "gruppenbehandlung", "kurstherapie",
+                "gruppenkg", "sturzpraevention gruppe", "rueckenschule",
+                "gruppengymnastik", "gruppenbehandlung kg",
+            ],
+            "icd_prefix": ["M54", "M79", "G20", "M81"],
+            "checklist": [
+                "Teilnehmerzahl: X Patienten (GKV-Limit: max. 5 bei KG-Gruppe)",
+                "Gemeinsames Gruppenziel (Therapieziel fuer alle Teilnehmer)",
+                "Besonderheiten einzelner Teilnehmer (falls dokumentationsrelevant)",
+            ],
+        },
         "KGG": {
             "label":    "Krankengymnastik am Geraet (MTT / KGG)",
             "billing":  "20507",   # Gist KG_Gerät: 20507 @ €55.81 (not 20501 @ €29.63)

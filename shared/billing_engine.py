@@ -358,11 +358,86 @@ _HMK: dict[str, dict] = {
 
     "GR1": {
         "desc": "Krankengymnastik Gruppenbehandlung (2–5 Patienten)",
-        "heilmittel": "KG-Gruppe", "position": "20503",
-        "name": "Krankengymnastik Gruppenbehandlung klein",
-        "duration": 25, "regelfall": 6, "langfristig": False,
+        "heilmittel": "KG-Gruppe", "position": "20601",
+        # Gist: KG_Gruppe = 20601 (€13.26) — 20503 is Übungsgruppe (lower fee)
+        "name": "Krankengymnastik Gruppenbehandlung",
+        "duration": 45, "regelfall": 6, "langfristig": False,
         "icd": [],   # group therapy — prescribed alongside individual KG
-        "docs": ["Gruppenindikation", "Teilnehmerzahl (2-5)", "Therapieziel"],
+        "docs": ["Gruppenindikation", "Teilnehmerzahl (2-5 Pat.)", "Therapieziel (gemeinsames Gruppenziel)"],
+    },
+
+    # ══ MASSAGETHERAPIE ════════════════════════════════════════════════════════
+
+    "MA1": {
+        "desc": "Klassische Massage (KMT) / Bindegewebsmassage (BGM) / Segmentmassage",
+        "heilmittel": "Massage", "position": "20106",
+        # Gist: Massage_KMT = 20106 (€21.63), Massage_BGM = 20107 (€25.98), Massage_UW = 20102 (€33.75)
+        "name": "Klassische Massagetherapie",
+        "duration": 20, "regelfall": 6, "langfristig": False,
+        "icd": ["M54", "M79.1", "M62.4"],
+        "docs": ["Massageform (KMT/BGM/Segment)", "Lokalisation + Befund (Tonus/Myogelosen)", "Wirkung (Tonussenkung/Durchblutung)"],
+    },
+    "MA2": {
+        "desc": "Unterwasserdruckstrahlmassage (UWM)",
+        "heilmittel": "Massage-UW", "position": "20102",
+        "name": "Unterwasserdruckstrahlmassage",
+        "duration": 20, "regelfall": 6, "langfristig": False,
+        "icd": ["M54", "M79.3", "G82"],
+        "docs": ["Wassertemperatur (°C)", "Druck (bar)", "Behandlungsregion", "Wirkung"],
+    },
+
+    # ══ ELEKTROTHERAPIE ════════════════════════════════════════════════════════
+
+    "EL1": {
+        "desc": "Elektrotherapie – TENS / diadynamische Ströme / Interferenzstrom",
+        "heilmittel": "Elektro", "position": "21302",
+        # Gist: Elektro = 21302 (€8.43)
+        "name": "Elektrotherapie",
+        "duration": 15, "regelfall": 6, "langfristig": False,
+        "icd": ["M54", "M79.1", "M25.5"],
+        "docs": ["Stromform (TENS/IFC/Galvano)", "Frequenz (Hz) + Intensität (mA)", "Elektroden-Platzierung", "Wirkung (Analgesie/Muskelstimulation)"],
+    },
+    "EL2": {
+        "desc": "Elektrotherapie bei Lähmungen – EMS / neuromuskuläre Stimulation",
+        "heilmittel": "Elektro-Lähmung", "position": "21303",
+        # Gist: Elektro_Lahmung = 21303 (€18.70)
+        "name": "Elektrotherapie bei Lähmungen",
+        "duration": 20, "regelfall": 10, "langfristig": True,
+        "icd": ["G57", "G58", "G82", "S14", "S24"],
+        "docs": ["Lähmungsgrad (MRC 0-5)", "Stimulationsparameter (Hz/mA)", "Elektroden-Platzierung", "Muskelkontraktion: vorhanden / fehlend"],
+    },
+
+    # ══ THERMOTHERAPIE ═════════════════════════════════════════════════════════
+
+    "TH1": {
+        "desc": "Wärmetherapie – Fango / Heiße Rolle / Wärmestrahler",
+        "heilmittel": "Thermo", "position": "21501",
+        # Gist: Fango = 21501 (€16.16), Heisse_Rolle = 21530 (€13.47)
+        "name": "Warmpackung (Fango/Heiße Rolle)",
+        "duration": 20, "regelfall": 6, "langfristig": False,
+        "icd": ["M54", "M79.1"],
+        "docs": ["Wärmemodalität (Fango/Heiße Rolle/Strahler)", "Behandlungsregion", "Temperatur (°C oder subjektiv: angenehm warm)", "Kontraindikationsausschluss (Sensibilitätsstörung: nein)"],
+    },
+    "TH2": {
+        "desc": "Kältetherapie – Kryotherapie / Eispackung",
+        "heilmittel": "Kryotherapie", "position": "21534",
+        # Gist: Kaelte = 21534 (€11.95)
+        "name": "Kälteanwendung",
+        "duration": 15, "regelfall": 6, "langfristig": False,
+        "icd": ["M25.5", "S00", "S60", "S80", "S90"],
+        "docs": ["Kältemodalität (Eispack/Kältespray/Kryokammer)", "Behandlungsregion", "Schwellung (Umfang cm)", "Kontraindikationsausschluss (Kälteurtikaria/Durchblutungsstörung: nein)"],
+    },
+
+    # ══ KG IM BEWEGUNGSBAD / AQUATHERAPIE ══════════════════════════════════════
+
+    "BB1": {
+        "desc": "Krankengymnastik im Bewegungsbad – Einzelbehandlung (Aquatherapie)",
+        "heilmittel": "KG-BB", "position": "20902",
+        # Gist: KG_BB_Einzel = 20902 (€33.87)
+        "name": "Krankengymnastik im Bewegungsbad (Einzeln)",
+        "duration": 30, "regelfall": 6, "langfristig": False,
+        "icd": ["M16", "M17", "M05", "G82", "M80"],
+        "docs": ["Wassertemperatur (°C)", "Auftriebshilfen (vorhanden / nicht notwendig)", "Belastungsstatus im Wasser", "ROM und Gangbild im Vergleich zu trocken"],
     },
 
     # ══ GERÄTEGESTÜTZTE KG / MTT ══════════════════════════════════════════════
@@ -455,6 +530,29 @@ _GKV_PRICES: dict[str, float] = {
     "21111": 46.26,   # KPE Phase II 30 min
     "21901": 11.40,   # Geburtsvorbereitung (Gist-confirmed)
     "21904": 11.40,   # Rückbildungsgymnastik (Gist-confirmed)
+    # Massagen (Gist fees_2026)
+    "20102": 33.75,   # UW-Massage (Unterwasserdruckstrahl)
+    "20106": 21.63,   # Klassische Massage (KMT)
+    "20107": 25.98,   # Bindegewebsmassage (BGM)
+    "20108": 21.63,   # Segmentmassage
+    # Gruppentherapie
+    "20601": 13.26,   # KG-Gruppe 45 min
+    "20401": 8.43,    # Übungsbehandlung Gruppe
+    # Elektrotherapie
+    "21302": 8.43,    # Elektrotherapie (TENS/IFC/Galvano)
+    "21303": 18.70,   # Elektrotherapie bei Lähmungen (EMS)
+    "21310": 14.48,   # Elektrotherapie Teilkörper
+    "21312": 27.61,   # Elektrotherapie Vollkörper
+    # Thermotherapie
+    "21501": 16.16,   # Fango / Warmpackung
+    "21517": 7.43,    # Wärmestrahler (Rotlicht)
+    "21530": 13.47,   # Heiße Rolle
+    "21531": 14.66,   # Ultraschall-Wärme
+    "21534": 11.95,   # Kältetherapie
+    # Aquatherapie
+    "20902": 33.87,   # KG Bewegungsbad Einzel
+    "21004": 24.16,   # KG Bewegungsbad Gruppe 3 Pat.
+    "21005": 15.97,   # KG Bewegungsbad Gruppe 4–5 Pat.
 }
 
 # ── PKV market price ranges (GebüTh reference 2026) ──────────────────────────
@@ -478,6 +576,15 @@ _PKV_RANGES: dict[str, tuple] = {
     "21111": (52.0, 115.0),
     "21901": (20.0,  55.0),   # Geburtsvorbereitung
     "21904": (20.0,  55.0),   # Rückbildungsgymnastik
+    "20106": (22.0,  55.0),   # KMT
+    "20107": (26.0,  65.0),   # BGM
+    "20102": (34.0,  80.0),   # UW-Massage
+    "20601": (14.0,  35.0),   # KG-Gruppe
+    "21302": (10.0,  28.0),   # Elektrotherapie
+    "21303": (20.0,  55.0),   # Elektro bei Lähmungen
+    "21501": (18.0,  45.0),   # Fango
+    "21534": (13.0,  38.0),   # Kältetherapie
+    "20902": (35.0,  90.0),   # KG Bewegungsbad
 }
 
 # ── BG surcharges (DGUV typical, varies by Träger) ────────────────────────────
@@ -859,6 +966,26 @@ class _GKVEngine:
                                     "beinpresse", "latzug", "ergometer", "krafttraining am",
                                     "mtt ", "gerätegestützt"]):
             return "KGG"
+        if any(k in text for k in ["bewegungsbad", "aquatherapie", "wassergymnastik",
+                                    "unterwassergymnastik", "hydrotherapie", "pool "]):
+            return "BB1"
+        if any(k in text for k in ["bindegewebsmassage", "bgm ", "klassische massage", "kmt ",
+                                    "segmentmassage", "myogelose", "triggerpunkt-massage"]):
+            return "MA1"
+        if any(k in text for k in ["unterwasserdruckstrahl", "uw-massage", "uwm "]):
+            return "MA2"
+        if any(k in text for k in ["fango", "heiße rolle", "heisse rolle", "warmpackung",
+                                    "wärmetherapie", "wärmestrahler", "rotlicht"]):
+            return "TH1"
+        if any(k in text for k in ["kältetherapie", "eispack", "kryotherapie", "eis-", "kälte "]):
+            return "TH2"
+        if any(k in text for k in ["tens ", "interferenzstrom", "ifc ", "galvano", "diadynamisch",
+                                    "elektrotherapie", "reizstrom"]):
+            return "EL1"
+        if any(k in text for k in ["ems ", "elektrostimulation lähmung", "neuromuskuläre stimulation"]):
+            return "EL2"
+        if any(k in text for k in ["gruppentherapie", "gruppenbehandlung", "kurstherapie"]):
+            return "GR1"
         if any(k in text for k in ["skoliose", "schroth", "rippenbuckel"]):
             return "WS3"
         if any(k in text for k in ["hws", "nacken", "zervikal", "trapezius",

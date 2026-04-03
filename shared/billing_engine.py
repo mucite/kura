@@ -436,7 +436,7 @@ _HMK: dict[str, dict] = {
         # Gist: KG_BB_Einzel = 20902 (€33.87)
         "name": "Krankengymnastik im Bewegungsbad (Einzeln)",
         "duration": 30, "regelfall": 6, "langfristig": False,
-        "icd": ["M16", "M17", "M05", "G82", "M80"],
+        "icd": ["M05", "G82", "M80"],  # M16/M17 removed — belong to EX4/EX3; BB1 selected via AQUA profile_id only
         "docs": ["Wassertemperatur (°C)", "Auftriebshilfen (vorhanden / nicht notwendig)", "Belastungsstatus im Wasser", "ROM und Gangbild im Vergleich zu trocken"],
     },
 
@@ -775,7 +775,12 @@ class _GKVEngine:
         config_pos = self._config_position(icd10, config_rules)
         if config_pos and config_pos != position:
             position = config_pos
-            # CONFIG_OVERRIDE PASS suppressed — informational noise
+            # Resync entry/dg so docs and position_name reflect the overridden position
+            for _override_dg, _override_entry in _HMK.items():
+                if _override_entry.get("position") == config_pos:
+                    dg = _override_dg
+                    entry = _override_entry
+                    break
 
         # ── 3. MT indication detected — WARN, never auto-upgrade ─────────────
         # §125 SGB V: only the doctor's prescription authorises MT (21201).
@@ -834,8 +839,12 @@ class _GKVEngine:
                 risk = "WARN"
 
         # ── 9. Required tests from remote config — emit only on FAIL ──────────
+        # Skip any test already covered by entry["docs"] to avoid duplicate FEHLT items.
         rule = config_rules.get(f"ICD10_{icd10.replace('.', '_')}", {})
+        _dg_docs_lower = {d.lower() for d in entry.get("docs", [])}
         for test in rule.get("required_tests", []):
+            if test.lower() in _dg_docs_lower:
+                continue   # already checked in section 7 above
             if not _check_doc(test, soap):
                 audit.append(AuditItem(
                     f"CFG_{test.upper()[:20]}",
@@ -930,7 +939,7 @@ class _GKVEngine:
         return BillingResult(
             insurance_type=InsuranceType.GKV,
             position_number=position,
-            position_name=_HMK.get(dg, entry)["name"] if position == entry["position"] else "Manuelle Therapie",
+            position_name=entry["name"],
             diagnosegruppe=dg,
             diagnosegruppe_desc=entry["desc"],
             legal_basis="§ 125 SGB V | Anlage 2 Rahmenempfehlungen (01.01.2026) | § 106b Prüfung",

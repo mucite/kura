@@ -306,7 +306,9 @@ class KuraEngine:
             "billing":  "20201",
             "priority": 70,
             "triggers": [
-                "lymphoedem", "lymph", "mld", "kpe", "entstauung", "stemmer",
+                # NOTE: do NOT use bare "lymph" — matches "Lymphabfluss", "Lymphknoten"
+                # in orthopaedic contexts and causes false LY profile selection.
+                "lymphoedem", "lymphdrainage", "mld", "kpe", "entstauung", "stemmer",
                 "lipoedem", "mastektomie", "axillaer", "sentinel", "erysipel",
                 "sekundaeres oedema",
             ],
@@ -836,14 +838,27 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         s_val = soap_dict.get("S", "")
         s_text = s_val if isinstance(s_val, str) else ""
-        
-        vas = re.search(r"VAS\s*(\d+)", transcript, re.I)
-        if vas and "VAS" not in s_text:
-            soap_dict["S"] = s_text + f" (VAS {vas.group(1)}/10)"
 
-        vas_match = re.search(r"(?:Schmerz|VAS).*?(\d+)\s*(?:von|/)\s*10", transcript, re.I)
-        if vas_match and "VAS" not in s_text:
-            soap_dict["S"] = f"VAS {vas_match.group(1)}/10. " + s_text
+        # Recover VAS — handle all orderings: "VAS 6", "6 von 10 beim Schmerz", "6/10"
+        if "VAS" not in s_text:
+            vas_num = None
+            m = re.search(r"\bVAS\s*(\d{1,2})\b", transcript, re.I)
+            if m:
+                vas_num = m.group(1)
+            if not vas_num:
+                m = re.search(r"(?:Schmerz|Schmerzen|schmerzt)[^.]*?(\d{1,2})\s*(?:von|/)\s*10", transcript, re.I)
+                if m:
+                    vas_num = m.group(1)
+            if not vas_num:
+                m = re.search(r"\b(\d{1,2})\s*(?:von|/)\s*10\b[^.]*?(?:schmerz|schmerzen|schmerzt)", transcript, re.I)
+                if m:
+                    vas_num = m.group(1)
+            if not vas_num:
+                m = re.search(r"\b([1-9]|10)\s*/\s*10\b", transcript)
+                if m:
+                    vas_num = m.group(1)
+            if vas_num:
+                soap_dict["S"] = f"VAS {vas_num}/10. " + s_text.lstrip()
 
         if "lasegue" in transcript.lower() or "lasek" in transcript.lower():
             if "lasègue" not in obj_text.lower():
@@ -1233,6 +1248,20 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         if s_field:
             soap_dict["S"] = s_field
 
+        # Cross-domain SMART goal sanity check
+        p_field = soap_dict.get("P", "")
+        if isinstance(p_field, str):
+            _smart_m = re.search(r'Ziel\s*:\s*ROM\s+(\w+)', p_field, re.I)
+            if _smart_m:
+                _goal_part = _smart_m.group(1).lower()
+                _all_text = " ".join(v for v in soap_dict.values() if isinstance(v, str)).lower()
+                if _goal_part not in _all_text:
+                    soap_dict["P"] = re.sub(
+                        r'Ziel\s*:\s*ROM\s+\w+[^\|.]*',
+                        'Ziel: n.d. — bitte korrektes Funktionsziel ergaenzen',
+                        p_field, flags=re.I
+                    )
+
         # Diagnostic tests belong in O (Objektiv), not in P (Plan) — strip from PLAN
         _diag_test_re = re.compile(
             r'\b(?:Patrick-Test|FABER-Test|Lasègue-Test|Bragard-Test|Slump-Test|'
@@ -1621,13 +1650,17 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                     res_icd = "M80.05" if is_osteoporotic else "S72.0"
                 elif icd10.startswith("M81") and any(k in t_low for k in ["fraktur", "bruch", "gebrochen"]):
                     res_icd = "M80.05" if hip_ctx else "M80.08"
-                elif "schulter" in t_low and not icd10.startswith("M75"):
+                _is_schulter = "schulter" in t_low or icd10.startswith("M75")
+                _is_knie     = "knie" in t_low or icd10.startswith("M17")
+                if _is_schulter and not icd10.startswith("M75"):
                     res_icd = "M75.4"
-                elif "knie" in t_low and not icd10.startswith("M17"):
+                elif _is_knie and not _is_schulter and not icd10.startswith("M17"):
                     res_icd = "M17.1"
-                elif hip_ctx and not icd10.startswith(("M16", "M80", "S72")):
+                elif hip_ctx and not _is_schulter and not _is_knie and not icd10.startswith(("M16", "M80", "S72")):
                     res_icd = "M16.1"
-                elif any(k in t_low for k in ["hexenschuss", "lumbago", "ischiasschmerz", "lws", "rücken"]):
+                elif (not _is_schulter and not _is_knie and not hip_ctx and
+                      (any(k in t_low for k in ["hexenschuss", "lumbago", "ischiasschmerz", "lws"]) or
+                       re.search(r'rücken(?:schmerz|weh|beschwerden|problem)', t_low))):
                     res_icd = "M54.5"
                     if any(k in t_low for k in ["ausstrahlung", "lasegue", "radikulär", "bein", "wade"]):
                         res_icd = "M51.1"

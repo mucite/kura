@@ -292,7 +292,9 @@ class KuraEngine:
             "billing":  "20201",
             "priority": 70,
             "triggers": [
-                "lymphoedem", "lymph", "mld", "kpe", "entstauung", "stemmer",
+                # NOTE: do NOT use bare "lymph" — matches "Lymphabfluss", "Lymphknoten"
+                # in orthopaedic/HWS contexts and causes false LY profile selection.
+                "lymphoedem", "lymphdrainage", "mld", "kpe", "entstauung", "stemmer",
                 "lipoedem", "mastektomie", "axillaer", "sentinel", "erysipel",
                 "sekundaeres oedema",
             ],
@@ -724,14 +726,31 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                     obj_text = re.sub(r'(?:LWS[^|]*?)?\b0-0-\d{2,3}\b[^|]*', '', obj_text).strip(' |')
                     break
 
-        # 2. Recover VAS (Pain scale)
-        vas = re.search(r"VAS\s*(\d+)", transcript, re.I)
-        if vas and "VAS" not in soap_dict["S"]:
-            soap_dict["S"] += f" (VAS {vas.group(1)}/10)"
-
-        vas_match = re.search(r"(?:Schmerz|VAS).*?(\d+)\s*(?:von|/)\s*10", transcript, re.I)
-        if vas_match and "VAS" not in soap_dict["S"]:
-            soap_dict["S"] = f"VAS {vas_match.group(1)}/10. " + soap_dict["S"]
+        # 2. Recover VAS (Pain scale) — handle both orderings:
+        #    "VAS 6" / "6/10" / "6 von 10" / "eine 6 von 10 beim Schmerz"
+        if "VAS" not in soap_dict.get("S", ""):
+            vas_num = None
+            # Pattern A: explicit VAS label before number
+            m = re.search(r"\bVAS\s*(\d{1,2})\b", transcript, re.I)
+            if m:
+                vas_num = m.group(1)
+            if not vas_num:
+                # Pattern B: "Schmerz ... X von 10" (forward)
+                m = re.search(r"(?:Schmerz|Schmerzen|schmerzt)[^.]*?(\d{1,2})\s*(?:von|/)\s*10", transcript, re.I)
+                if m:
+                    vas_num = m.group(1)
+            if not vas_num:
+                # Pattern C: "X von 10 ... Schmerz" (reversed — e.g. "eine 6 von 10 beim Schmerz")
+                m = re.search(r"\b(\d{1,2})\s*(?:von|/)\s*10\b[^.]*?(?:schmerz|schmerzen|schmerzt)", transcript, re.I)
+                if m:
+                    vas_num = m.group(1)
+            if not vas_num:
+                # Pattern D: bare "X/10" or "X von 10" anywhere (only 1-10)
+                m = re.search(r"\b([1-9]|10)\s*/\s*10\b", transcript)
+                if m:
+                    vas_num = m.group(1)
+            if vas_num:
+                soap_dict["S"] = f"VAS {vas_num}/10. " + soap_dict["S"].lstrip()
 
         # 3. Recover Tests (Lasègue) if mentioned but missing in O
         if "lasegue" in transcript.lower() or "lasek" in transcript.lower():
@@ -1236,6 +1255,21 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         if s_field:
             soap_dict["S"] = s_field
 
+        # Cross-domain SMART goal sanity check:
+        # If the SMART goal mentions a body part that doesn't appear in the SOAP at all,
+        # it's a hallucination — clear the goal and flag it for manual completion.
+        p_field = soap_dict.get("P", "")
+        _smart_m = re.search(r'Ziel\s*:\s*ROM\s+(\w+)', p_field, re.I)
+        if _smart_m:
+            _goal_part = _smart_m.group(1).lower()
+            _all_text = " ".join(v for v in soap_dict.values() if isinstance(v, str)).lower()
+            if _goal_part not in _all_text:
+                soap_dict["P"] = re.sub(
+                    r'Ziel\s*:\s*ROM\s+\w+[^\|.]*',
+                    'Ziel: n.d. — bitte korrektes Funktionsziel ergaenzen',
+                    p_field, flags=re.I
+                )
+
         # Diagnostic tests belong in O (Objektiv), not in P (Plan) — strip from PLAN
         _diag_test_re = re.compile(
             r'\b(?:Patrick-Test|FABER-Test|Lasègue-Test|Bragard-Test|Slump-Test|'
@@ -1515,13 +1549,21 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                     res_icd = "M80.05"   # Osteoporotic femoral neck fracture
                 else:
                     res_icd = "M80.08"   # Osteoporotic fracture, other site
-            elif "schulter" in t_low and not icd10.startswith("M75"):
+            # Dominant body-region guards — order: Schulter > Knie > Hüfte > Rücken
+            # Each guard also protects the already-correct ICD from being overridden.
+            _is_schulter = "schulter" in t_low or icd10.startswith("M75")
+            _is_knie     = "knie" in t_low or icd10.startswith("M17")
+            if _is_schulter and not icd10.startswith("M75"):
                 res_icd = "M75.4"
-            elif "knie" in t_low and not icd10.startswith("M17"):
+            elif _is_knie and not _is_schulter and not icd10.startswith("M17"):
                 res_icd = "M17.1"
-            elif hip_ctx and not icd10.startswith(("M16", "M80", "S72")):
+            elif hip_ctx and not _is_schulter and not _is_knie and not icd10.startswith(("M16", "M80", "S72")):
                 res_icd = "M16.1"   # Koxarthrose
-            elif any(k in t_low for k in ["hexenschuss", "lumbago", "ischiasschmerz", "lws", "rücken"]):
+            elif (not _is_schulter and not _is_knie and not hip_ctx and
+                  (any(k in t_low for k in ["hexenschuss", "lumbago", "ischiasschmerz", "lws"]) or
+                   re.search(r'rücken(?:schmerz|weh|beschwerden|problem)', t_low))):
+                # "rücken" alone excluded: "Legen Sie sich auf den Rücken" is positional,
+                # not a pain complaint — require it to be compounded with a symptom word.
                 res_icd = "M54.5"
                 if any(k in t_low for k in ["ausstrahlung", "lasegue", "radikulär", "bein", "wade"]):
                     res_icd = "M51.1"

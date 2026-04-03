@@ -153,16 +153,18 @@ _HMK: dict[str, dict] = {
         "name": "Manuelle Therapie",
         "duration": 20, "regelfall": 6, "langfristig": False,
         "icd": ["M75"],
-        "docs": ["ROM Schulter (Abd/Flex/AR/IR)", "Endgefühl", "Painful Arc", "Krafttest (Jobe/Hawkins)"],
+        # 3 billing-critical items only (§106b): segment + provocation test + ROM
+        "docs": ["Behandeltes Segment (Art. glenohumeralis)", "Provokationstest (Hawkins/Jobe)",
+                 "ROM Schulter (Neutral-Null)"],
     },
     "EX3": {
         "desc": "Kniegelenk – Gonarthrose, postoperativ, Meniskusläsion",
         "heilmittel": "KG", "position": "20501",
         "name": "Krankengymnastik Einzelbehandlung",
         "duration": 20, "regelfall": 6, "langfristig": False,
-        # optional_mt intentionally absent: HMK does not list Kniegelenk as MT indication.
         "icd": ["M17", "M22", "M23", "S82", "S83"],
-        "docs": ["ROM Knie (Flex/Ext)", "Umfang", "Kraft (MMT)", "Gangbild", "Knienachgiebigkeit"],
+        # 3 billing-critical items (§106b): ROM + strength + functional test
+        "docs": ["ROM Knie (Flex/Ext)", "Kraft (MMT)", "Gangbild"],
     },
     "EX4": {
         "desc": "Hüftgelenk – Coxarthrose, postoperativ (TEP)",
@@ -201,7 +203,8 @@ _HMK: dict[str, dict] = {
         "name": "Manuelle Therapie",
         "duration": 20, "regelfall": 6, "langfristig": False,
         "icd": ["M50", "M53", "M54.0", "M54.1", "M54.2", "M99.0", "M99.1"],
-        "docs": ["Segmentbefund (C/Th)", "Endgefühl", "Neurolog. Screening", "ROM HWS"],
+        # 3 billing-critical: segment (MT-Pflicht) + provocation + ROM
+        "docs": ["Behandeltes Segment (C/Th)", "Provokationstest (Spurling/Slump)", "ROM HWS (Neutral-Null)"],
     },
     "WS1b": {
         "desc": "LWS/ISG – segmentale Funktionsstörung, Lumbago, Ischialgie",
@@ -209,7 +212,8 @@ _HMK: dict[str, dict] = {
         "name": "Manuelle Therapie",
         "duration": 20, "regelfall": 6, "langfristig": False,
         "icd": ["M54.3", "M54.4", "M54.5", "M99.3", "M99.4", "M99.5"],
-        "docs": ["Segmentbefund (L/S)", "FBA (Finger-Boden-Abstand)", "Schober-Zeichen", "Lasègue"],
+        # 3 billing-critical: segment (MT-Pflicht) + FBA + Lasègue (neurolog. exclusion)
+        "docs": ["Behandeltes Segment (L/S)", "FBA (Finger-Boden-Abstand)", "Lasègue"],
     },
     "WS2": {
         "desc": "Wirbelsäule postoperativ / Bandscheibenoperation",
@@ -359,6 +363,30 @@ _HMK: dict[str, dict] = {
         "duration": 25, "regelfall": 6, "langfristig": False,
         "icd": [],   # group therapy — prescribed alongside individual KG
         "docs": ["Gruppenindikation", "Teilnehmerzahl (2-5)", "Therapieziel"],
+    },
+
+    # ══ GERÄTEGESTÜTZTE KG / MTT ══════════════════════════════════════════════
+
+    "KGG": {
+        "desc": "Krankengymnastik am Gerät / Medizinische Trainingstherapie (MTT)",
+        "heilmittel": "KGG", "position": "20501",
+        "name": "Krankengymnastik am Gerät",
+        "duration": 20, "regelfall": 6, "langfristig": False,
+        # KGG is billed within §125 KG framework; ICDs are all major orthopaedic groups
+        "icd": [],   # No specific ICD — DG assigned via fallback from M54/M17/M75/M16/S-codes
+        "docs": ["Trainingsplan (Gerät + Last + Wdh)", "Krafttest (MRC 0-5 oder Dynamometer)", "Therapieziel"],
+    },
+
+    # ══ BECKENBODEN / KONTINENZ ═══════════════════════════════════════════════
+
+    "PF1": {
+        "desc": "Beckenbodentherapie – Harninkontinenz, Beckenbodendysfunktion, postpartum",
+        "heilmittel": "KG", "position": "20501",
+        "name": "Krankengymnastik Einzelbehandlung",
+        "duration": 20, "regelfall": 10, "langfristig": False,
+        "icd": ["N39.3", "N39.4", "N81", "N81.1", "N81.2", "N81.8", "O34.1",
+                "N40", "R32"],  # incl. Prostatahyperplasie + funktionelle Harninkontinenz
+        "docs": ["Kontinenzstatus (Harnverlust-Typ: Stress/Drang/Misch)", "Beckenboden-Tonus (0-5)", "Miktionsfrequenz"],
     },
 }
 
@@ -638,28 +666,22 @@ class _GKVEngine:
 
         # ── 5. Befunddichte §106b ──────────────────────────────────────────────
         min_len = 60 if position in ("21201", "20511", "20510") else 20
-        if len(obj) >= min_len:
-            audit.append(AuditItem("OBJ_DENSITY", f"O-Feld Mindestdichte (>={min_len} Zeichen)",
-                                   "PASS", f"{len(obj)} Zeichen"))
-        else:
-            audit.append(AuditItem("OBJ_DENSITY", f"O-Feld Mindestdichte (>={min_len} Zeichen)",
-                                   "FAIL", f"Nur {len(obj)} Zeichen — {min_len - len(obj)} fehlen"))
+        if len(obj) < min_len:
+            audit.append(AuditItem("OBJ_DENSITY", "O-Feld Befunddichte",
+                                   "FAIL", f"Nur {len(obj)} Zeichen — mindestens {min_len} erforderlich"))
             risk = "WARN"
 
-        # ── 6. Neutral-Null ROM ────────────────────────────────────────────────
-        if position in ("21201", "20501") and "°" in obj:
+        # ── 6. Neutral-Null ROM format — FAIL only for MT (21201), not a WARN elsewhere ─
+        if position == "21201" and "°" in obj:
             has_nn = bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", obj))
-            audit.append(AuditItem("ROM_FORMAT", "ROM Neutral-Null-Methode",
-                                   "PASS" if has_nn else "WARN",
-                                   "" if has_nn else "Grad (°) ohne Neutral-Null-Format — bitte [Ext]-[0]-[Flex] verwenden"))
+            if not has_nn:
+                audit.append(AuditItem("ROM_FORMAT", "ROM Neutral-Null-Methode",
+                                       "FAIL",
+                                       "Grad (°) dokumentiert aber kein [Ext]-[0]-[Flex] Format — "
+                                       "Pflicht fuer MT-Abrechnung (21201)"))
+                risk = "WARN"
 
-        # ── 7. VAS pain score ──────────────────────────────────────────────────
-        has_vas = bool(re.search(r"vas\s*\d|schmerz.*\d+/10|\d+/10", (subj + obj).lower()))
-        audit.append(AuditItem("VAS", "Schmerzquantifizierung (VAS/NRS)",
-                               "PASS" if has_vas else "WARN",
-                               "" if has_vas else "VAS-Score nicht dokumentiert — empfohlen für §106b"))
-
-        # ── 8. Required documentation per Diagnosegruppe ──────────────────────
+        # ── 7. Required documentation per Diagnosegruppe ──────────────────────
         for doc in entry["docs"]:
             present = _check_doc(doc, soap)
             audit.append(AuditItem(
@@ -738,25 +760,23 @@ class _GKVEngine:
                 "'Besonderer Verordnungsbedarf' (extrabudgetär) ausgestellt sein — bis 31.12.2025."
             ))
 
-        # ── 10e. Prescription start-window reminder (§125 SGB V) ──────────────
-        audit.append(AuditItem(
-            "RX_START_WINDOW", "Rezeptfrist-Prüfung (28 Tage)",
-            "WARN",
-            "Behandlungsbeginn innerhalb 28 Tagen ab Rezeptdatum erforderlich "
-            "(14 Tage bei 'dringend'). Häufigste Absetzungsursache — Datum prüfen!"
-        ))
-
-        # ── 11. Red flag check — BLOCKS billing ────────────────────────────────
+        # ── 10e. Red flag check — BLOCKS billing ──────────────────────────────
         red = self._red_flag_audit(soap)
         audit.extend(red)
         if any(a.status == "BLOCK" for a in red):
             risk = "BLOCK"
 
-        # ── 11. Red-Flag exclusion in Assessment ───────────────────────────────
-        has_rf_exclusion = "red flag" in assess.lower() or "ausgeschlossen" in assess.lower()
-        audit.append(AuditItem("RF_EXCLUSION", "Red-Flag-Ausschluss im Assessment",
-                               "PASS" if has_rf_exclusion else "WARN",
-                               "" if has_rf_exclusion else "Fehlender Red-Flag-Ausschluss im A-Feld"))
+        # ── 10f. Red-Flag exclusion — only FAIL when genuinely missing ─────────
+        # inject_audit_stamps() always adds the phrase, so this fires only when
+        # the A-field is empty or the scribe pipeline didn't run.
+        has_rf_exclusion = bool(re.search(r"red.flag|ausgeschlossen|kein(?:e)?\s+red", assess, re.I))
+        if not has_rf_exclusion:
+            audit.append(AuditItem("RF_EXCLUSION", "Red-Flag-Ausschluss im Assessment",
+                                   "FAIL",
+                                   "Red-Flag-Ausschluss fehlt im A-Feld — §106b Pflicht"))
+            risk = "WARN"
+        # RX_START_WINDOW is a process reminder, not a per-session doc item — omitted from
+        # the audit list to avoid constant noise; reflected in compliance_warnings text only.
 
         # ── Determine overall audit status ─────────────────────────────────────
         if any(a.status == "BLOCK" for a in audit):
@@ -781,7 +801,10 @@ class _GKVEngine:
             risk_level=risk,
             audit_items=audit,
             audit_status=audit_status,
-            compliance_warnings=[str(a) for a in audit if a.status != "PASS"],
+            compliance_warnings=(
+                [str(a) for a in audit if a.status not in ("PASS",)] +
+                ["Rezeptfrist: Behandlungsbeginn innerhalb 28 Tagen ab Rezeptdatum (14 Tage bei 'dringend')"]
+            ),
             required_documentation=entry["docs"],
             max_units_regelfall=entry["regelfall"],
             requires_langfrist_approval=entry.get("langfristig", False),
@@ -800,8 +823,16 @@ class _GKVEngine:
         if any(k in text for k in ["bobath", "pnf", "zns", "schlaganfall", "hemiplegie",
                                     "hemiparese", "parkinson", "multiple sklerose", "insult"]):
             return "ZNS1"
-        if any(k in text for k in ["lymph", "ödem", "mld", "kpe", "entstauung", "stemmer"]):
+        if any(k in text for k in ["lymphoedem", "lymphdrainage", "mld", "kpe", "entstauung", "stemmer"]):
             return "LY1"
+        if any(k in text for k in ["beckenboden", "inkontinenz", "harninkontinenz",
+                                    "stressinkontinenz", "dranginkontinenz", "kontinenz",
+                                    "beckenorgane", "prostatektomie", "postpartum"]):
+            return "PF1"
+        if any(k in text for k in ["kgg", "gerät", "trainingstherapie", "medizinische trainings",
+                                    "beinpresse", "latzug", "ergometer", "krafttraining am",
+                                    "mtt ", "gerätegestützt"]):
+            return "KGG"
         if any(k in text for k in ["skoliose", "schroth", "rippenbuckel"]):
             return "WS3"
         if any(k in text for k in ["hws", "nacken", "zervikal", "trapezius",
@@ -906,65 +937,49 @@ class _PKVEngine:
         audit: list[AuditItem] = []
         pkv_preise = pkv_preise or {}
 
-        audit.append(AuditItem("PKV_HINWEIS", "PKV-Abrechnungshinweis", "WARN",
-                               "Keine gesetzlichen Festpreise — Preis frei vereinbar (GebüTh als Orientierung)"))
-        audit.append(AuditItem("PKV_ERSTATTUNG", "Erstattungshinweis", "WARN",
-                               "Erstattung abhängig vom individuellen Versicherungsvertrag des Patienten"))
-
         dg = _match_dg(icd10) or "EX1b"
         entry = _HMK[dg]
         position = entry["position"]
 
         if entry.get("optional_mt") and self._mt_indicated(soap, transcript):
             position = "21201"
-            audit.append(AuditItem("MT_UPGRADE", "MT-Erstbefundung empfohlen", "PASS",
-                                   "21200 (30 Min) bei Neupatient separat abrechenbar"))
 
-        # Praxispreis hat Vorrang — GebüTh nur als Orientierungswert wenn kein Praxispreis gesetzt
+        # Praxispreis has priority; GebüTh is advisory fallback
         praxispreis = pkv_preise.get(position)
         price_range = _PKV_RANGES.get(position, (25.0, 65.0))
+        price_str = (f"€{praxispreis:.2f} (Praxispreis)"
+                     if praxispreis
+                     else f"€{price_range[0]:.0f}–{price_range[1]:.0f} (GebüTh-Orientierung)")
 
-        if praxispreis:
-            audit.append(AuditItem("PKV_PRAXISPREIS", "Praxiseigener PKV-Preis",
-                                   "PASS", f"€{praxispreis:.2f} (aus Praxiskonfiguration)"))
-        else:
-            audit.append(AuditItem("PKV_GEBUETH", "GebüTh-Orientierungswert",
-                                   "WARN",
-                                   f"€{price_range[0]:.0f}–{price_range[1]:.0f} — "
-                                   "Praxispreis in config_override.json unter 'pkv_preise' hinterlegen"))
+        # ── 1. Single combined PKV info item (replaces 3 always-WARN items) ───
+        audit.append(AuditItem(
+            "PKV_INFO", "PKV-Abrechnung",
+            "PASS" if praxispreis else "WARN",
+            f"{price_str} | Erstattung vertragsabhängig | "
+            + ("Praxispreis konfiguriert." if praxispreis
+               else "Praxispreis in config_override.json hinterlegen fuer exakten Betrag.")
+        ))
 
         likelihood = self._score_likelihood(icd10, soap)
         hints = self._hints(soap, transcript, position)
 
-        # Quality audit items (same as GKV, but advisory only)
         obj = soap.get("O", "")
         subj = soap.get("S", "")
 
-        audit.append(AuditItem("OBJ_QUALITY", "O-Feld Qualität",
-                               "PASS" if len(obj) > 80 else "WARN",
-                               f"{len(obj)} Zeichen — PKV prüft Befunddichte bei Retaxation"))
-        has_nn = bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", obj))
-        audit.append(AuditItem("ROM_FORMAT", "ROM Neutral-Null",
-                               "PASS" if has_nn else "WARN",
-                               "" if has_nn else "Neutral-Null erhöht PKV-Erstattungswahrscheinlichkeit"))
-        has_vas = bool(re.search(r"vas\s*\d|\d+/10", (subj + obj).lower()))
-        audit.append(AuditItem("VAS", "VAS-Score",
-                               "PASS" if has_vas else "WARN",
-                               "" if has_vas else "VAS-Score erhöht PKV-Akzeptanz"))
-
+        # ── 2. Missing mandatory documentation (WARN = PKV may reject) ────────
         for doc in entry["docs"]:
             present = _check_doc(doc, soap)
-            audit.append(AuditItem(f"DOC_{doc[:20]}", doc,
-                                   "PASS" if present else "WARN",
-                                   "" if present else "Empfohlen für PKV-Prüfung"))
+            if not present:
+                audit.append(AuditItem(
+                    f"DOC_{doc[:20]}", doc,
+                    "WARN", "Fehlt — PKV-Retaxation wahrscheinlicher ohne diesen Befund"
+                ))
 
+        # ── 3. Erstattungswahrscheinlichkeit — only surface if LOW ─────────────
         if likelihood == "GERING":
             audit.append(AuditItem("PKV_LIKELIHOOD", "Erstattungswahrscheinlichkeit",
                                    "WARN",
                                    "GERING — Kostenvoranschlag und Begründungsschreiben empfohlen"))
-        else:
-            audit.append(AuditItem("PKV_LIKELIHOOD", "Erstattungswahrscheinlichkeit",
-                                   "PASS", likelihood))
 
         audit_status = "REVIEW" if any(a.status == "WARN" for a in audit) else "PASS"
 

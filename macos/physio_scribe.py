@@ -555,7 +555,7 @@ class KuraEngine:
         },
         "KGG": {
             "label":    "Krankengymnastik am Geraet (MTT / KGG)",
-            "billing":  "20501",
+            "billing":  "20507",   # Gist KG_Gerät: 20507 @ €55.81 (not 20501 @ €29.63)
             "priority": 38,
             "triggers": [
                 "kgg", "krankengymnastik am geraet", "medizinische trainingstherapie",
@@ -570,6 +570,24 @@ class KuraEngine:
                 "Ausgangsleistung (Watt) oder 1-RM-Schaetzung bei Kraftgeraeten",
                 "Schmerzfreiheit bei Belastung: ja / nein (VAS vor + nach Training)",
                 "Steuerung: herzfrequenzbasiert (Ziel-HF) / RPE (Borg-Skala 0-10)",
+            ],
+        },
+        "GEB": {
+            "label":    "Geburtshilfe / Rückbildungsgymnastik",
+            "billing":  "21904",   # 21901 Vorbereitung / 21904 Rückbildung (Gist ICD10_O80)
+            "priority": 52,
+            "triggers": [
+                "schwanger", "geburt", "rueckbildung", "postnatal", "postpartal",
+                "dammriss", "perinealriss", "kaiserschnitt", "sectio", "stillen",
+                "wochenbett", "hebamme", "pränatal", "ssw", "schwangerschaftswoche",
+            ],
+            "icd_prefix": ["O34", "O70", "O71", "Z34", "Z39"],
+            "checklist": [
+                "SSW (pränatal) oder Wochen postpartum (postnatal)",
+                "Beckenbodenkraft: Oxford-Skala (0-5)",
+                "Dammriss-/OP-Narbe: Grad (I-IV) + Verschieblichkeit (falls vorhanden)",
+                "Abdominalwand: Rektusdiastase (cm Spalt auf Nabelhöhe, falls vorhanden)",
+                "Kontinenz: Harnverlust unter Belastung: ja / nein",
             ],
         },
         "BECKEN": {

@@ -369,12 +369,32 @@ _HMK: dict[str, dict] = {
 
     "KGG": {
         "desc": "Krankengymnastik am Gerät / Medizinische Trainingstherapie (MTT)",
-        "heilmittel": "KGG", "position": "20501",
+        "heilmittel": "KGG", "position": "20507",
+        # Gist-confirmed: KG_Gerät = 20507 (€55.81) — distinct from 20501 KG Einzelbehandlung (€29.63)
         "name": "Krankengymnastik am Gerät",
-        "duration": 20, "regelfall": 6, "langfristig": False,
-        # KGG is billed within §125 KG framework; ICDs are all major orthopaedic groups
+        "duration": 45, "regelfall": 6, "langfristig": False,
         "icd": [],   # No specific ICD — DG assigned via fallback from M54/M17/M75/M16/S-codes
         "docs": ["Trainingsplan (Gerät + Last + Wdh)", "Krafttest (MRC 0-5 oder Dynamometer)", "Therapieziel"],
+    },
+
+    # ══ GEBURTSHILFE / RÜCKBILDUNG ════════════════════════════════════════════
+    # Gist: ICD10_O80 → Geburtsvorbereitung (21901) / Rückbildungsgymnastik (21904)
+
+    "GEB1": {
+        "desc": "Geburtsvorbereitung – pränatale Atemtherapie, Beckenbodentraining",
+        "heilmittel": "KG", "position": "21901",
+        "name": "Geburtshilfliche Leistungen – Vorbereitung",
+        "duration": 45, "regelfall": 6, "langfristig": False,
+        "icd": ["O34.1", "O26", "O30", "Z34"],
+        "docs": ["Schwangerschaftswoche (SSW)", "Beckenbodenbefund", "Atemtechnik-Stand"],
+    },
+    "GEB2": {
+        "desc": "Rückbildungsgymnastik – postnatale Beckenbodenreha",
+        "heilmittel": "KG", "position": "21904",
+        "name": "Geburtshilfliche Leistungen – Rückbildung",
+        "duration": 45, "regelfall": 6, "langfristig": False,
+        "icd": ["O70", "O71", "N81.0", "N81.8", "Z39"],
+        "docs": ["Wochen postpartum", "Beckenbodenkraft (Oxford 0-5)", "Dammriss-/Narbengrad (falls vorhanden)"],
     },
 
     # ══ BECKENBODEN / KONTINENZ ═══════════════════════════════════════════════
@@ -417,6 +437,7 @@ _GKV_PRICES: dict[str, float] = {
     "20300": 34.34,   # Physiotherapeutische Diagnostik (Blankoverordnung, ab 01.11.2024)
     "20500": 30.83,   # KG Erstbefundung 30 min (ab 01.01.2026)
     "20501": 29.63,   # KG Einzelbehandlung 20 min (ab 01.01.2026)
+    "20507": 55.81,   # KG am Gerät (KGG/MTT) 45 min (ab 01.01.2026) — Gist: KG_Gerät
     "20502": 29.63,   # KG Hausbesuch 20 min
     "20503": 13.76,   # KG Gruppe 2–5 Pat. 25 min
     "20504": 10.29,   # KG Gruppe 6–8 Pat. 45 min
@@ -432,6 +453,8 @@ _GKV_PRICES: dict[str, float] = {
     "21100": 53.94,   # KPE Phase I — MLD-Anteil
     "21110": 58.42,   # KPE Phase I 60 min
     "21111": 46.26,   # KPE Phase II 30 min
+    "21901": 11.40,   # Geburtsvorbereitung (Gist-confirmed)
+    "21904": 11.40,   # Rückbildungsgymnastik (Gist-confirmed)
 }
 
 # ── PKV market price ranges (GebüTh reference 2026) ──────────────────────────
@@ -439,6 +462,7 @@ _GKV_PRICES: dict[str, float] = {
 
 _PKV_RANGES: dict[str, tuple] = {
     "20501": (30.0,  80.0),
+    "20507": (55.0, 130.0),   # KGG/MTT 45 min
     "20502": (30.0,  80.0),
     "20503": (15.0,  35.0),
     "20510": (40.0,  90.0),
@@ -452,6 +476,8 @@ _PKV_RANGES: dict[str, tuple] = {
     "21100": (55.0, 120.0),
     "21110": (65.0, 140.0),
     "21111": (52.0, 115.0),
+    "21901": (20.0,  55.0),   # Geburtsvorbereitung
+    "21904": (20.0,  55.0),   # Rückbildungsgymnastik
 }
 
 # ── BG surcharges (DGUV typical, varies by Träger) ────────────────────────────

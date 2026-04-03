@@ -446,15 +446,20 @@ class KuraApp:
 
         if br:
             billing_line = br.format_billing_line()
-            total_items = len([a for a in br.audit_items if a.status != "PASS"])
+            critical_items = [a for a in br.audit_items if a.status in ("FAIL", "BLOCK")]
             pass_items = len([a for a in br.audit_items if a.status == "PASS"])
             if br.audit_status == "PASS":
                 audit_summary = f"✅ AUDIT BESTANDEN — alle {pass_items} Prüfpunkte erfüllt"
             elif br.audit_status == "BLOCK":
                 audit_summary = "🔴 ABRECHNUNG GESPERRT — ärztliche Abklärung erforderlich"
             else:
-                audit_summary = f"⚠️ PRÜFUNG ERFORDERLICH — {total_items} Hinweise (vor Abrechnung prüfen)"
-            flagged = [str(i) for i in br.audit_items if i.status in ("WARN", "FAIL", "BLOCK")]
+                n = len(critical_items)
+                audit_summary = (
+                    f"⚠️ {n} PFLICHTFELD{'ER' if n != 1 else ''} FEHLT — vor Abrechnung ergänzen"
+                    if n else "⚠️ PRÜFUNG EMPFOHLEN"
+                )
+            # Show only FAIL/BLOCK items — WARN items are informational hints, not blockers
+            flagged = [str(i) for i in critical_items]
             audit_block = "\n".join(flagged) if flagged else ""
             if br.optimization_hints:
                 audit_block += ("\n\nHINWEISE:\n" + "\n".join(br.optimization_hints)) if audit_block \
@@ -777,14 +782,17 @@ class KuraApp:
 
                 pass_count = sum(1 for a in br_obj.audit_items if a.status == "PASS")
                 total_count = len(br_obj.audit_items)
-                open_count = total_count - pass_count
+                critical_count = sum(1 for a in br_obj.audit_items if a.status in ("FAIL", "BLOCK"))
 
                 if br_obj.audit_status == "PASS":
                     badge_detail = f"Alle {total_count} Pruefpunkte erfuellt"
                 elif br_obj.audit_status == "BLOCK":
                     badge_detail = "Aerztliche Abklaerung vor Therapiefortsetzung erforderlich"
                 else:
-                    badge_detail = f"{open_count} von {total_count} Hinweisen offen"
+                    badge_detail = (
+                        f"{critical_count} Pflichtfeld{'er' if critical_count != 1 else ''} fehlt"
+                        if critical_count else "Hinweise vorhanden — Abrechnung moeglich"
+                    )
 
                 pdf.set_fill_color(*badge_col)
                 pdf.set_text_color(*WHITE)
@@ -793,10 +801,8 @@ class KuraApp:
                          new_x="LMARGIN", new_y="NEXT", fill=True)
                 pdf.ln(2)
 
-                if br_obj.audit_status == "PASS":
-                    show_items = [a for a in br_obj.audit_items if a.status in ("FAIL", "BLOCK")]
-                else:
-                    show_items = [a for a in br_obj.audit_items if a.status in ("WARN", "FAIL", "BLOCK")]
+                # Nur FAIL/BLOCK anzeigen — WARN-Hinweise sind informativ, kein Abrechnungsblocker
+                show_items = [a for a in br_obj.audit_items if a.status in ("FAIL", "BLOCK")]
 
                 if show_items:
                     pdf.set_font("Helvetica", "B", 7.5)

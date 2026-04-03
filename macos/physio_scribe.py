@@ -704,6 +704,26 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             if "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
                 obj_text += " | FBA: n.d."
 
+        # 1c. Verbal LWS flexion descriptions → convert to FBA, remove hallucinated degree-ROM
+        # Therapists often say "bis Mitte der Schienbeine" instead of giving cm.
+        # The LLM then invents a Neutral-Null value (e.g. 0-0-90) that was never mentioned.
+        _verbal_fba = [
+            (r'mitte\s+(?:der\s+)?schienbein\w*|schienbeinhöhe|schienbeinniveau', '~35 cm', 'Mitte Schienbein'),
+            (r'kniehöhe\b|bis\s+(?:zum?\s+)?knie\b',                              '~50 cm', 'Kniehöhe'),
+            (r'waden(?:höhe)?\b|wadenmitte\b',                                     '~25 cm', 'Wadenhöhe'),
+            (r'knöchelh?öhe\b|bis\s+(?:zum?\s+)?knöchel\b',                       '~15 cm', 'Knöchelhöhe'),
+            (r'(?:fast\s+)?den?\s+boden\b|bodenkontakt\b',                        '~5 cm',  'fast Boden'),
+        ]
+        is_lws = any(k in transcript.lower() for k in ["lws", "lumbal", "isg", "iliosakral", "kreuzschmerz"])
+        if is_lws:
+            for pattern, fba_val, fba_label in _verbal_fba:
+                if re.search(pattern, transcript, re.I):
+                    if "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
+                        obj_text += f" | FBA: {fba_val} (Angabe Therapeut: {fba_label})"
+                    # Strip any hallucinated Neutral-Null ROM for LWS flexion from O
+                    obj_text = re.sub(r'(?:LWS[^|]*?)?\b0-0-\d{2,3}\b[^|]*', '', obj_text).strip(' |')
+                    break
+
         # 2. Recover VAS (Pain scale)
         vas = re.search(r"VAS\s*(\d+)", transcript, re.I)
         if vas and "VAS" not in soap_dict["S"]:
@@ -1215,6 +1235,22 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         ).strip().strip('.')
         if s_field:
             soap_dict["S"] = s_field
+
+        # Diagnostic tests belong in O (Objektiv), not in P (Plan) — strip from PLAN
+        _diag_test_re = re.compile(
+            r'\b(?:Patrick-Test|FABER-Test|Lasègue-Test|Bragard-Test|Slump-Test|'
+            r'Spurling-Test|Jobe-Test|Hawkins(?:-Kennedy)?-Test|Neer-(?:Test|Zeichen)|'
+            r'McMurray-Test|Apley-(?:Grinding-)?Test|Lachman-Test|Schubladentest|'
+            r'Thomas-Test|Ober-Test|Tinel-Zeichen|Phalen-Test|Finkelstein-Test|'
+            r'Speed-Test|Yergason-Test|Drop-Arm-Test|Pivot-Shift-Test|'
+            r'Vorlauf-Test|Vorlauftest|Trendelenburg-(?:Zeichen|Test)|'
+            r'Schober-Zeichen|FABER)[^\|.]*[,.]?',
+            re.I
+        )
+        p_field = soap_dict.get("P", "")
+        p_clean = _diag_test_re.sub('', p_field).strip(' |,.')
+        if p_clean != p_field:
+            soap_dict["P"] = re.sub(r'\s{2,}', ' ', p_clean).strip()
 
         return soap_dict
 

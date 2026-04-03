@@ -808,6 +808,10 @@ class _GKVEngine:
                                    "schädelbasis", "scaleni", "subokzipital",
                                    "spannungskopfschmerz", "kopfschmerz", "c5", "c6", "c7"]):
             return "WS1a"
+        if any(k in text for k in ["iliosakral", "isg", " lws", "lumbal", "lumbago",
+                                   "ischialgie", "ischiasschmerz", "kreuzschmerz",
+                                   "vorlauf-test", "vorlauftest", "blockierung im"]):
+            return "WS1b"
         if any(k in text for k in ["schulter", "impingement", "rotatorenmanschette"]):
             return "EX2"
         if any(k in text for k in ["knie", "gonarthrose", "meniskus"]):

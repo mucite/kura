@@ -376,16 +376,20 @@ class KuraApp(rumps.App):
 
             if br:
                 billing_line = br.format_billing_line()
-                total_items  = len([a for a in br.audit_items if a.status != "PASS"])
-                pass_items   = len([a for a in br.audit_items if a.status == "PASS"])
+                critical_items = [a for a in br.audit_items if a.status in ("FAIL", "BLOCK")]
+                pass_items     = len([a for a in br.audit_items if a.status == "PASS"])
                 if br.audit_status == "PASS":
                     audit_summary = f"✅ AUDIT BESTANDEN — alle {pass_items} Prüfpunkte erfüllt"
                 elif br.audit_status == "BLOCK":
                     audit_summary = f"🔴 ABRECHNUNG GESPERRT — ärztliche Abklärung erforderlich"
                 else:
-                    audit_summary = f"⚠️  PRÜFUNG ERFORDERLICH — {total_items} Hinweise (vor Abrechnung prüfen)"
-                flagged = [str(i) for i in br.audit_items if i.status in ("WARN", "FAIL", "BLOCK")]
-                audit_notes = "\n".join(flagged) if flagged else ""
+                    n = len(critical_items)
+                    audit_summary = (
+                        f"⚠️  {n} PFLICHTFELD{'ER' if n != 1 else ''} FEHLT — vor Abrechnung ergänzen"
+                        if n else "⚠️  PRÜFUNG EMPFOHLEN"
+                    )
+                # Show only FAIL/BLOCK items — WARN items are informational hints, not blockers
+                audit_notes = "\n".join(str(i) for i in critical_items) if critical_items else ""
             else:
                 billing_line = res.get('billing_suggestion', '–')
                 audit_summary = "⚠️  Abrechnungsprüfung nicht verfügbar"
@@ -1429,16 +1433,19 @@ class KuraApp(rumps.App):
                 badge_col = STATUS_COLORS.get(br_obj.audit_status, (90, 90, 90))
                 badge_txt = STATUS_LABELS.get(br_obj.audit_status, br_obj.audit_status)
 
-                pass_count   = sum(1 for a in br_obj.audit_items if a.status == "PASS")
-                total_count  = len(br_obj.audit_items)
-                open_count   = total_count - pass_count
+                pass_count    = sum(1 for a in br_obj.audit_items if a.status == "PASS")
+                total_count   = len(br_obj.audit_items)
+                critical_count = sum(1 for a in br_obj.audit_items if a.status in ("FAIL", "BLOCK"))
 
                 if br_obj.audit_status == "PASS":
                     badge_detail = f"Alle {total_count} Pruefpunkte erfuellt"
                 elif br_obj.audit_status == "BLOCK":
                     badge_detail = "Aerztliche Abklaerung vor Therapiefortsetzung erforderlich"
                 else:
-                    badge_detail = f"{open_count} von {total_count} Hinweisen offen"
+                    badge_detail = (
+                        f"{critical_count} Pflichtfeld{'er' if critical_count != 1 else ''} fehlt"
+                        if critical_count else "Hinweise vorhanden — Abrechnung moeglich"
+                    )
 
                 pdf.set_fill_color(*badge_col)
                 pdf.set_text_color(*WHITE)
@@ -1448,14 +1455,9 @@ class KuraApp(rumps.App):
                 pdf.ln(2)
 
                 # ── Einzelne Audit-Punkte ─────────────────────────────────
-                # Bei PASS: nur kritische Warnungen (FAIL/BLOCK) zeigen falls vorhanden
-                # Bei REVIEW/BLOCK: alle nicht-PASS Punkte zeigen
-                if br_obj.audit_status == "PASS":
-                    show_items = [a for a in br_obj.audit_items
-                                  if a.status in ("FAIL", "BLOCK")]
-                else:
-                    show_items = [a for a in br_obj.audit_items
-                                  if a.status in ("WARN", "FAIL", "BLOCK")]
+                # Nur FAIL/BLOCK anzeigen — WARN-Hinweise sind informativ, kein Abrechnungsblocker
+                show_items = [a for a in br_obj.audit_items
+                              if a.status in ("FAIL", "BLOCK")]
 
                 if show_items:
                     pdf.set_font("Helvetica", "B", 7.5)

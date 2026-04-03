@@ -1302,7 +1302,13 @@ class KuraApp(rumps.App):
             text = str(self.last_report)
 
             def _field(label):
-                m = _re.search(rf'{label}\n(.*?)(?=\n[A-Z]{{2,}}|\n-{{3,}}|\Z)', text, _re.S)
+                # Matches: ── LABEL ──────\n<content>
+                # Stops at: next ── SECTION ── header OR long separator line (footer)
+                m = _re.search(
+                    rf'[─\-]{{1,4}}\s+{label}[^\n]*\n(.*?)'
+                    rf'(?=\n[─\-]{{1,4}}\s+[A-Z]|\n[─\-]{{30,}}|\Z)',
+                    text, _re.S
+                )
                 return m.group(1).strip() if m else ""
 
             soap_s = _field("SUBJEKTIV")
@@ -1310,7 +1316,8 @@ class KuraApp(rumps.App):
             soap_a = _field("ASSESSMENT")
             soap_p = _field("PLAN")
 
-            footer_m = _re.search(r'-{3,}\n(.*)', text, _re.S)
+            # Footer: pure line of 30+ dashes (no letters) marks the billing/audit block
+            footer_m = _re.search(r'(?m)^[─\-]{30,}$\n(.*)', text, _re.S)
             footer_raw = footer_m.group(1).strip() if footer_m else ""
 
             # Split billing line from audit notes

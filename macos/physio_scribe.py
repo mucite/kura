@@ -94,6 +94,577 @@ class KuraEngine:
                 "Bitte App neu installieren."
             )
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         # mlx_whisper calls ffmpeg internally as a subprocess to decode audio.
         # In the .app bundle, ffmpeg is not on PATH — add it now so the call works.
         self._ensure_ffmpeg_on_path()
@@ -2137,38 +2708,82 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 parsed["compliance_check"].append(f"⚠️ ROM Halluzination? {l}-0-{r}!")
         return parsed
 
+
+    @staticmethod
+    def _repair_json(text: str) -> str:
+        """
+        Attempt to repair common LLM JSON output failures before parsing:
+        1. Remove trailing commas before } or ]
+        2. Replace literal newlines inside string values with spaces
+        3. If JSON is truncated (no closing }), close open structures
+        """
+        # Strip everything before the first { and after the last }
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1:
+            return text
+        if end == -1:
+            # Truncated — close any open structure
+            text = text[start:]
+            # Count unclosed braces/brackets
+            depth_brace = text.count("{") - text.count("}")
+            depth_bracket = text.count("[") - text.count("]")
+            # If we're mid-string (odd number of unescaped quotes), close it
+            in_str = False
+            escape = False
+            for ch in text:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_str = not in_str
+            if in_str:
+                text += '"'
+            text += "]" * max(0, depth_bracket) + "}" * max(0, depth_brace)
+        else:
+            text = text[start:end + 1]
+
+        # Remove trailing commas before closing braces/brackets
+        text = re.sub(r',\s*([\}\]])', r'\1', text)
+        # Replace unescaped literal newlines inside JSON strings with space
+        # (LLMs sometimes put real \n inside "..." values)
+        text = re.sub(r'(?<!\\)\n', ' ', text)
+        # Fix double-escaped quotes that become invalid
+        text = re.sub(r'\\{2,}"', '\\"', text)
+        return text
+
     def parse_robust_json(self, text):
         """
-        Robust JSON parser - ensures all SOAP fields are strings, not nested objects.
-        Falls back to regex field extraction when JSON is malformed, then to "n.d."
+        Robust JSON parser with repair + regex fallback.
+        Order: 1) repair + json.loads  2) regex field extraction  3) n.d. defaults
         """
         def _extract_fields_regex(raw: str) -> dict:
-            """Secondary: extract "S": "...", "O": "...", etc. via regex when JSON parse fails."""
             result = {}
             for field in ["S", "O", "A", "P"]:
-                m = re.search(
-                    rf'"{field}"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL)
+                m = re.search(rf'"{field}"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL)
                 if m:
                     result[field] = m.group(1).replace('\\"', '"').replace('\\n', ' ').strip()
             return result
 
         icd10 = "M99.9"
         soap_raw = {}
+
+        # Strategy 1: repair then parse
         try:
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if not match:
-                raise ValueError("No JSON object found in output")
-            data = json.loads(match.group())
+            repaired = self._repair_json(text)
+            data = json.loads(repaired)
             icd10 = data.get("icd10", "M99.9")
             soap_raw = data.get("soap", {})
-        except Exception as e:
-            print(f"⚠️ JSON parse failed, trying regex extraction: {e}")
-            # Try to salvage individual field values
+        except Exception as e1:
+            _log.warning("JSON parse failed after repair: %s — trying regex extraction", e1)
+            # Strategy 2: regex field extraction
             soap_raw = _extract_fields_regex(text)
-            # Try to grab ICD-10 from raw text
             icd_m = re.search(r'"icd10"\s*:\s*"([A-Z]\d{2}[\.\d]*)"', text)
             if icd_m:
                 icd10 = icd_m.group(1)
+            if not soap_raw:
+                _log.warning("Regex extraction also failed. Raw output (first 300): %s", text[:300])
 
         soap_clean = {}
         for field in ["S", "O", "A", "P"]:
@@ -2177,11 +2792,8 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
             elif not isinstance(value, str):
                 value = str(value) if value else ""
-            if not value or value.strip() in ("N/A", "n.d.", "Fehler", "{}"):
-                if field == "A":
-                    value = f"{icd10} | Red Flags klinisch ausgeschlossen."
-                else:
-                    value = "n.d."
+            if not value or value.strip() in ("N/A", "Fehler", "KI-Fehler", "{}"):
+                value = f"{icd10} | Red Flags klinisch ausgeschlossen." if field == "A" else "n.d."
             soap_clean[field] = value.strip()
 
         return {"icd10": icd10, "soap": soap_clean}

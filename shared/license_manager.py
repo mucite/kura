@@ -167,7 +167,8 @@ class LicenseManager:
         Docs: https://dev.digistore24.com/hc/en-us/articles/32479630493585-API-basics
         """
         url = f"{_DS24_BASE}/{action}"
-        headers = {"X-DS-API-KEY": _DS24_API_KEY}
+        api_key = os.environ.get("DS24_API_KEY", "") or _DS24_API_KEY
+        headers = {"X-DS-API-KEY": api_key}
         return requests.get(url, params=params or {}, headers=headers, timeout=timeout)
 
     # ── Activate ──────────────────────────────────────────────────────────────
@@ -175,6 +176,10 @@ class LicenseManager:
     def activate(self, license_key: str) -> tuple[bool, str]:
         """Verify a Digistore24 serial/license key and store it locally."""
         key = license_key.strip().upper()
+        # Normalize any dash variant (en-dash, em-dash, etc.) to ASCII hyphen
+        key = re.sub(r'[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]', '-', key)
+        # Remove whitespace that may have been inserted during copy/paste
+        key = re.sub(r'\s+', '', key)
 
         if not _KEY_RE.match(key):
             return False, (

@@ -175,21 +175,21 @@ class KuraApp(rumps.App):
         # --- Menu items (stored as attrs for dynamic updates) ---
         is_pro = (status is True)
 
-        self.status_item  = rumps.MenuItem("⏳ Modelle laden...", callback=None)
-        self._item_start  = rumps.MenuItem("Neue Sitzung", callback=None)
-        self._item_stop   = rumps.MenuItem("Stoppen & Auswerten", callback=None)
-        self._item_arch   = rumps.MenuItem("Archiv", callback=self.open_archive)
+        self.status_item  = rumps.MenuItem("⏳  Modelle werden geladen …", callback=None)
+        self._item_start  = rumps.MenuItem("▶  Neue Sitzung", callback=None)
+        self._item_stop   = rumps.MenuItem("⏹  Stoppen & Auswerten", callback=None)
+        self._item_arch   = rumps.MenuItem("📁  Archiv", callback=self.open_archive)
         self._item_config = rumps.MenuItem(
-            "Praxis-Einstellungen",
+            "⚙️  Praxis-Einstellungen",
             callback=self.open_practice_config if is_pro else self._config_locked,
         )
         self._item_gist_override = rumps.MenuItem(
-            "Konfiguration anpassen",
+            "✏️  Konfiguration anpassen",
             callback=self.open_gist_override if is_pro else self._config_locked,
         )
         self._item_lic    = rumps.MenuItem("", callback=self.activate_license)
-        self._item_deact  = rumps.MenuItem("Lizenz deaktivieren", callback=self.deactivate_license)
-        self._item_update = rumps.MenuItem("Aktualisierungen prüfen", callback=self.check_for_update)
+        self._item_deact  = rumps.MenuItem("🔓  Lizenz deaktivieren", callback=self.deactivate_license)
+        self._item_update = rumps.MenuItem("🔄  Nach Updates suchen", callback=self.check_for_update)
 
         self.menu = [
             self.status_item,
@@ -206,7 +206,7 @@ class KuraApp(rumps.App):
             self._item_deact,
             None,
             self._item_update,
-            rumps.MenuItem("Beenden", callback=self._quit),
+            rumps.MenuItem("⏻  Beenden", callback=self._quit),
         ]
         self._refresh_menu_state(status)
 
@@ -261,17 +261,17 @@ class KuraApp(rumps.App):
 
         # License item
         if is_pro:
-            self._item_lic.title = "Abo: Aktiv"
+            self._item_lic.title = "✅  Kura Pro — Lizenz aktiv"
             self._item_lic.set_callback(None)          # not clickable when active
             self._item_deact.set_callback(self.deactivate_license)
         elif license_status == "TRIAL":
             count = self.license_mgr.get_trial_count()
             rem   = self.license_mgr.max_trials - count
-            self._item_lic.title = f"Kura Pro aktivieren  ({rem} Testberichte verbleibend)"
+            self._item_lic.title = f"🔑  Kura Pro aktivieren  ({rem} von {self.license_mgr.max_trials} Testberichten verbleibend)"
             self._item_lic.set_callback(self.activate_license)
             self._item_deact.set_callback(None)
         else:
-            self._item_lic.title = "Kura Pro aktivieren"
+            self._item_lic.title = "🔑  Kura Pro aktivieren"
             self._item_lic.set_callback(self.activate_license)
             self._item_deact.set_callback(None)
 
@@ -391,23 +391,28 @@ class KuraApp(rumps.App):
 
             profile_line = f"Profil: {profile_label}\n" if profile_label else ""
             initial_text = (
-                f"KURA — {patient_display}  |  {date_str}\n"
+                f"╔══ KURA — {patient_display}  │  {date_str} ══╗\n"
                 f"{profile_line}"
-                f"{'─'*52}\n\n"
-                f"SUBJEKTIV\n{soap.get('S', '')}\n\n"
-                f"OBJEKTIV\n{soap.get('O', '')}\n\n"
-                f"ASSESSMENT\n{soap.get('A', '')}\n\n"
-                f"PLAN\n{soap.get('P', '')}\n\n"
-                f"{'─'*52}\n"
+                f"\n"
+                f"── SUBJEKTIV ──────────────────────────────────────────\n"
+                f"{soap.get('S', '')}\n\n"
+                f"── OBJEKTIV ───────────────────────────────────────────\n"
+                f"{soap.get('O', '')}\n\n"
+                f"── ASSESSMENT ─────────────────────────────────────────\n"
+                f"{soap.get('A', '')}\n\n"
+                f"── PLAN ───────────────────────────────────────────────\n"
+                f"{soap.get('P', '')}\n\n"
+                f"───────────────────────────────────────────────────────\n"
                 f"{footer}"
             )
 
             window = rumps.Window(
-                message="Prüfen und in Abrechnung übernehmen:",
-                title="KURA v2026.3.2",
+                message="Bericht prüfen — bei Bedarf bearbeiten, dann speichern:",
+                title="Kura — Bericht",
                 default_text=initial_text,
-                ok="KOPIEREN & PDF",
-                cancel="Abbrechen"
+                ok="✓  Speichern & PDF",
+                cancel="Verwerfen",
+                dimensions=(680, 460),
             )
             response = window.run()
             self._review_in_progress = False
@@ -794,12 +799,12 @@ class KuraApp(rumps.App):
 
         # Step 1 — Praxis name
         w1 = rumps.Window(
-            message="Praxisname (z.B. Physiotherapie Mustermann):",
-            title="Praxis-Einstellungen 1/3",
+            message="Praxisname  (z. B. Physiotherapie Mustermann):",
+            title="Praxis-Einstellungen  1 / 3",
             default_text=self._pc_get("practice", "name", cfg_path) or "",
-            ok="Weiter",
+            ok="Weiter →",
             cancel="Abbrechen",
-            dimensions=(320, 24),
+            dimensions=(400, 24),
         )
         r1 = w1.run()
         if not r1.clicked:
@@ -808,12 +813,12 @@ class KuraApp(rumps.App):
 
         # Step 2 — Betriebsstaettennummer
         w2 = rumps.Window(
-            message="Betriebsstaettennummer (BSNR, 9-stellig):",
-            title="Praxis-Einstellungen 2/3",
+            message="Betriebsstättennummer  (BSNR, 9-stellig):",
+            title="Praxis-Einstellungen  2 / 3",
             default_text=self._pc_get("practice", "license_number", cfg_path) or "",
-            ok="Weiter",
+            ok="Weiter →",
             cancel="Abbrechen",
-            dimensions=(320, 24),
+            dimensions=(400, 24),
         )
         r2 = w2.run()
         if not r2.clicked:
@@ -822,12 +827,12 @@ class KuraApp(rumps.App):
 
         # Step 3 — Location
         w3 = rumps.Window(
-            message="Standort (Stadt / Adresse):",
-            title="Praxis-Einstellungen 3/3",
+            message="Standort  (Stadt oder Adresse):",
+            title="Praxis-Einstellungen  3 / 3",
             default_text=self._pc_get("practice", "location", cfg_path) or "",
-            ok="Speichern",
+            ok="✓  Speichern",
             cancel="Abbrechen",
-            dimensions=(320, 24),
+            dimensions=(400, 24),
         )
         r3 = w3.run()
         if not r3.clicked:
@@ -910,9 +915,12 @@ class KuraApp(rumps.App):
 
         # Simple patient name input
         window = rumps.Window(
-            "Patientenname:",
-            "Kura",
-            "Weber"
+            message="Vorname Nachname (z. B. Max Mustermann):",
+            title="Neue Sitzung",
+            default_text="",
+            ok="Weiter",
+            cancel="Abbrechen",
+            dimensions=(320, 24),
         )
         response = window.run()
 
@@ -924,11 +932,11 @@ class KuraApp(rumps.App):
             # Insurance type dialog — three buttons, GKV is default (OK)
             from shared.billing_engine import InsuranceType
             ins_choice = rumps.alert(
-                title="Kura — Versicherungstyp",
+                title="Versicherungstyp",
                 message="Welche Versicherung hat der Patient?\n\n"
-                        "  GKV  — Gesetzlich (§125 SGB V, Festpreise)\n"
-                        "  PKV  — Privat (GebüTh, freie Preise)\n"
-                        "  BG   — Berufsgenossenschaft (DGUV)",
+                        "  GKV — Gesetzlich  (§ 125 SGB V, Festpreise)\n"
+                        "  PKV — Privat  (GebüTh, freie Preise)\n"
+                        "  BG  — Berufsgenossenschaft  (DGUV)",
                 ok="GKV",
                 cancel="PKV",
                 other="BG",
@@ -1143,15 +1151,15 @@ class KuraApp(rumps.App):
     def activate_license(self, _):
         win = rumps.Window(
             message=(
-                "Geben Sie Ihren Kura Pro Lizenzschluessel ein:\n\n"
-                "Format: RMEL3-3UDDC-YHJHF-C7TH9-QRYJK-FHZSV-KU26F-NS3CC\n"
-                "(8 Gruppen mit je 5 Zeichen, aus Kaufbestaetigung kopieren)"
+                "Lizenzschlüssel eingeben:\n\n"
+                "Format:  XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX\n"
+                "Den Schlüssel direkt aus der Kaufbestätigung kopieren."
             ),
-            title="Kura Pro aktivieren",
+            title="Kura Pro — Aktivierung",
             default_text="",
-            ok="Aktivieren",
+            ok="✓  Aktivieren",
             cancel="Abbrechen",
-            dimensions=(480, 24),
+            dimensions=(500, 24),
         )
         win.add_button("Jetzt kaufen")
         res = win.run()
@@ -1431,4 +1439,18 @@ class KuraApp(rumps.App):
 
 
 if __name__ == "__main__":
+    # Kill any existing Kura instance before starting
+    current_pid = os.getpid()
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "main.py"],
+            capture_output=True, text=True
+        )
+        for pid_str in result.stdout.strip().splitlines():
+            pid = int(pid_str)
+            if pid != current_pid:
+                os.kill(pid, 15)  # SIGTERM
+    except Exception:
+        pass
+
     KuraApp().run()

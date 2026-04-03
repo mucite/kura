@@ -209,10 +209,9 @@ class KuraApp(rumps.App):
         ]
         self._refresh_menu_state(status)
 
-        # Boot-time license enforcement — show blocking alert after the run loop starts
-        if status is False:
-            threading.Timer(1.2, lambda: self._on_main(self._boot_license_alert)).start()
-        elif status == "TRIAL":
+        # Boot-time notification — low trial count warning only (non-blocking)
+        # Hard block happens at recording start, not at launch, to avoid false positives
+        if status == "TRIAL":
             rem = self.license_mgr.max_trials - self.license_mgr.get_trial_count()
             if rem <= 2:
                 threading.Timer(1.2, lambda r=rem: self._on_main(

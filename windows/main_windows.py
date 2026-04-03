@@ -187,11 +187,10 @@ class KuraApp:
         elif event_type == "boot_done":
             self.output_text.delete("1.0", "end")
             self.output_text.insert("1.0", f"✅ KI-Modelle geladen. Kura v{APP_VERSION} ist einsatzbereit.\n")
-            # Boot-time license enforcement — runs on main thread after engine load
+            # Boot-time notification — low trial count warning only (non-blocking)
+            # Hard block happens at recording start, not at launch, to avoid false positives
             _boot_status = self.license_mgr.verify_locally()
-            if _boot_status is False:
-                self.root.after(300, self._show_upgrade_dialog)
-            elif _boot_status == "TRIAL":
+            if _boot_status == "TRIAL":
                 _rem = self.license_mgr.max_trials - self.license_mgr.get_trial_count()
                 if _rem <= 2:
                     messagebox.showinfo(

@@ -461,7 +461,9 @@ class KuraEngine:
             "priority": 42,
             "triggers": [
                 "lws", "lendenwirbel", "lumbalgie", "lumboischialgie", "ischiasschmerz",
-                "bandscheibenvorfall", "lumbago", "rücken", "wirbelsaeule",
+                "bandscheibenvorfall", "lumbago", "rückenschmerz", "rückenbeschwerd",
+                "wirbelsaeule", "wirbelsäule",
+                # "rücken" removed — matches "Rückenlage" (patient position), causing false LWS detection
             ],
             "icd_prefix": ["M54.4", "M54.5", "M51"],
             "checklist": [
@@ -478,10 +480,12 @@ class KuraEngine:
         "EX_HUefte": {
             "label":    "Extremitaeten Huefte (EX4)",
             "billing":  "21201",
-            "priority": 41,
+            "priority": 43,   # raised above EX_LWS (42) — hip keywords are more specific
             "triggers": [
-                "huefte", "coxarthrose", "hüftprothese", "htep", "trochanter",
-                "piriformis", "femur", "coxa", "hüftgelenk",
+                "hüfte", "huefte", "coxarthrose", "hüftprothese", "hüftgelenk",
+                "htep", "hüft-tep", "totalendoprothese", "hüfttep",
+                "trochanter", "piriformis", "femur", "coxa",
+                "hüftabduktor", "gluteus medius", "trendelenburg",
             ],
             "icd_prefix": ["M16", "Z96.6", "M70.6"],
             "checklist": [
@@ -1059,8 +1063,9 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         # ── KGG/MTT: recover training parameters ─────────────────────────────
         is_kgg = any(k in t_low for k in [
-            "kgg", "gerätegestützt", "gerät", "mtt", "medizinische trainings",
-            "beinpresse", "latzug", "ergometer", "krafttraining",
+            "kgg", "gerätegestützt", "mtt", "medizinische trainings",
+            "beinpresse", "latzug", "ergometer", "kabelzug", "legpress",
+            "latpulldown", "kraftmaschine", "trainingsgerät",
         ])
         if is_kgg:
             geraet = re.search(
@@ -1148,6 +1153,61 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         # Ödemkonsistenz: recover "teigig" / pitting descriptor
         if "delle" in t_low and "konsistenz" not in obj_text.lower() and "teigig" not in obj_text.lower():
             obj_text += " | Ödem-Konsistenz: teigig, Delle bleibend."
+
+        # ── Hüfte (EX4): recover ROM, Trendelenburg, Muskelkraft ─────────────────
+        is_huefte = any(k in t_low for k in [
+            "hüfte", "hüftgelenk", "hüftabduktor", "coxarthrose", "hüftprothese",
+            "trochanter", "gluteus", "trendelenburg", "hüft-tep", "htep",
+        ])
+        if is_huefte:
+            flex = re.search(
+                r"(?:flexion|beugung)[^\d]*(\d+)\s*(?:grad|°)|(\d+)\s*(?:grad|°)\s*(?:flexion|beugung)",
+                transcript, re.I)
+            if flex and "flexion" not in obj_text.lower():
+                val = flex.group(1) or flex.group(2)
+                obj_text += f" | ROM Hüfte Flexion: {val}°"
+            aro = re.search(
+                r"(?:außenrotation|aro|external\s+rotation)[^\d]*(\d+)\s*(?:grad|°)?",
+                transcript, re.I)
+            if aro and "rotation" not in obj_text.lower():
+                obj_text += f" | ARO: {aro.group(1)}°"
+            if "trendelenburg" in t_low and "trendelenburg" not in obj_text.lower():
+                pos = re.search(r"trendelenburg[^\.\n]*?(positiv|negativ)", t_low)
+                if pos:
+                    obj_text += f" | Trendelenburg-Zeichen: {pos.group(1)}"
+                elif any(k in t_low for k in ["absinkt", "becken sinkt", "becken fällt"]):
+                    obj_text += " | Trendelenburg-Zeichen: positiv (Becken sinkt zur Gegenseite)"
+            mmt = re.search(r"(?:kraft|mrc|mmt)[^\d]*([0-5])(?:\s*/\s*5)?", transcript, re.I)
+            if mmt and "mrc" not in obj_text.lower() and "mmt" not in obj_text.lower():
+                obj_text += f" | Kraft Abduktoren (MRC): {mmt.group(1)}/5"
+            if any(k in t_low for k in ["hinken", "hinkend", "trendelenburg-gang", "trendelenburg-zeichen"]):
+                if "gangbild" not in obj_text.lower():
+                    obj_text += " | Gangbild: Trendelenburg-Hinken (Gluteus-medius-Insuffizienz)"
+
+        # ── Krücke Seitenkontrolle ─────────────────────────────────────────────
+        plan_text = soap_dict.get("P", "")
+        kruecke_m = re.search(
+            r"krücke[n]?\s+(?:auf\s+der\s+|an\s+der\s+)?(?:rechten?|linken?)\s+seite|"
+            r"(?:rechten?|linken?)\s+krücke",
+            transcript, re.I)
+        if kruecke_m:
+            kruecke_raw = kruecke_m.group(0).lower()
+            kruecke_links = "links" in kruecke_raw
+            affected_re = re.search(
+                r"(?:schmerzen?|operation|operiert|tep|prothese|beschwerde)\w*\s+(?:im?|am?|der?|des?|auf\s+der)?\s*"
+                r"(rechten?|linken?)\s*(?:bein|hüfte|seite|knie|schulter)?",
+                transcript, re.I)
+            if affected_re:
+                affected_links = "link" in affected_re.group(1).lower()
+                ipsilateral = (kruecke_links == affected_links)
+                if ipsilateral:
+                    side_label = "links" if affected_links else "rechts"
+                    contra_label = "rechts" if affected_links else "links"
+                    warning = (
+                        f" ⚠️ KRÜCKEN-SEITE PRÜFEN: Krücke auf der betroffenen Seite ({side_label}) dokumentiert — "
+                        f"korrekt ist KONTRALATERAL ({contra_label}), um die betroffene Hüfte zu entlasten."
+                    )
+                    soap_dict["P"] = plan_text + warning
 
         soap_dict["O"] = obj_text
 

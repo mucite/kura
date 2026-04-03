@@ -502,6 +502,9 @@ class KuraApp:
         review_win.wait_window()
 
         if result["edited"]:
+            # Update the main output text with the edited report
+            self.output_text.delete("1.0", "end")
+            self.output_text.insert("1.0", result["edited"])
             self._finalize(result["edited"], res)
         else:
             self.status_label.configure(text="🩺 Bereit")
@@ -581,9 +584,28 @@ class KuraApp:
             self.status_label.configure(text="✅ Bericht gespeichert")
 
     # ── PDF export ─────────────────────────────────────────────────────────────
-    # (Same as PySimpleGUI version - keeping the PDF generation code identical)
     def _save_pdf_to_disk(self):
-        if not self.last_report:
+        """
+        Generate PDF from the current report.
+
+        This is a READ-ONLY operation that generates PDF from:
+        1. Current content in output_text (if it contains a valid report), OR
+        2. The last saved report (self.last_report) as fallback
+
+        This design ensures:
+        - PDF export doesn't modify application state (no side effects)
+        - Therapists can preview edits in PDF before saving
+        - Multiple PDF exports of same content are safe and idempotent
+        """
+        # Check if output_text has current editable content
+        output_content = self.output_text.get("1.0", "end-1c").strip()
+
+        # Use output_text if it contains a valid report, otherwise fall back to last_report
+        if output_content and ("SUBJEKTIV" in output_content or "KURA" in output_content):
+            report_text = output_content
+        elif self.last_report:
+            report_text = self.last_report
+        else:
             messagebox.showerror("Kura", "Kein Bericht zum Speichern vorhanden.")
             return
 
@@ -623,7 +645,7 @@ class KuraApp:
                 return text.encode('latin-1', 'replace').decode('latin-1')
 
             # Parse SOAP sections
-            text = str(self.last_report)
+            text = str(report_text)
 
             def _field(label):
                 m = re.search(rf'{label}\n(.*?)(?=\n[A-Z]{{2,}}|\n-{{3,}}|\n─{{3,}}|\Z)', text, re.S)

@@ -1123,6 +1123,70 @@ class KuraApp(rumps.App):
         except Exception:
             return True
 
+    # --- Session Delta Tracking ---
+    def _inject_session_delta(self, res: dict) -> dict:
+        """
+        Load the most recent archived session for this patient and inject a VAS
+        delta comparison into S so auditors see measurable progress per session.
+
+        Example injection: "VAS 5/10" → "VAS 5/10 (Vorsitzung: 8/10, Δ: ↓3)"
+        """
+        import re as _re
+        import glob as _glob
+
+        patient_dir = os.path.join(self.report_dir, self.patient_name)
+        if not os.path.isdir(patient_dir):
+            return res
+
+        archives = sorted(_glob.glob(os.path.join(patient_dir, "*.json")), reverse=True)
+        if not archives:
+            return res
+
+        prev_soap = None
+        for arch in archives[:5]:
+            try:
+                with open(arch, "r", encoding="utf-8") as _f:
+                    prev = json.load(_f)
+                candidate = prev.get("soap", {})
+                if candidate.get("S"):
+                    prev_soap = candidate
+                    break
+            except Exception:
+                continue
+
+        if not prev_soap:
+            return res
+
+        prev_s = prev_soap.get("S", "")
+        prev_match = _re.search(r"VAS\s*(\d+(?:[.,]\d+)?)/10", prev_s)
+        if not prev_match:
+            return res
+        prev_val = float(prev_match.group(1).replace(",", "."))
+
+        curr_soap = res.get("soap", {})
+        curr_s = curr_soap.get("S", "")
+        curr_match = _re.search(r"VAS\s*(\d+(?:[.,]\d+)?)/10", curr_s)
+        if not curr_match:
+            return res
+        curr_val = float(curr_match.group(1).replace(",", "."))
+
+        if curr_val == prev_val:
+            return res
+
+        delta = curr_val - prev_val
+        arrow = "↓" if delta < 0 else "↑"
+        abs_d = abs(delta)
+        delta_str = f"{arrow}{abs_d:.0f}" if abs_d == int(abs_d) else f"{arrow}{abs_d:.1f}"
+        delta_note = f"(Vorsitzung: {prev_val:.0f}/10, Δ: {delta_str})"
+
+        new_s = _re.sub(
+            r"(VAS\s*\d+(?:[.,]\d+)?/10)",
+            rf"\1 {delta_note}",
+            curr_s, count=1
+        )
+        res["soap"]["S"] = new_s
+        return res
+
     # --- AI Engine Workflow ---
     def run_ai(self):
         try:
@@ -1147,6 +1211,12 @@ class KuraApp(rumps.App):
                     print(f"✅ Audio file deleted: {self.temp_audio} (DSGVO compliance)")
             except Exception as e:
                 print(f"⚠️ Could not delete audio file: {e}")
+
+            # Inject session delta (VAS comparison to most recent archived session)
+            try:
+                res = self._inject_session_delta(res)
+            except Exception:
+                pass
 
             # Send to the main thread listener
             self.pending_ai_result = res
@@ -1372,6 +1442,30 @@ class KuraApp(rumps.App):
                      new_x="RIGHT", new_y="TOP", fill=True)
             pdf.cell(COL, 7, s(f"Datum: {date_str}   {time_str} Uhr  "),
                      new_x="LMARGIN", new_y="NEXT", align="R", fill=True)
+
+            # ── 2b. Practice info (from ~/.kura_practice.json) ────────────
+            try:
+                _cfg_path = os.path.expanduser("~/.kura_practice.json")
+                if os.path.exists(_cfg_path):
+                    with open(_cfg_path, "r", encoding="utf-8") as _fp:
+                        _pc = json.load(_fp)
+                    _pname = _pc.get("practice", {}).get("name", "")
+                    _bsnr  = _pc.get("practice", {}).get("license_number", "")
+                    _loc   = _pc.get("practice", {}).get("location", "")
+                    if _pname or _bsnr:
+                        _pline = s(_pname)
+                        if _bsnr:
+                            _pline += s(f"  |  BSNR: {_bsnr}")
+                        if _loc:
+                            _pline += s(f"  |  {_loc}")
+                        pdf.set_fill_color(*SHADE)
+                        pdf.set_text_color(*LIGHT)
+                        pdf.set_font("Helvetica", "", 7)
+                        pdf.cell(W, 5, f"  {_pline}",
+                                 new_x="LMARGIN", new_y="NEXT", fill=True)
+            except Exception:
+                pass
+
             pdf.ln(6)
 
             # ── 3. SOAP sections ──────────────────────────────────────────
@@ -1440,12 +1534,10 @@ class KuraApp(rumps.App):
                 badge_col = STATUS_COLORS.get(br_obj.audit_status, (90, 90, 90))
                 badge_txt = STATUS_LABELS.get(br_obj.audit_status, br_obj.audit_status)
 
-                pass_count    = sum(1 for a in br_obj.audit_items if a.status == "PASS")
-                total_count   = len(br_obj.audit_items)
                 critical_count = sum(1 for a in br_obj.audit_items if a.status in ("FAIL", "BLOCK"))
 
                 if br_obj.audit_status == "PASS":
-                    badge_detail = f"Alle {total_count} Pruefpunkte erfuellt"
+                    badge_detail = "Alle Pflichtfelder erfuellt"
                 elif br_obj.audit_status == "BLOCK":
                     badge_detail = "Aerztliche Abklaerung vor Therapiefortsetzung erforderlich"
                 else:

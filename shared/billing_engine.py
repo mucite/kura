@@ -739,6 +739,7 @@ class _GKVEngine:
         soap: dict,
         transcript: str,
         config_rules: dict,
+        profile_id: Optional[str] = None,
     ) -> BillingResult:
         audit: list[AuditItem] = []
         risk = "OK"
@@ -754,9 +755,18 @@ class _GKVEngine:
             ))
             risk = "WARN"
             dg = self._fallback_dg(soap, transcript)
-        else:
-            audit.append(AuditItem("DG_LOOKUP", "Diagnosegruppe §125", "PASS",
-                                   f"{dg}: {_HMK[dg]['desc']}"))
+        # PASS suppressed — DG_LOOKUP only emits on failure
+
+        # ── 1b. Profile override for modality-specific sessions ───────────────
+        # Modality profiles (KGG, ELEKTRO, THERMO, etc.) are identified by transcript
+        # content, not ICD codes. Without this override M54.5 would route to WS1b/MT
+        # even when the actual session is KG am Gerät (20507).
+        if profile_id and profile_id in _PROFILE_TO_DG:
+            dg = _PROFILE_TO_DG[profile_id]
+            # Remove DG_LOOKUP warning that may have been emitted above — the profile
+            # override resolves the ICD ambiguity; no manual check needed.
+            audit = [a for a in audit if a.code != "DG_LOOKUP"]
+            risk = "OK"
 
         entry = _HMK[dg]
         position = entry["position"]
@@ -765,8 +775,7 @@ class _GKVEngine:
         config_pos = self._config_position(icd10, config_rules)
         if config_pos and config_pos != position:
             position = config_pos
-            audit.append(AuditItem("CONFIG_OVERRIDE", "Praxis-Konfiguration",
-                                   "PASS", f"Position {position} aus Gist-Konfig übernommen"))
+            # CONFIG_OVERRIDE PASS suppressed — informational noise
 
         # ── 3. MT indication detected — WARN, never auto-upgrade ─────────────
         # §125 SGB V: only the doctor's prescription authorises MT (21201).
@@ -787,15 +796,16 @@ class _GKVEngine:
         plan = soap.get("P", "")
         assess = soap.get("A", "")
 
-        audit.append(AuditItem("SOAP_S", "S-Feld (Subjektiv)",
-                               "PASS" if len(subj) > 15 else "FAIL",
-                               "" if len(subj) > 15 else "Subjektiver Befund zu kurz oder fehlt"))
-        audit.append(AuditItem("SOAP_A", "A-Feld (Assessment/Diagnose)",
-                               "PASS" if len(assess) > 10 else "FAIL",
-                               "" if len(assess) > 10 else "Diagnose fehlt"))
-        audit.append(AuditItem("SOAP_P", "P-Feld (Therapieplan)",
-                               "PASS" if len(plan) > 15 else "FAIL",
-                               "" if len(plan) > 15 else "Therapieplan fehlt oder zu unspezifisch"))
+        # SOAP field checks — emit only on FAIL, PASS is assumed and not listed
+        if len(subj) <= 15:
+            audit.append(AuditItem("SOAP_S", "S-Feld (Subjektiv)", "FAIL",
+                                   "Subjektiver Befund zu kurz oder fehlt"))
+        if len(assess) <= 10:
+            audit.append(AuditItem("SOAP_A", "A-Feld (Assessment/Diagnose)", "FAIL",
+                                   "Diagnose fehlt"))
+        if len(plan) <= 15:
+            audit.append(AuditItem("SOAP_P", "P-Feld (Therapieplan)", "FAIL",
+                                   "Therapieplan fehlt oder zu unspezifisch"))
 
         # ── 5. Befunddichte §106b ──────────────────────────────────────────────
         min_len = 60 if position in ("21201", "20511", "20510") else 20
@@ -814,29 +824,23 @@ class _GKVEngine:
                                        "Pflicht fuer MT-Abrechnung (21201)"))
                 risk = "WARN"
 
-        # ── 7. Required documentation per Diagnosegruppe ──────────────────────
+        # ── 7. Required documentation per Diagnosegruppe — emit only on FAIL ────
         for doc in entry["docs"]:
-            present = _check_doc(doc, soap)
-            audit.append(AuditItem(
-                f"DOC_{doc.upper().replace(' ', '_')[:20]}",
-                doc,
-                "PASS" if present else "FAIL",
-                "" if present else f"Pflichtfeld für {dg} fehlt"
-            ))
-            if not present:
+            if not _check_doc(doc, soap):
+                audit.append(AuditItem(
+                    f"DOC_{doc.upper().replace(' ', '_')[:20]}",
+                    doc, "FAIL", f"Pflichtfeld für {dg} fehlt"
+                ))
                 risk = "WARN"
 
-        # ── 9. Required tests from remote config ───────────────────────────────
+        # ── 9. Required tests from remote config — emit only on FAIL ──────────
         rule = config_rules.get(f"ICD10_{icd10.replace('.', '_')}", {})
         for test in rule.get("required_tests", []):
-            present = _check_doc(test, soap)
-            audit.append(AuditItem(
-                f"CFG_{test.upper()[:20]}",
-                f"{test} (Praxisregel)",
-                "PASS" if present else "FAIL",
-                "" if present else f"Pflichttest laut Konfiguration fehlt"
-            ))
-            if not present:
+            if not _check_doc(test, soap):
+                audit.append(AuditItem(
+                    f"CFG_{test.upper()[:20]}",
+                    f"{test} (Praxisregel)", "FAIL", "Pflichttest laut Konfiguration fehlt"
+                ))
                 risk = "WARN"
 
         # ── 10a. MT segment documentation — mandatory for 21201 ───────────────
@@ -1044,15 +1048,11 @@ class _GKVEngine:
 
             # Special case: "Taubheit" with "pelzig" - treat as documented symptom, not emergency
             if flag.lower() == "taubheit" and has_pelzig:
-                # Check if pelzig is part of the documented neurological screening
                 if any(k in obj for k in ["pelzig", "missempfindung", "parästhesie", "kribbel"]):
-                    items.append(AuditItem(f"RF_{flag.upper()}", f"Red Flag: {label}",
-                                           "PASS", "Sensibilitätsstörung dokumentiert (pelziges Gefühl) - kein Notfall"))
-                    continue
+                    continue  # PASS suppressed — documented screening, no alert needed
 
             if negated:
-                items.append(AuditItem(f"RF_{flag.upper()}", f"Red Flag: {label}",
-                                       "PASS", f"{flag} dokumentiert und ausgeschlossen"))
+                pass  # PASS suppressed — red flag excluded, nothing to show
             else:
                 # Warn instead of Block if symptom is documented in O-field (clinical assessment present)
                 if flag.lower() in obj:
@@ -1080,6 +1080,7 @@ class _PKVEngine:
         soap: dict,
         transcript: str,
         pkv_preise: Optional[dict] = None,
+        profile_id: Optional[str] = None,
     ) -> BillingResult:
         """
         pkv_preise: dict[Positionsnummer → float] aus config_override.json.
@@ -1091,6 +1092,8 @@ class _PKVEngine:
         pkv_preise = pkv_preise or {}
 
         dg = _match_dg(icd10) or "EX1b"
+        if profile_id and profile_id in _PROFILE_TO_DG:
+            dg = _PROFILE_TO_DG[profile_id]
         entry = _HMK[dg]
         position = entry["position"]
 
@@ -1104,14 +1107,13 @@ class _PKVEngine:
                      if praxispreis
                      else f"€{price_range[0]:.0f}–{price_range[1]:.0f} (GebüTh-Orientierung)")
 
-        # ── 1. Single combined PKV info item (replaces 3 always-WARN items) ───
-        audit.append(AuditItem(
-            "PKV_INFO", "PKV-Abrechnung",
-            "PASS" if praxispreis else "WARN",
-            f"{price_str} | Erstattung vertragsabhängig | "
-            + ("Praxispreis konfiguriert." if praxispreis
-               else "Praxispreis in config_override.json hinterlegen fuer exakten Betrag.")
-        ))
+        # ── 1. PKV info — emit only when praxispreis is missing (actionable) ──
+        if not praxispreis:
+            audit.append(AuditItem(
+                "PKV_INFO", "PKV-Abrechnung",
+                "WARN",
+                f"{price_str} | Praxispreis in config_override.json hinterlegen fuer exakten Betrag."
+            ))
 
         likelihood = self._score_likelihood(icd10, soap)
         hints = self._hints(soap, transcript, position)
@@ -1195,8 +1197,8 @@ class _BGEngine:
         self._gkv = _GKVEngine()
 
     def evaluate(self, icd10: str, soap: dict, transcript: str,
-                 config_rules: dict) -> BillingResult:
-        result = self._gkv.evaluate(icd10, soap, transcript, config_rules)
+                 config_rules: dict, profile_id: Optional[str] = None) -> BillingResult:
+        result = self._gkv.evaluate(icd10, soap, transcript, config_rules, profile_id=profile_id)
         result.insurance_type = InsuranceType.BG
 
         # Add BG-specific doc checks
@@ -1223,6 +1225,22 @@ class _BGEngine:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
+# ── Profile → Diagnosegruppe override for modality-specific sessions ─────────
+# These profiles are identified by transcript content (not ICD codes).
+# Without this map the GKV engine would fall through to the ICD-based DG
+# (e.g. M54.5 → WS1b/21201) and produce the wrong billing position.
+_PROFILE_TO_DG: dict[str, str] = {
+    "KGG":    "KGG",   # 20507 KG am Gerät / MTT
+    "ELEKTRO": "EL1",  # 21302 Elektrotherapie
+    "THERMO": "TH1",   # 21501 Wärmetherapie / Fango
+    "MASSE":  "MA1",   # 20106 Klassische Massage / KMT
+    "UWM":    "MA2",   # 20102 Unterwasserdruckstrahlmassage
+    "AQUA":   "BB1",   # 20902 KG im Bewegungsbad
+    "GRUPPE": "GR1",   # 20601 KG Gruppenbehandlung
+    "BECKEN": "PF1",   # 20501 Beckenbodentherapie
+}
+
+
 class BillingEngine:
     """
     Single entry point. Dispatches to GKV, PKV, or BG engine.
@@ -1234,6 +1252,7 @@ class BillingEngine:
             transcript="...",
             insurance_type=InsuranceType.GKV,
             config_rules={},   # from ConfigManager.billing_rules
+            profile_id="KGG",  # optional — overrides ICD-based billing for modality profiles
         )
         print(result.format_audit_report())
         print(result.format_billing_line())
@@ -1252,16 +1271,20 @@ class BillingEngine:
         insurance_type: InsuranceType = InsuranceType.GKV,
         config_rules: Optional[dict] = None,
         pkv_preise: Optional[dict] = None,
+        profile_id: Optional[str] = None,
     ) -> BillingResult:
         """
         config_rules : aus ConfigManager.billing_rules  (GKV/BG)
         pkv_preise   : aus ConfigManager.pkv_preise     (PKV — praxiseigene Preise)
                        z.B. {"21201": 72.00, "20501": 55.00}
                        GKV-Festpreise werden dadurch nicht verändert.
+        profile_id   : aus PhysioScribe._detect_profile() — overrides ICD-based DG
+                       for modality-specific profiles (KGG, ELEKTRO, THERMO, etc.)
         """
         rules = config_rules or {}
         if insurance_type == InsuranceType.BG:
-            return self._bg.evaluate(icd10, soap, transcript, rules)
+            return self._bg.evaluate(icd10, soap, transcript, rules, profile_id=profile_id)
         if insurance_type == InsuranceType.PKV:
-            return self._pkv.evaluate(icd10, soap, transcript, pkv_preise=pkv_preise)
-        return self._gkv.evaluate(icd10, soap, transcript, rules)
+            return self._pkv.evaluate(icd10, soap, transcript, pkv_preise=pkv_preise,
+                                      profile_id=profile_id)
+        return self._gkv.evaluate(icd10, soap, transcript, rules, profile_id=profile_id)

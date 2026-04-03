@@ -795,6 +795,8 @@ EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
 7. DIAGNOSEN GEHOEREN IN A, NICHT IN S: ICD-10-Codes, Erkrankungsbezeichnungen (z.B. "Gonarthrose", "Bandscheibenvorfall", "Lymphödem"), Diagnose-Aussagen und Vordiagnosen NIEMALS in S schreiben. S enthaelt NUR subjektive Patientenaussagen: Schmerzschilderung, Funktionsziel, Vorgeschichte in eigenen Worten. Wenn der Therapeut eine Diagnose nennt, landet sie in A.
 8. THERAPIEZIEL im P-Feld: SMART formulieren — Spezifisch, Messbar, Erreichbar, Relevant, Terminiert. Beispiel: "Ziel: ROM Knieflexion 0-0-120 in 6 EH."
 9. KPE-DOKUMENTATION (nur bei MLD/Lymph): P-Feld muss alle 4 Komponenten nennen: MLD + Kompressionsbandagierung + Entstauungsgymnastik + Hautpflege.
+10. VERLAUFSDOKUMENTATION: Falls der Therapeut eine Veraenderung zum Vortermin erwaehnt (z.B. "war letzte Woche besser", "VAS gestern 8", "letzte Sitzung noch 7/10"), schreibe den Verlauf direkt nach dem aktuellen VAS-Wert im S-Feld: "VAS 5/10 (Vorsitzung: 8/10, Δ: -3)". Dies ist §106b-Pflicht: Pruefer erwarten messbaren Therapiefortschritt je Sitzung.
+11. PROFIL-PARAMETER exakt im O-Feld (als Zahlenwerte, niemals als Prosa-Zusammenfassung): KGG/MTT → Geraet + Last (kg) + Wdh x Saetze; ELEKTRO → Stromform (TENS/IFC/Galvano) + Frequenz (Hz) + Intensitaet (mA) + Elektroden-Platzierung; THERMO/Fango → Modalitaet + Behandlungsregion + Temperatur (°C oder "angenehm warm"); BECKEN → Oxford-Skala (0-5) + Kontraktionsdauer (sek) + Serienzahl.
 
 PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 {checklist}
@@ -1053,6 +1055,85 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         cm_metrics = re.findall(r"([+-]\d+\s*cm)", transcript, re.I)
         if cm_metrics and "cm" not in soap_dict.get("O", ""):
             obj_text += f" | Umfangsdifferenz: {', '.join(cm_metrics)}"
+
+        # ── KGG/MTT: recover training parameters ─────────────────────────────
+        is_kgg = any(k in t_low for k in [
+            "kgg", "gerätegestützt", "gerät", "mtt", "medizinische trainings",
+            "beinpresse", "latzug", "ergometer", "krafttraining",
+        ])
+        if is_kgg:
+            geraet = re.search(
+                r"\b(beinpresse|latzug|kabelzug|ruderger[äa]t|ergometer|crosstrainer|"
+                r"beinstrecker|beincurl|schulterdr[üu]ck|brustpresse|r[üu]ckenstrecker|"
+                r"beinabduktor|legpress|latpulldown|rowing)\b",
+                transcript, re.I)
+            if geraet and "trainingsplan" not in obj_text.lower() and geraet.group(1).lower() not in obj_text.lower():
+                obj_text += f" | Gerät: {geraet.group(1)}"
+            last_m = re.search(r"(\d+)\s*(?:kg|kilogramm)(?:\s*(?:widerstand|last|gewicht))?", transcript, re.I)
+            if last_m and "kg" not in obj_text:
+                obj_text += f" | Last: {last_m.group(1)} kg"
+            wdh = re.search(r"(\d+)\s*(?:wiederholungen?|wdh\.?|reps?)", transcript, re.I)
+            saetze = re.search(r"(\d+)\s*(?:s[äa]tze?|sets?|serien?)", transcript, re.I)
+            if wdh and saetze and "wdh" not in obj_text.lower():
+                obj_text += f" | {wdh.group(1)} Wdh x {saetze.group(1)} Sätze"
+            elif wdh and "wdh" not in obj_text.lower():
+                obj_text += f" | {wdh.group(1)} Wdh"
+
+        # ── Beckenboden: recover Oxford-Skala and contraction duration ────────
+        is_becken = any(k in t_low for k in [
+            "beckenboden", "inkontinenz", "harninkontinenz", "stressinkontinenz",
+            "dranginkontinenz", "kontinenz", "beckenorgane", "prostatektomie",
+        ])
+        if is_becken:
+            oxford = re.search(r"(?:oxford|kraft)[^\d]*([0-5])(?:\s*/\s*5)?", transcript, re.I)
+            if oxford and "oxford" not in obj_text.lower() and "beckenboden-kraft" not in obj_text.lower():
+                obj_text += f" | Beckenboden-Kraft (Oxford): {oxford.group(1)}/5"
+            elif is_becken and "oxford" not in obj_text.lower() and "beckenboden-kraft" not in obj_text.lower():
+                obj_text += " | Beckenboden-Kraft (Oxford): n.d."
+            kontraktion = re.search(
+                r"(\d+)\s*(?:sekunden?|sek\.?)\s*(?:kontraktion|halten|anspannen)",
+                transcript, re.I)
+            if kontraktion and "kontraktion" not in obj_text.lower():
+                obj_text += f" | Kontraktion: {kontraktion.group(1)} s"
+
+        # ── Elektrotherapie: recover modality, Hz, mA, electrode placement ───
+        is_elektro = any(k in t_low for k in [
+            "tens", "interferenzstrom", "ifc", "galvano", "elektrotherapie", "reizstrom",
+        ])
+        if is_elektro:
+            stromform = re.search(
+                r"\b(TENS|IFC|Interferenz(?:strom)?|Galvano(?:phor)?|diadynamisch|EMS)\b",
+                transcript, re.I)
+            if stromform and "stromform" not in obj_text.lower() and "tens" not in obj_text.lower():
+                obj_text += f" | Stromform: {stromform.group(1)}"
+            freq = re.search(r"(\d+)\s*(?:Hz|Hertz)", transcript, re.I)
+            if freq and "hz" not in obj_text.lower():
+                obj_text += f" | Frequenz: {freq.group(1)} Hz"
+            intensitaet = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:mA|Milliampere)", transcript, re.I)
+            if intensitaet and " ma" not in obj_text.lower() and "ma)" not in obj_text.lower():
+                obj_text += f" | Intensität: {intensitaet.group(1)} mA"
+            platzierung = re.search(
+                r"(?:elektrode[n]?\s+(?:an|über|auf|am)\s+|platzier\w*\s+(?:an|über|am)\s+)"
+                r"([\w\säöüÄÖÜß]+?)(?:\s*[,.|]|$)",
+                transcript, re.I)
+            if platzierung and "elektrode" not in obj_text.lower():
+                obj_text += f" | Elektroden: {platzierung.group(1).strip()}"
+
+        # ── Thermotherapie: recover modality, region, temperature ─────────────
+        is_thermo = any(k in t_low for k in [
+            "fango", "heiße rolle", "heisse rolle", "warmpackung", "wärmetherapie",
+            "kältetherapie", "eispack", "kryotherapie",
+        ])
+        if is_thermo:
+            modalitaet = re.search(
+                r"\b(Fango|Hei[sß]e\s+Rolle|Warmpackung|W[äa]rmestrahler|Rotlicht|"
+                r"Eispack|K[äa]ltespray|Kryotherapie)\b",
+                transcript, re.I)
+            if modalitaet and all(k not in obj_text.lower() for k in ["fango", "rolle", "eispack", "wärme"]):
+                obj_text += f" | Wärmemodalität: {modalitaet.group(1)}"
+            temp_m = re.search(r"(\d+(?:[.,]\d+)?)\s*°?C\b", transcript, re.I)
+            if temp_m and "°c" not in obj_text.lower() and "grad" not in obj_text.lower():
+                obj_text += f" | Temperatur: {temp_m.group(1)} °C"
 
         stadium = re.search(r"Stadium\s*[1-3]", transcript, re.I)
         if stadium and "Stadium" not in soap_dict.get("O", ""):
@@ -1828,11 +1909,11 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         if "krankengymnastik" in plan_text or " kg" in plan_text:
             if is_neuro:
-                return res_icd, codes.get("KG_ZNS", "20710")
+                return res_icd, codes.get("KG_ZNS", "20511")
             return res_icd, codes.get("KG", "20501")
 
         if is_neuro:
-            return res_icd, codes.get("KG_ZNS", "20710")
+            return res_icd, codes.get("KG_ZNS", "20511")
         # MT must NOT override lymph — a lymph case mentioning "mobilisation" is still MLD
         if is_ortho_mt and not is_lymph:
             return res_icd, codes.get("MT", "21201")
@@ -2130,6 +2211,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             insurance_type=insurance_type,
             config_rules=self.billing_rules,
             pkv_preise=self.config.pkv_preise,
+            profile_id=profile_id,
         )
 
         if status_callback:

@@ -870,7 +870,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         # Stemmer-Zeichen: infer from "Delle" (pitting) or explicit Stadium 2/3
         if any(k in t_low for k in ["delle", "dellen", "stadium 2", "stadium 3"]):
             if "stemmer" not in obj_text.lower():
-                obj_text += " | Stemmer-Zeichen: positiv (klinisch indiziert durch Dellenbildung)."
+                obj_text += " | Stemmer-Zeichen: positiv, Hautfalte nicht abhebbar."
 
         # Ödemkonsistenz: recover "teigig" / pitting descriptor
         if "delle" in t_low and "konsistenz" not in obj_text.lower() and "teigig" not in obj_text.lower():
@@ -1437,10 +1437,14 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 continue
             is_hallucination = False
             for pattern in forbidden:
-                if re.search(pattern, sent_stripped, re.I):
-                    # Keep it if it's a negated exclusion ("kein Hinweis auf Gonarthrose")
-                    if self._NEGATION_RE.search(sent_stripped):
-                        break
+                m = re.search(pattern, sent_stripped, re.I)
+                if m:
+                    # Proximity negation: check only the 6 words BEFORE the matched term
+                    before = sent_stripped[:m.start()]
+                    nearby_words = before.split()[-6:]
+                    negation_nearby = self._NEGATION_RE.search(" ".join(nearby_words))
+                    if negation_nearby:
+                        break  # term is locally negated — keep it
                     is_hallucination = True
                     break
             if not is_hallucination:

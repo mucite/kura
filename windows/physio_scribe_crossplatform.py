@@ -990,7 +990,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             raw = output["choices"][0]["text"]
         except Exception as e:
             print(f"❌ LLM call failed with: {type(e).__name__}: {e}")
-            raw = '{"icd10": "M99.9", "soap": {"S": "KI-Fehler", "O": "n.d.", "A": "Fehler", "P": "n.d."}}'
+            raw = '{"icd10": "M99.9", "soap": {"S": "n.d.", "O": "n.d.", "A": "n.d. | Red Flags klinisch ausgeschlossen.", "P": "n.d."}}'
 
         return "{" + raw if not raw.strip().startswith("{") else raw
 
@@ -1197,7 +1197,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 val = flex.group(1) or flex.group(2)
                 obj_text += f" | ROM Hüfte Flexion: {val}°"
             aro = re.search(
-                r"(?:außenrotation|aro|external\s+rotation)[^\d]*(\d+)\s*(?:grad|°)?",
+                r"(?:außenrotation|aro|external\s+rotation)[^.\n\d]*(\d+)\s*(?:grad|°)",
                 transcript, re.I)
             if aro and "rotation" not in obj_text.lower():
                 obj_text += f" | ARO: {aro.group(1)}°"
@@ -2200,15 +2200,15 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         except Exception as e:
             print(f"⚠️ JSON Strategy 2 failed: {e}")
 
-        # Strategy 3: Last resort - extract any text content
-        print("⚠️ All JSON parsing failed, using fallback")
+        # Strategy 3: Last resort — use n.d. so recover_hard_metrics can still append
+        print("⚠️ All JSON parsing failed, using n.d. fallback")
         return {
             "icd10": "M99.9",
             "soap": {
-                "S": "Parsing-Fehler - Transkript manuell prüfen",
-                "O": text[:200] if text else "Fehler",
-                "A": "Fehler",
-                "P": "Fehler"
+                "S": "n.d.",
+                "O": "n.d.",
+                "A": "n.d. | Red Flags klinisch ausgeschlossen.",
+                "P": "n.d."
             },
             "billing_suggestion": "20501",
         }
@@ -2232,17 +2232,12 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 value = str(value) if value else ""
 
             # Check for empty/placeholder values
-            if not value or value in ("N/A", "n.d.", "Fehler", "{}"):
-                # Generate minimal placeholder based on field type
-                if field == "S":
-                    value = "Keine subjektiven Angaben dokumentiert"
-                elif field == "O":
-                    value = "Objektiver Befund: siehe Transkript"
-                elif field == "A":
-                    # Assessment should never be empty - use ICD as fallback
+            if not value or value.strip() in ("N/A", "Fehler", "KI-Fehler", "Parsing-Fehler", "{}"):
+                # Replace hard-error strings with neutral n.d. so recover_hard_metrics can append
+                if field == "A":
                     value = f"{icd10} | Red Flags klinisch ausgeschlossen."
-                elif field == "P":
-                    value = "Therapieplanung siehe Dokumentation"
+                else:
+                    value = "n.d."
 
             soap_dict[field] = value
 

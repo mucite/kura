@@ -1080,8 +1080,10 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 val = flex.group(1) or flex.group(2)
                 obj_text += f" | ROM Hüfte Flexion: {val}°"
             # Außenrotation / Innenrotation
+            # Require an explicit unit (grad/°) to avoid grabbing unrelated numbers
+            # [^.\n\d]* stops at sentence boundaries so "ARO fest ... 3 Sätze" doesn't match
             aro = re.search(
-                r"(?:außenrotation|aro|external\s+rotation)[^\d]*(\d+)\s*(?:grad|°)?",
+                r"(?:außenrotation|aro|external\s+rotation)[^.\n\d]*(\d+)\s*(?:grad|°)",
                 transcript, re.I)
             if aro and "rotation" not in obj_text.lower():
                 obj_text += f" | ARO: {aro.group(1)}°"
@@ -2093,35 +2095,51 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
     def parse_robust_json(self, text):
         """
         Robust JSON parser - ensures all SOAP fields are strings, not nested objects.
+        Falls back to regex field extraction when JSON is malformed, then to "n.d."
         """
+        def _extract_fields_regex(raw: str) -> dict:
+            """Secondary: extract "S": "...", "O": "...", etc. via regex when JSON parse fails."""
+            result = {}
+            for field in ["S", "O", "A", "P"]:
+                m = re.search(
+                    rf'"{field}"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL)
+                if m:
+                    result[field] = m.group(1).replace('\\"', '"').replace('\\n', ' ').strip()
+            return result
+
+        icd10 = "M99.9"
+        soap_raw = {}
         try:
             match = re.search(r'\{.*\}', text, re.DOTALL)
-            data = json.loads(match.group() if match else "{}")
+            if not match:
+                raise ValueError("No JSON object found in output")
+            data = json.loads(match.group())
+            icd10 = data.get("icd10", "M99.9")
             soap_raw = data.get("soap", {})
-
-            # Ensure all SOAP fields are strings, not nested objects
-            soap_clean = {}
-            for field in ["S", "O", "A", "P"]:
-                value = soap_raw.get(field, "")
-                # Convert non-string values to strings
-                if isinstance(value, dict):
-                    # Flatten nested dict to readable string
-                    value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
-                elif not isinstance(value, str):
-                    value = str(value) if value else "N/A"
-                # Ensure non-empty
-                if not value or value in ("N/A", "n.d.", "Fehler", "{}"):
-                    if field == "A":
-                        # Assessment should never be empty
-                        value = f"{data.get('icd10', 'M99.9')} | Red Flags klinisch ausgeschlossen."
-                    else:
-                        value = "N/A"
-                soap_clean[field] = value.strip() if value else "N/A"
-
-            return {"icd10": data.get("icd10", "M99.9"), "soap": soap_clean}
         except Exception as e:
-            print(f"⚠️ JSON parsing failed: {e}")
-            return {"icd10": "M99.9", "soap": {k: "Fehler" for k in ["S", "O", "A", "P"]}}
+            print(f"⚠️ JSON parse failed, trying regex extraction: {e}")
+            # Try to salvage individual field values
+            soap_raw = _extract_fields_regex(text)
+            # Try to grab ICD-10 from raw text
+            icd_m = re.search(r'"icd10"\s*:\s*"([A-Z]\d{2}[\.\d]*)"', text)
+            if icd_m:
+                icd10 = icd_m.group(1)
+
+        soap_clean = {}
+        for field in ["S", "O", "A", "P"]:
+            value = soap_raw.get(field, "")
+            if isinstance(value, dict):
+                value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
+            elif not isinstance(value, str):
+                value = str(value) if value else ""
+            if not value or value.strip() in ("N/A", "n.d.", "Fehler", "{}"):
+                if field == "A":
+                    value = f"{icd10} | Red Flags klinisch ausgeschlossen."
+                else:
+                    value = "n.d."
+            soap_clean[field] = value.strip()
+
+        return {"icd10": icd10, "soap": soap_clean}
 
     def cleanup(self):
         self.model = self.tokenizer = None

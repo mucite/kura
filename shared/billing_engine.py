@@ -623,7 +623,11 @@ _DOC_CHECKERS: dict = {
     "ROM (Neutral-Null)":              lambda t: bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", t)),
     "ROM Schulter (Abd/Flex/AR/IR)":   lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and "schulter" in t,
     "ROM Knie (Flex/Ext)":             lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and "knie" in t,
-    "ROM Hüfte (Flex/Abd/AR)":         lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and "hüfte" in t,
+    "ROM Hüfte (Flex/Abd/AR)":         lambda t: "hüfte" in t and bool(re.search(
+        r"(?:flexion|abd|aro|iro|ext|rom hüfte|nzm).*\d+|"   # any named value with a number
+        r"\d+\s*[-/]\s*0\s*[-/]\s*\d+|"                       # NZM format: 90-0-0 or 90/0/0
+        r"\d+ - \d+ - \d+",                                    # NZM with spaces
+        t, re.I)),
     "ROM HWS":                         lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and any(k in t for k in ["hws", "hals", "zervikal", "c0", "c1", "c2"]),
     "ROM Sprunggelenk (DF/PF)":        lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and any(k in t for k in ["sprung", "osg", "usg"]),
     "Schmerz (VAS)":                   lambda t: bool(re.search(r"vas\s*\d|schmerz.*\d+/10|\d+/10", t)),

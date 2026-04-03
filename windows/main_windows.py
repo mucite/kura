@@ -57,10 +57,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from shared.license_manager import LicenseManager
 
-# ── Version & update URLs ──────────────────────────────────────────────────────
-
-APP_VERSION   = "2026.3.2"
-_VERSION_URL  = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/version.json"
+# ── Version — single source of truth: version.json at project root ────────────
+from shared.version import APP_VERSION, VERSION_URL as _VERSION_URL
 _DOWNLOAD_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/Kura_Windows_v2026.exe"
 
 # ── CustomTkinter theme ────────────────────────────────────────────────────────
@@ -189,6 +187,18 @@ class KuraApp:
         elif event_type == "boot_done":
             self.output_text.delete("1.0", "end")
             self.output_text.insert("1.0", f"✅ KI-Modelle geladen. Kura v{APP_VERSION} ist einsatzbereit.\n")
+            # Boot-time license enforcement — runs on main thread after engine load
+            _boot_status = self.license_mgr.verify_locally()
+            if _boot_status is False:
+                self.root.after(300, self._show_upgrade_dialog)
+            elif _boot_status == "TRIAL":
+                _rem = self.license_mgr.max_trials - self.license_mgr.get_trial_count()
+                if _rem <= 2:
+                    messagebox.showinfo(
+                        "Kura Testphase",
+                        f"Noch {_rem} Testbericht{'e' if _rem != 1 else ''} verbleibend.\n\n"
+                        "Aktivieren Sie Kura Pro für unbegrenzte Nutzung."
+                    )
         elif event_type == "ai_done":
             self._on_ai_done(value)
         elif event_type == "ai_error":
@@ -223,6 +233,20 @@ class KuraApp:
     # ── Recording ─────────────────────────────────────────────────────────────
 
     def _start_recording(self):
+        # ── License gate — block before any recording starts ─────────────────
+        status = self.license_mgr.verify_locally()
+        if status is False:
+            self._show_upgrade_dialog()
+            return
+        if status is True and self.license_mgr.grace_days_remaining > 0:
+            days = self.license_mgr.grace_days_remaining
+            messagebox.showwarning(
+                "Kura Pro — Offline-Modus",
+                f"Lizenzprüfung fehlgeschlagen.\n"
+                f"Noch {days} Tag{'e' if days != 1 else ''} Offline-Gnadenfrist verbleibend.\n\n"
+                "Bitte bald Internetverbindung herstellen."
+            )
+
         if not self.engine:
             messagebox.showerror("Kura", "KI-Modelle werden noch geladen. Bitte warten.")
             return
@@ -515,11 +539,8 @@ class KuraApp:
         status = self.license_mgr.verify_locally()
 
         if status is False:
-            messagebox.showerror(
-                "Kura Testphase beendet",
-                "Sie haben das Limit von 5 kostenlosen Berichten erreicht.\n\n"
-                "Bitte aktivieren Sie Kura Pro, um weiter zu arbeiten."
-            )
+            title, msg = self._license_block_message()
+            messagebox.showerror(title, msg)
             self._show_upgrade_dialog()
             return
 
@@ -835,10 +856,8 @@ class KuraApp:
 
     @staticmethod
     def _version_gt(a: str, b: str) -> bool:
-        try:
-            return tuple(int(x) for x in a.split(".")) > tuple(int(x) for x in b.split("."))
-        except Exception:
-            return False
+        from shared.version import version_gt
+        return version_gt(a, b)
 
     def _check_update_background(self):
         """Silent update check on boot."""
@@ -862,34 +881,60 @@ class KuraApp:
                 r = requests.get(_VERSION_URL, timeout=6)
                 if r.status_code != 200:
                     messagebox.showinfo("Kura Update",
-                        "Update-Prüfung fehlgeschlagen.\nKeine Verbindung — bitte später erneut versuchen.")
+                        "Server nicht erreichbar.\nBitte später erneut versuchen.")
+                    self.status_label.configure(text="🩺 Bereit")
                     return
                 remote_ver = r.json().get("version", "")
                 if self._version_gt(remote_ver, APP_VERSION):
                     if messagebox.askyesno(
                         "Kura Update",
-                        f"Neue Version verfügbar!\n\n"
+                        f"Neue Version verfügbar: v{remote_ver}\n\n"
                         "Wichtig: Beenden Sie Kura zuerst, bevor Sie die neue Version installieren.\n\n"
                         "Jetzt herunterladen?"
                     ):
                         webbrowser.open(_DOWNLOAD_URL)
                 else:
                     messagebox.showinfo("Kura Update", f"Kura ist aktuell (v{APP_VERSION}).")
-                self.status_label.configure(text="🩺 Bereit")
             except Exception:
-                messagebox.showerror("Kura Update", "Update-Prüfung fehlgeschlagen.")
+                messagebox.showinfo("Kura Update",
+                    "Kein Internet — Update-Prüfung nicht möglich.\n"
+                    "Die App funktioniert weiterhin vollständig offline.")
+            finally:
                 self.status_label.configure(text="🩺 Bereit")
         threading.Thread(target=_run, daemon=True).start()
 
     # ── License dialogs ───────────────────────────────────────────────────────
 
+    def _license_block_message(self) -> tuple[str, str]:
+        """Return (title, message) based on block_reason."""
+        reason = self.license_mgr.block_reason
+        if reason == "trial_expired":
+            return (
+                "Testphase abgelaufen",
+                "Ihre 5 kostenlosen Berichte wurden verwendet.\n\n"
+                "Aktivieren Sie Kura Pro, um unbegrenzt weiter zu arbeiten.\n\n"
+                "Eine Internetverbindung ist für die Aktivierung erforderlich."
+            )
+        if reason == "offline_grace_expired":
+            return (
+                "Kura Pro — Keine Verbindung",
+                "Ihr Abonnement konnte 3 Tage lang nicht geprüft werden.\n\n"
+                "Bitte stellen Sie eine Internetverbindung her, damit Kura "
+                "Ihre Lizenz mit Digistore24 abgleichen kann.\n\n"
+                "Sobald Sie wieder online sind, startet Kura automatisch."
+            )
+        return (
+            "Abonnement abgelaufen",
+            "Ihr Kura Pro Abonnement ist abgelaufen oder wurde storniert.\n\n"
+            "Bitte erneuern Sie Ihr Abonnement auf Digistore24 und geben "
+            "Sie Ihren neuen Lizenzschlüssel ein.\n\n"
+            "Eine Internetverbindung ist für die Aktivierung erforderlich."
+        )
+
     def _show_upgrade_dialog(self):
-        if messagebox.askyesno(
-            "Kura Pro erforderlich",
-            "Testphase beendet. Aktivieren Sie Kura Pro für unbegrenzte Berichte.\n\n"
-            "Jetzt upgraden (€49/Monat)?"
-        ):
-            webbrowser.open("https://kura-medical.de/#pricing")
+        title, msg = self._license_block_message()
+        if messagebox.askyesno(title, msg + "\n\nJetzt aktivieren?"):
+            self._activate_license()
 
     def _activate_license(self):
         """License activation dialog."""

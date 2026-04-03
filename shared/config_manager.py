@@ -44,7 +44,12 @@ _GIST_URL = (
 
 _FALLBACK = {
     "version": "2026.0.0",
-    "billing_codes": {"MT": "21201", "KG": "20501", "KPE": "21100"},
+    "billing_codes": {
+        "KG": "20501", "KG_ZNS": "20710", "KG_Gruppe": "20601",
+        "MT": "21201",
+        "MLD_30": "20205", "MLD_45": "20201", "MLD_60": "20202",
+        "KPE_I": "21110", "KPE_II": "21111",
+    },
     "context": {"audit_standard": "§ 106b SGB V", "special_focus": ["Allgemein"]},
     "billing_rules": {},
     "audit_rules": {},

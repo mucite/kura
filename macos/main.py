@@ -140,9 +140,8 @@ if "HF_TOKEN" not in os.environ:
 # --- Live Audio Visualizer ---
 
 
-# --- App version (must match Gist version when releasing) ---
-APP_VERSION = "2026.3.2"
-_VERSION_URL  = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/version.json"
+# --- App version — single source of truth: version.json at project root ---
+from shared.version import APP_VERSION, VERSION_URL as _VERSION_URL
 _DOWNLOAD_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/Kura_macOS_v2026.dmg"
 
 
@@ -209,6 +208,20 @@ class KuraApp(rumps.App):
             rumps.MenuItem("⏻  Beenden", callback=self._quit),
         ]
         self._refresh_menu_state(status)
+
+        # Boot-time license enforcement — show blocking alert after the run loop starts
+        if status is False:
+            threading.Timer(1.2, lambda: self._on_main(self._boot_license_alert)).start()
+        elif status == "TRIAL":
+            rem = self.license_mgr.max_trials - self.license_mgr.get_trial_count()
+            if rem <= 2:
+                threading.Timer(1.2, lambda r=rem: self._on_main(
+                    lambda: rumps.notification(
+                        "Kura Testphase",
+                        f"Noch {r} Testbericht{'e' if r != 1 else ''} verbleibend",
+                        "Upgrade auf Kura Pro für unbegrenzte Nutzung.",
+                    )
+                )).start()
 
         # --- Internal State ---
         self.engine = None
@@ -427,12 +440,8 @@ class KuraApp(rumps.App):
         status = self.license_mgr.verify_locally()
 
         if status is False:
-            rumps.alert(
-                title="Kura Testphase beendet",
-                message="Sie haben das Limit von 5 kostenlosen Berichten erreicht.\n\n"
-                        "Bitte aktivieren Sie Kura Pro, um Ihre Arbeit zu speichern.",
-                ok="Jetzt aktivieren"
-            )
+            title, msg = self._license_block_message()
+            rumps.alert(title=title, message=msg, ok="Lizenz aktivieren")
             self.activate_license(None)
             return
 
@@ -520,40 +529,48 @@ class KuraApp(rumps.App):
 
     # ── Update check ──────────────────────────────────────────────────────────
 
-    def check_for_update(self, _=None):
-        """Check Gist version against APP_VERSION. Called on boot and from tray."""
+    def check_for_update(self, _=None, silent=False):
+        """Check remote version.json against APP_VERSION.
+        silent=True (boot): no notification on failure or 'already up to date'.
+        silent=False (manual): always notify the result.
+        """
         def _run():
             try:
                 import requests as _req
                 r = _req.get(_VERSION_URL, timeout=6)
                 if r.status_code != 200:
-                    self._on_main(lambda: self._item_update.set_callback(self.check_for_update))
+                    if not silent:
+                        self._on_main(lambda: rumps.notification(
+                            "Kura", "Update-Prüfung fehlgeschlagen",
+                            "Server nicht erreichbar. Bitte später erneut versuchen."
+                        ))
                     return
-                gist_ver = r.json().get("version", "")
-                if self._version_gt(gist_ver, APP_VERSION):
-                    # New version available
-                    self._on_main(lambda v=gist_ver: (
+                remote_ver = r.json().get("version", "")
+                if self._version_gt(remote_ver, APP_VERSION):
+                    self._on_main(lambda v=remote_ver: (
                         setattr(self._item_update, 'title',
                                 f"Update verfuegbar: v{v} (jetzt herunterladen)"),
                         self._item_update.set_callback(self._open_update_page),
                         rumps.notification(
                             "Kura Update verfuegbar",
                             f"Version {v} ist bereit",
-                            "Klicken Sie auf 'Update verfuegbar' im Tray und beenden Sie Kura vor der Installation.",
+                            "Klicken Sie auf 'Update verfuegbar' im Tray.",
                         ),
                     ))
-                else:
+                elif not silent:
                     self._on_main(lambda: (
                         setattr(self._item_update, 'title', "Aktualisierungen pruefen"),
                         self._item_update.set_callback(self.check_for_update),
-                        rumps.notification("Kura", "Kein Update", f"Sie verwenden die aktuelle Version ({APP_VERSION})."),
+                        rumps.notification("Kura", "Kein Update",
+                                           f"Sie verwenden die aktuelle Version ({APP_VERSION})."),
                     ))
             except Exception as e:
                 print(f"Update-Prüfung fehlgeschlagen: {e}")
-                self._on_main(lambda: rumps.notification(
-                    "Kura", "Update-Prüfung fehlgeschlagen",
-                    "Keine Verbindung. Bitte später erneut versuchen."
-                ))
+                if not silent:
+                    self._on_main(lambda: rumps.notification(
+                        "Kura", "Kein Internet",
+                        "Update-Prüfung nicht möglich. App funktioniert weiterhin offline."
+                    ))
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -572,11 +589,8 @@ class KuraApp(rumps.App):
 
     @staticmethod
     def _version_gt(a: str, b: str) -> bool:
-        """Return True if version string a is strictly greater than b (e.g. '2026.4.0' > '2026.3.2')."""
-        try:
-            return tuple(int(x) for x in a.split(".")) > tuple(int(x) for x in b.split("."))
-        except Exception:
-            return False
+        from shared.version import version_gt
+        return version_gt(a, b)
 
     def update_timer(self, _):
         """Updates the menu bar title with recording duration. Detects ffmpeg death."""
@@ -680,8 +694,8 @@ class KuraApp(rumps.App):
                 self._item_start.set_callback(self.start),
                 rumps.notification("Kura", "Bereit", "KI-Modelle geladen. Kura ist einsatzbereit.")
             ))
-            # Silent background update check — runs after boot, no UI block
-            self.check_for_update()
+            # Silent background update check — no notification if offline or already up to date
+            self.check_for_update(silent=True)
 
         except MemoryError as e:
             error_msg = f"Speicher-Fehler: {e}"
@@ -903,12 +917,61 @@ class KuraApp(rumps.App):
         except Exception:
             return ""
 
+    # --- License block helper ---
+    def _boot_license_alert(self):
+        """Blocking alert shown on app startup when license is invalid/expired."""
+        title, msg = self._license_block_message()
+        rumps.alert(title=title, message=msg, ok="Lizenz aktivieren")
+        self.activate_license(None)
+
+    def _license_block_message(self) -> tuple[str, str]:
+        """Return (title, message) based on block_reason."""
+        reason = self.license_mgr.block_reason
+        if reason == "trial_expired":
+            return (
+                "Testphase abgelaufen",
+                "Ihre 5 kostenlosen Berichte wurden verwendet.\n\n"
+                "Aktivieren Sie Kura Pro, um unbegrenzt weiter zu arbeiten.\n"
+                "Eine Internetverbindung ist für die Aktivierung erforderlich."
+            )
+        if reason == "offline_grace_expired":
+            return (
+                "Kura Pro — Keine Verbindung",
+                "Ihr Abonnement konnte 3 Tage lang nicht geprüft werden.\n\n"
+                "Bitte stellen Sie eine Internetverbindung her, damit Kura Ihre "
+                "Lizenz mit Digistore24 abgleichen kann.\n\n"
+                "Sobald Sie wieder online sind, startet Kura automatisch."
+            )
+        # subscription_expired (DS24 rejected) or any other reason
+        return (
+            "Abonnement abgelaufen",
+            "Ihr Kura Pro Abonnement ist abgelaufen oder wurde storniert.\n\n"
+            "Bitte erneuern Sie Ihr Abonnement auf Digistore24 und aktivieren "
+            "Sie Ihren neuen Lizenzschlüssel.\n\n"
+            "Eine Internetverbindung ist für die Aktivierung erforderlich."
+        )
+
     # --- Start Session ---
     def start(self, _):
         if self.recording:
             rumps.alert("Fehler", "Aufnahme läuft bereits.")
             return
-            
+
+        # ── License gate — check BEFORE allowing any recording ───────────────
+        status = self.license_mgr.verify_locally()
+        if status is False:
+            title, msg = self._license_block_message()
+            rumps.alert(title=title, message=msg, ok="Lizenz aktivieren")
+            self.activate_license(None)
+            return
+        if status is True and self.license_mgr.grace_days_remaining > 0:
+            days = self.license_mgr.grace_days_remaining
+            rumps.notification(
+                "Kura Pro — Offline-Modus",
+                f"Lizenzprüfung fehlgeschlagen — noch {days} Tag{'e' if days != 1 else ''} Offline-Gnadenfrist.",
+                "Bitte bald Internetverbindung herstellen.",
+            )
+
         if not self.engine:
             rumps.alert("Fehler", "KI-Engine nicht bereit.\n\nBitte warten Sie, bis 'KI-Modelle laden...' abgeschlossen ist.\n\nFalls das Problem weiterhin besteht, starten Sie Kura neu.")
             return

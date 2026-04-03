@@ -87,6 +87,24 @@ class LicenseManager:
         self.mac_address = self._get_mac()
         self.hardware_id = self._build_hardware_id()
         self._cache: dict | None = None
+        self._block_reason: str = ""        # set whenever verify_locally() returns False
+        self._grace_days_remaining: int = 0  # days left in offline grace (0 = not in grace)
+
+    @property
+    def block_reason(self) -> str:
+        """
+        Human-readable reason why verify_locally() returned False.
+        One of: 'trial_expired' | 'subscription_expired' | 'offline_grace_expired' | ''
+        """
+        return self._block_reason
+
+    @property
+    def grace_days_remaining(self) -> int:
+        """
+        Days left in offline grace period when verify_locally() returned True.
+        0 means not currently in grace period.
+        """
+        return self._grace_days_remaining
 
     # ── Hardware fingerprinting ───────────────────────────────────────────────
 
@@ -144,17 +162,40 @@ class LicenseManager:
             return self._cache
         try:
             with open(self.license_file, "r", encoding="utf-8") as f:
-                self._cache = json.load(f)
+                raw = json.load(f)
         except Exception:
             self._cache = {}
+            return self._cache
+
+        sign = raw.get("_sign")
+        if sign is None:
+            # Legacy file (pre-HMAC signing) — accept but force immediate DS24 revalidation
+            raw["validated_at"] = None
+            self._cache = raw
+            return self._cache
+
+        if sign != self._license_hmac(raw):
+            # Signature mismatch — file tampered, clear and force re-activation
+            print("License: HMAC mismatch — file tampered. Clearing cache.")
+            try:
+                os.remove(self.license_file)
+            except Exception:
+                pass
+            self._cache = {}
+            return self._cache
+
+        self._cache = raw
         return self._cache
 
     def _save(self, data: dict):
-        self._cache = data
+        # Strip any existing signature before recomputing
+        to_write = {k: v for k, v in data.items() if k != "_sign"}
+        to_write["_sign"] = self._license_hmac(to_write)
+        self._cache = to_write
         try:
             with open(self.license_file, "w", encoding="utf-8") as f:
                 if f is not None:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
+                    json.dump(to_write, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"License save error: {e}")
 
@@ -221,19 +262,33 @@ class LicenseManager:
 
     def validate(self) -> bool:
         """Re-check stored license against Digistore24. 12h cache, 3-day offline grace."""
+        self._grace_days_remaining = 0
         cache = self._load()
         if not cache:
             return False
 
         if cache.get("hardware_id") != self.hardware_id:
             print("License: hardware mismatch — key belongs to a different workstation.")
+            self._block_reason = "subscription_expired"
             return False
 
         last = cache.get("validated_at")
         if last:
-            age = datetime.utcnow() - datetime.fromisoformat(last)
-            if age < timedelta(hours=_REVALIDATE_HOURS):
-                return cache.get("status") == "active"
+            try:
+                last_dt = datetime.fromisoformat(last)
+                now_dt  = datetime.utcnow()
+                # Clock-rollback attack: validated_at is suspiciously in the future
+                if last_dt > now_dt + timedelta(minutes=5):
+                    print("License: clock skew detected — forcing revalidation.")
+                    last = None  # fall through to DS24 check
+                else:
+                    age = now_dt - last_dt
+                    if age < timedelta(hours=_REVALIDATE_HOURS):
+                        if cache.get("status") != "active":
+                            self._block_reason = "subscription_expired"
+                        return cache.get("status") == "active"
+            except Exception:
+                last = None  # malformed date — force revalidation
 
         key = cache.get("key", "")
         try:
@@ -248,17 +303,27 @@ class LicenseManager:
                 cache["validated_at"] = datetime.utcnow().isoformat()
                 self._save(cache)
                 return True
+            # DS24 explicitly rejected — subscription cancelled/expired
             cache["status"] = "invalid"
             self._save(cache)
+            self._block_reason = "subscription_expired"
             return False
 
         except Exception:
+            # Offline — apply grace period
             if last:
-                age = datetime.utcnow() - datetime.fromisoformat(last)
-                if age < timedelta(days=_GRACE_DAYS):
-                    print(f"License: offline grace, {_GRACE_DAYS - age.days}d remaining.")
-                    return cache.get("status") == "active"
+                try:
+                    age = datetime.utcnow() - datetime.fromisoformat(last)
+                    if age < timedelta(days=_GRACE_DAYS):
+                        days_left = max(0, _GRACE_DAYS - age.days)
+                        self._grace_days_remaining = days_left
+                        print(f"License: offline grace, {days_left}d remaining.")
+                        if cache.get("status") == "active":
+                            return True
+                except Exception:
+                    pass
             print("License: offline and grace period expired.")
+            self._block_reason = "offline_grace_expired"
             return False
 
     # ── Deactivate ────────────────────────────────────────────────────────────
@@ -286,6 +351,18 @@ class LicenseManager:
         secret = hashlib.sha256(
             (self.hardware_id + self.mac_address).encode()
         ).digest()
+        return _hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+
+    def _license_hmac(self, data: dict) -> str:
+        """HMAC-SHA256 over canonical JSON of all license fields (excl. '_sign').
+        Key is hardware-bound — copy of license.json to another machine won't verify."""
+        import hmac as _hmac
+        payload = json.dumps(
+            {k: v for k, v in sorted(data.items()) if k != "_sign"},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        secret = hashlib.sha256((self.hardware_id + "kura_lic_v1").encode()).digest()
         return _hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
 
     def get_trial_count(self) -> int:
@@ -326,12 +403,19 @@ class LicenseManager:
     def verify_locally(self):
         """
         Returns: True (licensed) | "TRIAL" (in trial) | False (expired/invalid)
+        When returning False, block_reason is set to explain why.
         """
         if os.path.exists(self.license_file):
-            return True if self.validate() else False
+            if self.validate():
+                self._block_reason = ""
+                return True
+            # block_reason already set inside validate()
+            return False
         count = self.get_trial_count()
         if count < self.max_trials:
+            self._block_reason = ""
             return "TRIAL"
+        self._block_reason = "trial_expired"
         return False
 
     # ── Legacy shims ─────────────────────────────────────────────────────────

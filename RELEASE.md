@@ -1,6 +1,88 @@
-# 🚀 GitHub Release Guide
+# Kura Release Guide
 
-Complete guide for building and uploading Kura Medical executables to GitHub.
+---
+
+## The Rule
+
+**One file controls everything: `version.json` at project root.**
+
+```
+version.json  ← edit this → run release.sh → done
+```
+
+Never change `APP_VERSION` manually anywhere. It is read automatically from `version.json`.
+
+---
+
+## Version Format
+
+```
+YYYY.N.N   →  2026.4.0
+```
+
+- `YYYY` = year (always 2026 for now)
+- `N` = release number (increment for each release)
+- `.N` = patch/hotfix (increment for small fixes, omit for major releases)
+
+---
+
+## Releasing a New Version
+
+```bash
+./scripts/release.sh 2026.4.0 "What changed in this release"
+```
+
+That script does:
+1. Updates `version.json` (date, changelog, version number)
+2. Pushes `version.json` to Cloudflare R2 — **this triggers the in-app update notification for all users**
+3. Creates a git commit + tag
+
+Then build and publish:
+```bash
+cd macos && ./build_release.sh v2026.4.0     # macOS DMG
+cd windows && build_release.bat v2026.4.0    # Windows ZIP
+git push origin main --tags
+gh release create v2026.4.0 --title "Kura v2026.4.0"
+```
+
+---
+
+## What Each Version File Does
+
+| File | Purpose | Who reads it |
+|---|---|---|
+| `version.json` (local) | Source of truth — version number + changelog | `shared/version.py` at startup |
+| `version.json` (R2) | Triggers update notification in running apps | Both mains on boot + manual check |
+| Gist `"version"` field | Config/billing data version — **not the app version** | `config_manager.py` for cache invalidation |
+
+> The Gist version and app version are **independent**. Update the Gist version when billing codes or config change. Update `version.json` when releasing a new app binary.
+
+---
+
+## R2 Setup (one-time)
+
+Set these environment variables (add to `~/.zshrc`):
+
+```bash
+export R2_BUCKET=your-bucket-name
+export R2_ENDPOINT=https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com
+export AWS_ACCESS_KEY_ID=your-r2-access-key
+export AWS_SECRET_ACCESS_KEY=your-r2-secret-key
+```
+
+Then `release.sh` will push automatically.
+
+---
+
+## Hotfix (no binary rebuild needed)
+
+If only fixing a bug that doesn't require a new DMG/ZIP:
+
+```bash
+./scripts/release.sh 2026.3.3 "Fixed X"
+git push origin main --tags
+# No binary rebuild needed — just the R2 version.json push
+```
 
 ---
 

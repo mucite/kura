@@ -638,15 +638,17 @@ EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
 4. Neutral-Null-Methode: [Ext]-[0]-[Flex], Beispiel Knie: "0-0-90".
 5. Red Flags IMMER im A-Feld: "Red Flags klinisch ausgeschlossen." (oder benennen).
 6. DIAGNOSEN GEHOEREN IN A, NICHT IN S: ICD-10-Codes, Erkrankungsbezeichnungen (z.B. "Gonarthrose", "Bandscheibenvorfall", "Lymphödem"), Diagnose-Aussagen und Vordiagnosen NIEMALS in S schreiben. S enthaelt NUR subjektive Patientenaussagen: Schmerzschilderung, Funktionsziel, Vorgeschichte in eigenen Worten. Wenn der Therapeut eine Diagnose nennt, landet sie in A.
+7. THERAPIEZIEL im P-Feld: SMART formulieren — Spezifisch, Messbar, Erreichbar, Relevant, Terminiert. Beispiel: "Ziel: ROM Knieflexion 0-0-120 in 6 EH."
+8. KPE-DOKUMENTATION (nur bei MLD/Lymph): P-Feld muss alle 4 Komponenten nennen: MLD + Kompressionsbandagierung + Entstauungsgymnastik + Hautpflege.
 
 PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 {checklist}
 
 SOAP-STRUKTUR:
-S: Hauptbeschwerde + Schmerzlokalisation + VAS x/10 + Dauer + Ausloeser
+S: Hauptbeschwerde des Patienten (eigene Worte) + Schmerzlokalisation + VAS x/10 + Dauer + Ausloeser
 O: ALLE klinischen Messwerte und Tests des Profils — KEINE Zusammenfassungen
 A: ICD-10-Diagnose | Differentialdiagnose | Red-Flag-Ausschluss
-P: Heilmittel ({prof["billing"]}) + Technik + Frequenz + messbares Funktionsziel
+P: Heilmittel ({prof["billing"]}) + Technik + Frequenz + SMART-Funktionsziel | Behandler: n.d.
 
 JSON-OUTPUT (alle Felder Pflicht, auch wenn "n.d."):
 {{
@@ -691,6 +693,14 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         if schober and "Schober" not in obj_text:
             obj_text += f" | Schober-Zeichen: {schober.group(1)} - {schober.group(2)}"
 
+        # 1b. Recover Finger-Boden-Abstand (FBA) — most common LWS metric
+        fba = re.search(r"(?:finger.boden|fba)[^\d]*(\d+)\s*cm", transcript, re.I)
+        if fba and "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
+            obj_text += f" | FBA: {fba.group(1)} cm"
+        elif re.search(r"finger.boden|fba", transcript, re.I):
+            if "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
+                obj_text += " | FBA: n.d."
+
         # 2. Recover VAS (Pain scale)
         vas = re.search(r"VAS\s*(\d+)", transcript, re.I)
         if vas and "VAS" not in soap_dict["S"]:
@@ -717,6 +727,16 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         tug = re.search(r"Timed Up and Go.*?(\d+)\s*Sekunden", transcript, re.I)
         if tug and "Timed Up and Go" not in obj_text:
             obj_text += f" | Timed Up & Go: {tug.group(1)}s"
+
+        # Recover Barthel Index
+        barthel = re.search(r"barthel.*?(\d+)", transcript, re.I)
+        if barthel and "barthel" not in obj_text.lower():
+            obj_text += f" | Barthel-Index: {barthel.group(1)}/100"
+
+        # Recover House-Brackmann (Fazialisparese)
+        hb = re.search(r"house.brackmann[^\d]*(grad\s*[IVX]+|\d)", transcript, re.I)
+        if hb and "house" not in obj_text.lower():
+            obj_text += f" | House-Brackmann: {hb.group(1)}"
 
         # Look for Abduction/Adduction or Rotation patterns
         rom_match = re.search(r"(?:Abduktion|Rotation).*?(\d+)\s*(?:zu|bis)\s*0\s*(?:zu|bis)\s*(\d+)", transcript, re.I)
@@ -815,14 +835,22 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         if is_massive:
             stadium = "Stadium 3 (Elephantiasis)"
+            icd_suffix = "02"
         elif is_hard:
             stadium = "Stadium 2 (irreversibel, fibrosiert)"
+            icd_suffix = "01"
         elif is_soft:
             stadium = "Stadium 1 (reversibel, pitting)"
+            icd_suffix = "01"
         elif is_postop:
             stadium = "Stadium 1–2 (postoperativ, noch zu klassifizieren)"
+            icd_suffix = "01"
         else:
             stadium = "Stadium 1–2 (Klassifikation ausstehend — Stemmer-Zeichen prüfen)"
+            icd_suffix = "01"
+
+        # Store inferred suffix for run_full_flow to apply to the ICD-10 code
+        soap_dict["_ly_icd_suffix"] = icd_suffix
 
         # Inject into A-field if not already there
         staging_note = f"Lymphödem {stadium}."
@@ -838,58 +866,291 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         """
         import re
 
-        # 1. Split into Simple Replacements and Regex Patterns
-        # Simple: Exact string match (Case-insensitive)
+        # 1. Simple string replacements (case-insensitive exact match)
         simple_fixes = {
+            # ── Whisper mishearings / compound splits ─────────────────────────
             "Axiola": "Axilla",
             "Sanddemobilisation": "sanfte Mobilisation",
             "chonic": "chronisch",
+            "ischemisch": "ischämisch",
             "Hinterkopfschmerz": "okzipitaler Kopfschmerz",
             "Kinnretraktion": "Kinn-Retraktion",
-            "VKB Plastik": "VKB-Plastik",
-            "Lasek": "Lasègue-Test",
-            "Tuberculum Mayus": "Tuberculum majus",
-            "Gleno-Humeral-Gelenk": "Glenohumeralgelenk",
-            "Subakromialraum": "Subakromialraum",
-            "Jobe Test": "Jobe-Test",
-            "Hawkins Test": "Hawkins-Test",
-            "Supraspinatus-Szene": "Supraspinatussehne",
-            "Jove-Test": "Jobe-Test",
+            "Hochlagerndes": "Hochlagern des",
             "Befallung": "Läsion/Dysfunktion",
+            # ── Muscles ───────────────────────────────────────────────────────
+            "Gastroknemius": "M. gastrocnemius",
+            "Gastrocnemius": "M. gastrocnemius",
+            "Quadrizeps": "M. quadriceps femoris",
+            "Quadriceps": "M. quadriceps femoris",
+            "Deltamuskel": "M. deltoideus",
+            "Deltoideus": "M. deltoideus",
+            "Illiopsoas": "M. iliopsoas",
+            "Hüftbeuger": "M. iliopsoas",
+            "Trapeziusmuskel": "M. trapezius",
+            "Latissimus dorsi": "M. latissimus dorsi",
+            "Bizepsmuskel": "M. biceps brachii",
+            "Bizeps": "M. biceps brachii",
+            "Trizepsmuskel": "M. triceps brachii",
+            "Trizeps": "M. triceps brachii",
+            "Soleus": "M. soleus",
+            "Tibialis anterior": "M. tibialis anterior",
+            "Peroneusmuskel": "M. peroneus longus",
+            "Peroneus": "M. peroneus longus",
+            "Supraspinatusmuskel": "M. supraspinatus",
+            "Infraspinatus": "M. infraspinatus",
+            "Subscapularis": "M. subscapularis",
+            "Serratus anterior": "M. serratus anterior",
+            "Gluteus maximus": "M. gluteus maximus",
+            "Gluteus medius": "M. gluteus medius",
+            "Glutäusmuskel": "M. gluteus maximus",
+            "Piriformismuskel": "M. piriformis",
+            "Hamstrings": "Mm. ischiocrurales",
+            "Ischiocrurale": "Mm. ischiocrurales",
+            "ischio-choraler": "ischiocrurale",
+            "ischo-cural": "ischiocrurale",
+            "autochtoner": "autochthoner",
+            "Adduktoren": "Mm. adductores",
+            "Rückenstrecker": "M. erector spinae",
+            "Brustmuskel": "M. pectoralis major",
+            "SCM": "M. sternocleidomastoideus",
+            "Skalenusse": "Mm. scaleni",
+            "Skalenus": "Mm. scaleni",
+            # ── Tendons ───────────────────────────────────────────────────────
+            "Achilles Sehne": "Achillessehne",
+            "Achilles sehne": "Achillessehne",
+            "Achillesehne": "Achillessehne",
+            "Achillos Sehne": "Achillessehne",
+            "Patella Sehne": "Patellasehne",
+            "Patellarsehne": "Patellasehne",
+            "Patelasehne": "Patellasehne",
+            "Bizeps Sehne": "Bizepssehne",
+            "Supraspinatus Sehne": "Supraspinatussehne",
+            "Supraspinatuss Sehne": "Supraspinatussehne",
+            "Supraspinatuse Sehne": "Supraspinatussehne",
+            "Supraspinatus-Szene": "Supraspinatussehne",
+            # ── Ligaments ─────────────────────────────────────────────────────
+            "VKB Plastik": "VKB-Plastik",
+            "Kreuzbandriss": "Kreuzbandruptur",
+            "Innenband": "MCL (Mediales Kollateralband)",
+            "Außenband": "LCL (Laterales Kollateralband)",
+            "Außenbandriss": "Außenbandruptur",
+            "Deltaligament": "Lig. deltoideum",
+            "Deltaligemant": "Lig. deltoideum",
+            # ── Joints ────────────────────────────────────────────────────────
+            "Schulter Gelenk": "Schultergelenk",
+            "Schultergelenkt": "Schultergelenk",
+            "Knie Gelenk": "Kniegelenk",
+            "Hüft Gelenk": "Hüftgelenk",
+            "Hand Gelenk": "Handgelenk",
+            "Sprung Gelenk": "Sprunggelenk",
+            "Ellenbogen Gelenk": "Ellbogengelenk",
+            "Ellenbogengelenk": "Ellbogengelenk",
+            "Ileo Sakral Gelenk": "ISG (Iliosakralgelenk)",
+            "Ileo-Sakral-Gelenk": "ISG (Iliosakralgelenk)",
+            "Iliosakralgelenk": "ISG (Iliosakralgelenk)",
+            "Sakroiliakalgelenk": "ISG (Iliosakralgelenk)",
+            "Gleno-Humeral-Gelenk": "Glenohumeralgelenk",
+            "AC Gelenk": "ACG (Akromioklavikulargelenk)",
+            "SC Gelenk": "SCG (Sternoklavikulargelenk)",
+            # ── Bones ─────────────────────────────────────────────────────────
+            "Klabicula": "Klavikula",
+            "Klavicula": "Klavikula",
+            "Clavicula": "Klavikula",
+            "Scapula": "Skapula",
+            "Calcaneus": "Kalkaneus",
+            "Kalcaneus": "Kalkaneus",
+            "Tuberculum Mayus": "Tuberculum majus",
             "Mayus": "majus",
+            # ── Nerves ────────────────────────────────────────────────────────
+            "Ischiasnerv": "N. ischiadicus",
+            "Ischias Nerv": "N. ischiadicus",
+            "N Ischiadikus": "N. ischiadicus",
+            "Nervus ischiadicus": "N. ischiadicus",
+            "Medianusnerv": "N. medianus",
+            "Median Nerv": "N. medianus",
+            "Radialisnerv": "N. radialis",
+            "Ulnarisnerv": "N. ulnaris",
+            "Peroneusnerv": "N. peroneus communis",
+            "Peronäusnerv": "N. peroneus communis",
+            "Facialisparese": "Fazialisparese",
+            "Fazialiesparese": "Fazialisparese",
+            "Faziale Parese": "Fazialisparese",
+            "Fazialislähmung": "Fazialisparese",
+            # ── Clinical tests ────────────────────────────────────────────────
+            "Lasek": "Lasègue-Test",
+            "Jobe Test": "Jobe-Test",
+            "Jobe-test": "Jobe-Test",
+            "Jobbe Test": "Jobe-Test",
+            "Jobbe-Test": "Jobe-Test",
+            "Jove-Test": "Jobe-Test",
+            "Hawkins Test": "Hawkins-Test",
+            "Hawkins Kennedy Test": "Hawkins-Kennedy-Test",
+            "Hawkins Kennedy": "Hawkins-Kennedy-Test",
+            "Neer Test": "Neer-Test",
+            "Neer Zeichen": "Neer-Zeichen",
+            "Apley Test": "Apley-Test",
+            "Apley Grinding": "Apley-Grinding-Test",
+            "McMurray Test": "McMurray-Test",
+            "Mc Murray Test": "McMurray-Test",
+            "Lachmann Test": "Lachman-Test",
+            "Lachmann-Test": "Lachman-Test",
+            "Drawer Test": "Schubladentest",
+            "Drawer-Test": "Schubladentest",
+            "Schubladen Test": "Schubladentest",
+            "FABER Test": "FABER-Test",
+            "Faber Test": "FABER-Test",
+            "Patrick Test": "Patrick-Test (FABER)",
+            "Thomas Test": "Thomas-Test",
+            "Ober Test": "Ober-Test",
+            "Spurling Test": "Spurling-Test",
+            "Bragard Test": "Bragard-Test",
+            "Slump Test": "Slump-Test",
+            "Drop Arm Test": "Drop-Arm-Test",
+            "Speed Test": "Speed-Test",
+            "Yergason Test": "Yergason-Test",
+            "Pivot Shift Test": "Pivot-Shift-Test",
+            "Stemmer Zeichen": "Stemmer-Zeichen",
+            "Stemmer-zeichen": "Stemmer-Zeichen",
+            "Stämmer": "Stemmer-Zeichen",
+            "Stemmerzeichen": "Stemmer-Zeichen",
+            "Tinel Zeichen": "Tinel-Zeichen",
+            "Phalen Test": "Phalen-Test",
+            "Finkelstein Test": "Finkelstein-Test",
+            "Schober Zeichen": "Schober-Zeichen",
+            "Schoberzeichen": "Schober-Zeichen",
+            "Finger Boden Abstand": "Finger-Boden-Abstand (FBA)",
+            "Finger-Boden Abstand": "Finger-Boden-Abstand (FBA)",
+            "Timed Up and Go": "Timed-Up-and-Go-Test",
+            "Hoehn Yahr": "Hoehn-Yahr-Skala",
+            "House Brackmann": "House-Brackmann-Skala",
+            "Ashworth Skala": "Ashworth-Skala",
+            "Barthel Index": "Barthel-Index",
+            # ── Diagnoses ─────────────────────────────────────────────────────
+            "Gonartrose": "Gonarthrose",
+            "Coxarthrose": "Koxarthrose",
+            "Epikondilitis": "Epikondylitis",
+            "Epicondylitis": "Epikondylitis",
+            "Tennisellbogen": "Laterale Epikondylitis (Tennisellbogen)",
+            "Golferellbogen": "Mediale Epikondylitis (Golferellbogen)",
+            "Tendinopatie": "Tendinopathie",
+            "Tendinopathia": "Tendinopathie",
+            "Bursitas": "Bursitis",
+            "Carpaltunnelsyndrom": "Karpaltunnelsyndrom",
+            "Karpaltunnel Syndrom": "Karpaltunnelsyndrom",
+            "Bandscheiben Vorfall": "Bandscheibenvorfall",
+            "Bandscheibenprolaps": "Bandscheibenvorfall (Prolaps)",
+            "Bandscheiben Prolaps": "Bandscheibenvorfall (Prolaps)",
+            "Bandscheiben Protrusion": "Bandscheibenprotrusion",
+            "Spinalkanel Stenose": "Spinalkanalstenose",
+            "Spinalstenose": "Spinalkanalstenose",
+            "Frozen Shoulder": "Frozen Shoulder (Schultersteife, adhäsive Kapsulitis)",
+            "Schultersteife": "Frozen Shoulder (Schultersteife)",
+            "adhäsive Kapsulitis": "Adhäsive Kapsulitis (Frozen Shoulder)",
+            "Rotatorenmanschetten Ruptur": "Rotatorenmanschettenruptur",
+            "Rotatorenmanschettenriss": "Rotatorenmanschettenruptur",
+            "Schulterimpingement": "Schulter-Impingement-Syndrom",
+            "Plantarfaszitis": "Plantarfasziitis",
+            "Plantarfasziose": "Plantarfasziose",
+            "Hallux Valgus": "Hallux valgus",
+            "Spastik": "Spastizität",
+            "Ataksie": "Ataxie",
+            "Hemiplägie": "Hemiplegie",
+            "Apoplex": "Apoplexie (Schlaganfall)",
+            "Apoplexia": "Apoplexie (Schlaganfall)",
+            "Hemi Parese": "Hemiparese",
+            "Querschnitt Lähmung": "Querschnittlähmung",
+            "Poly Neuropathie": "Polyneuropathie",
+            "Osteoporosse": "Osteoporose",
+            "Fibromyalgia": "Fibromyalgie",
+            "Psoriasisathritis": "Psoriasisarthritis",
+            # ── Techniques ────────────────────────────────────────────────────
+            "Mobilisierung": "Mobilisation",
+            "Mobilization": "Mobilisation",
+            "Manual Therapie": "Manualtherapie",
+            "Manuele Therapie": "Manualtherapie",
+            "Manualtherapie": "Manuelle Therapie",
+            "KTaping": "Kinesiotaping",
+            "K-Taping": "Kinesiotaping",
+            "Kinesio Taping": "Kinesiotaping",
+            "TENS Behandlung": "TENS-Behandlung",
+            "Ultraschall Therapie": "Ultraschalltherapie",
+            "Ultraschall-Therapie": "Ultraschalltherapie",
+            "Wärme Therapie": "Wärmetherapie",
+            "Kälte Therapie": "Kältetherapie",
+            "Schlingentisch": "Schlingentisch",
+            "Schlingen Tisch": "Schlingentisch",
+            "Stoßwellentherapie": "Stoßwellentherapie",
+            "Schockwellentherapie": "Stoßwellentherapie",
+            "KG am Gerät": "KGG (Krankengymnastik am Gerät)",
+            # ── Lymphology ────────────────────────────────────────────────────
+            "Manuelle Lymph Drainage": "MLD (Manuelle Lymphdrainage)",
+            "Manuelle Lymphdrainage": "MLD (Manuelle Lymphdrainage)",
+            "Lymphoedem": "Lymphödem",
+            "Lymphodem": "Lymphödem",
+            "Lymphödes": "Lymphödem",
+            "Oedema": "Ödem",
+            "Oedem": "Ödem",
+            "Anastomosen": "Lymph-Anastomosen",
+            "Kompressions Therapie": "Kompressionstherapie",
+            "Kompressionsstrumpf": "Kompressionsstrumpf Kl.",
+            # ── Neurotherapy approach names ───────────────────────────────────
             "Bobad": "Bobath",
             "Bobert": "Bobath",
-            "P N F": "PNF",
-            "ischemisch": "ischämisch",
-            "Zirkumduktion": "Zirkumduktion",
             "Bobart": "Bobath",
+            "P N F": "PNF",
+            "M, M, T": "MMT",
+            # ── Oncology ─────────────────────────────────────────────────────
             "Mama-Karzinom": "Mamma-Karzinom",
             "Mama-Ablation": "Mamma-Ablation",
             "Mamma Ablation": "Mamma-Ablation",
             "Mammaablation": "Mamma-Ablation",
-            "Hochlagerndes": "Hochlagern des",
-            "Lymphödes": "Lymphödem",
-            "Anastomosen": "Lymph-Anastomosen"
+            # ── Scales / measurements ─────────────────────────────────────────
+            "Barthel-index": "Barthel-Index",
+            "Ashworth-skala": "Ashworth-Skala",
+            "modifizierte Ashworth Skala": "Modifizierte Ashworth-Skala (MAS)",
+            "Hoehn-Yahr-skala": "Hoehn-Yahr-Skala",
+            "Epikondylitis lateral": "Laterale Epikondylitis",
+            "Epikondylitis medial": "Mediale Epikondylitis",
         }
 
-        # Complex: Regex patterns for multiple variations
+        # 2. Regex patterns for multi-variant corrections
         regex_fixes = {
-            r"Laseck|Lasegge|Laseque": "Lasègue-Test",
-            r"Schoberzeichen|Schober Zeichen": "Schober-Zeichen",
-            r"Fußheber": "M. extensor hallucis longus (Fußheber)",
-            r"(\d+)\s*zu\s*(\d+)": r"\1 - \2",  # Neutral-Zero fix (10 zu 15 → 10 - 15)
-            # CMD
-            r"CNMD|CMND|CNMT|C\.N\.M\.D\.": "CMD",
-            # Knee instability
+            r"Laseck|Lasegge|Laseque":                   "Lasègue-Test",
+            r"Schoberzeichen|Schober Zeichen":            "Schober-Zeichen",
+            r"Fußheber":                                  "M. extensor hallucis longus (Fußheber)",
+            r"(\d+)\s*zu\s*(\d+)":                       r"\1 - \2",  # Neutral-Zero fix
+            r"CNMD|CMND|CNMT|C\.N\.M\.D\.":              "CMD",
             r"Knieknadi\w*|Knienadig\w*|Knie.?Nadi\w*|Knienachgibigkeit": "Knienachgiebigkeit",
-            # Other compounds
             r"Rotatorenmanschete\b|Rotatoren.?Manschette": "Rotatorenmanschette",
-            r"Impingmentsyndrom|Impingement.?Syndrom": "Impingementsyndrom",
-            r"Plantarfasciitis|Plantar.?Fasziitis": "Plantarfasziitis",
-            r"Karpaltunnel.?Syndrom": "Karpaltunnelsyndrom",
+            r"Impingmentsyndrom|Impingement.?Syndrom":   "Impingement-Syndrom",
+            r"Plantarfasciitis|Plantar.?Fasziitis":      "Plantarfasziitis",
+            r"Karpaltunnel.?Syndrom":                    "Karpaltunnelsyndrom",
             r"Propriozepzion|Propioception|Propiozeption": "Propriozeption",
-            r"Tendinapathie|Tendinopatie": "Tendinopathie",
-            r"Patellofemorales?\s?Schmerz.?Syndrom": "Patellofemoralschmerzsyndrom",
+            r"Tendinapathie|Tendinopatie":               "Tendinopathie",
+            r"Patellofemorales?\s?Schmerz.?Syndrom":     "Patellofemoralschmerzsyndrom",
+            # Spine level normalisation: "L 4" → "L4", "C 5/C 6" → "C5/C6"
+            r"\bL\s*([1-5])\s*/\s*L\s*([1-5])\b":       r"L\1/L\2",
+            r"\bL\s*([1-5])\b(?!\s*/\s*[LS])":           r"L\1",
+            r"\bS\s*([12])\b":                            r"S\1",
+            r"\bC\s*([1-8])\s*/\s*C\s*([1-8])\b":        r"C\1/C\2",
+            r"\bC\s*([1-8])\b(?!\s*/\s*C)":              r"C\1",
+            r"\b[Tt][Hh]\s*([1-9]|1[0-2])\b":           r"BWK\1",  # Th4 → BWK4
+            # Test name hyphenation
+            r"\b(Jobe|Neer|Ober|Thomas|Apley|Phalen|Spurling|Yergason|Lachman|McMurray|Speed)\s+[Tt]est\b": r"\1-Test",
+            r"\b(Hawkins)[- ](Kennedy)[- ][Tt]est\b":    r"\1-\2-Test",
+            r"\b(Pivot)[- ](Shift)[- ][Tt]est\b":        r"\1-\2-Test",
+            r"\b(Drop)[- ](Arm)[- ][Tt]est\b":           r"\1-\2-Test",
+            r"\b(Valgus|Varus)[- ](Stress)[- ][Tt]est\b": r"\1-\2-Test",
+            # VAS/NRS score normalisation: "VAS 7 von 10" → "VAS 7/10"
+            r"\b(VAS|NRS)\s+(\d{1,2})\s+(?:von|of|aus)\s+10\b": r"\1 \2/10",
+            # ICD-10 spacing fix: "M 54.5" → "M54.5"
+            r"\b([A-Z])\s+(\d{2})\.(\d{1,2})\b":        r"\1\2.\3",
+            # LWS/HWS/BWS compound hyphenation
+            r"\b(LWS|HWS|BWS)[- ](Syndrom|Schmerzen|Problematik|Beschwerden)\b": r"\1-\2",
+            # ISG compound hyphenation
+            r"\bISG[- ](Blockierung|Dysfunktion|Syndrom)\b": r"ISG-\1",
+            # Rheumatology
+            r"Spondylitis\s+Ankylosans":                 "Spondylitis ankylosans",
         }
 
         for key in ["S", "O", "A", "P"]:
@@ -1083,6 +1344,15 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         parsed["soap"] = self.recover_hard_metrics(transcript, parsed["soap"])
         if profile_id == "LY":
             parsed["soap"] = self._inject_ly_staging(transcript, parsed["soap"])
+            # Apply ICD-10 staging suffix (Oct 2024 rule: terminal staging code required)
+            suffix = parsed["soap"].pop("_ly_icd_suffix", None)
+            if suffix and re.match(r"^[IQE]\d{2}\.\d$", icd):
+                icd = icd + suffix  # e.g. I89.0 → I89.001, but use correct format
+            elif suffix and re.match(r"^[IQE]\d{2}\.\d0?$", icd):
+                # Normalise: I89.0 → I89.01, I97.2 → I97.21, E88.2 → E88.21
+                base = icd.rstrip("0") if icd.endswith("0") and len(icd) > 5 else icd
+                icd = base + suffix
+                parsed["icd10"] = icd
         parsed["soap"] = self._migrate_diagnoses_from_s_to_a(parsed["soap"])
         parsed["soap"] = self._clean_hallucinated_regions(parsed["soap"], icd, profile_id)
         parsed["soap"] = self._inject_bladder_bowel_into_objective(transcript, parsed["soap"])
@@ -1174,13 +1444,16 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                     res_icd = "M51.1"
 
         # --- 3. BILLING ALLOCATION (Hierarchical) ---
+        # Apply ICD domain lock before billing allocation
+        res_icd = self._lock_icd_domain(res_icd, soap, transcript)
+
         # Rule: If 'Krankengymnastik' is explicitly dictated as the work type,
         # we don't 'Upcode' to MT even if mobilisation is mentioned.
         if "krankengymnastik" in plan_text or " kg" in plan_text:
-            if is_neuro: return res_icd, codes.get("KG_ZNS", "20511")
+            if is_neuro: return res_icd, codes.get("KG_ZNS", "20710")
             return res_icd, codes.get("KG", "20501")
 
-        if is_neuro: return res_icd, codes.get("KG_ZNS", "20511")
+        if is_neuro: return res_icd, codes.get("KG_ZNS", "20710")
         # MT must NOT override lymph — a lymph case mentioning "mobilisation" is still MLD
         if is_ortho_mt and not is_lymph: return res_icd, codes.get("MT", "21201")
         if is_lymph:
@@ -1189,15 +1462,84 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 "ablation", "mastektomie", "mamma", "sentinel",
                 "bestrahlung", "axillaer", "onkol", "karzinom",
             ])
-            duration_60 = bool(re.search(r"60\s*(?:min|minuten)", t_low))
             if is_post_cancer:
-                res_icd = "I97.2" if not res_icd.startswith("I97") else res_icd
-                return res_icd, codes.get("KPE", "21110")
-            if duration_60:
+                res_icd = "I97.21" if not res_icd.startswith("I97") else res_icd
+                return res_icd, codes.get("KPE_I", "21110")
+
+            # Oct 2024 rule: duration determined by stadium, not just time keyword
+            # Stadium II/III or explicit 60-min → MLD-60 (20202)
+            # Stadium I, two body parts or explicit 45-min → MLD-45 (20201)
+            # Stadium I, one body part or explicit 30-min → MLD-30 (20205)
+            is_stadium2_3 = any(k in t_low for k in [
+                "stadium 2", "stadium 3", "irreversibel", "fibrosiert",
+                "elephantiasis", "hart", "derb",
+            ])
+            two_parts = bool(re.search(
+                r"arm.*bein|bein.*arm|beidseitig|bilateral|"
+                r"(?:hand|ober|unter).{0,10}(?:ober|unter)|zwei.{0,10}(?:glied|extrem)",
+                t_low
+            ))
+            explicit_60 = bool(re.search(r"60\s*(?:min|minuten)", t_low))
+            explicit_30 = bool(re.search(r"30\s*(?:min|minuten)", t_low))
+
+            if is_stadium2_3 or explicit_60:
                 return res_icd, codes.get("MLD_60", "20202")
-            return res_icd, codes.get("MLD", "20201")
+            if explicit_30 and not two_parts:
+                return res_icd, codes.get("MLD_30", "20205")
+            return res_icd, codes.get("MLD_45", "20201")
 
         return res_icd, codes.get("KG", "20501")
+
+    def _lock_icd_domain(self, icd10: str, soap: dict, transcript: str) -> str:
+        """
+        Safety net: prevent cross-domain ICD-10 coding errors.
+        E.g. a stroke patient must never receive a knee code (M17).
+        Uses a 2-hit confidence threshold for hard blocks.
+        """
+        if not icd10:
+            return icd10
+
+        t = transcript.lower() if isinstance(transcript, str) else ""
+        a_text = (soap.get("A", "") or "").lower()
+        combined = f"{t} {a_text}"
+
+        # M51.1 carve-out: disc herniation with neurological signs is legitimately M5x
+        if re.match(r"^M5[0-9]", icd10):
+            disc_neuro = bool(re.search(
+                r"bandscheib|diskus|prolaps|protrusion|radikulär|ausstrahlung|dermatom",
+                combined
+            ))
+            if disc_neuro:
+                return icd10  # preserve M51.1 etc.
+
+        # Domain keyword sets
+        domains = {
+            "neuro_stroke":  (["schlaganfall", "apoplex", "insult", "hemiparese", "hemiplegie",
+                                "hirninfarkt", "tia", "stroke"], "I69.3"),
+            "neuro_parkinson": (["parkinson", "tremor", "rigor", "brady­kinese", "bradykinese",
+                                  "hoehn yahr", "hoehn-yahr"], "G20"),
+            "neuro_ms":      (["multiple sklerose", "ms-schub", "ms schub", "demyelini",
+                                "fatigue ms", "gangstörung ms"], "G35"),
+            "neuro_facial":  (["fazialisparese", "fazialis", "bell'sche", "bellsche",
+                                "gesichtslähmung", "house-brackmann"], "G51.0"),
+            "lymph":         (["lymphödem", "lymphdrainage", "mld", "entstauung",
+                                "stemmer", "kpe", "lipödem"], "I89.0"),
+            "copd":          (["copd", "atemwegsobstruktion", "emphysem", "dyspnoe",
+                                "atemtherapie", "atemübung"], "J44.1"),
+        }
+
+        for domain, (keywords, fallback_icd) in domains.items():
+            hits = sum(1 for kw in keywords if kw in combined)
+            if hits >= 2:
+                # Hard block: if current ICD belongs to wrong chapter, override
+                if domain.startswith("neuro_") and icd10[0] == "M":
+                    return fallback_icd
+                if domain == "lymph" and icd10[0] == "M":
+                    return fallback_icd
+                if domain == "copd" and icd10[0] == "M":
+                    return fallback_icd
+
+        return icd10
 
     # Terms that are out-of-scope for each profile domain.
     # If these appear as diagnoses in A (not as exclusions), they are hallucinations.

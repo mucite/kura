@@ -286,24 +286,30 @@ _HMK: dict[str, dict] = {
         "heilmittel": "MLD", "position": "20201",
         "name": "Manuelle Lymphdrainage 45 Min",
         "duration": 45, "regelfall": 6, "langfristig": True,
-        "icd": ["Q82.0", "I89.0"],
-        "docs": ["Stemmer-Zeichen", "Umfangsmessung (cm)", "Stadium (1-3)", "Ödemkonsistenz"],
+        # ICD with stage suffixes (Oct 2024 rule: terminal code required on prescription)
+        "icd": ["Q82.0", "Q82.00", "Q82.01", "Q82.02", "I89.0", "I89.00", "I89.01", "I89.02"],
+        "docs": ["Stemmer-Zeichen", "Umfangsmessung (cm)", "Stadium (1-3)", "Ödemkonsistenz",
+                 "Hautbefund (Rötung/Hyperkeratose)"],
     },
     "LY2": {
         "desc": "Sekundäres Lymphödem (postoperativ, Post-Cancer, Bestrahlung)",
         "heilmittel": "KPE", "position": "21110",
         "name": "Komplexe Physikalische Entstauungstherapie Phase I",
         "duration": 60, "regelfall": 6, "langfristig": True,
-        "icd": ["I89.0", "I97.2", "I97.89", "C77", "C78", "C79"],
-        "docs": ["Ödem-Stadium", "Umfangsmessung beidseitig", "Stemmer-Zeichen", "Onkolog. Vordiagnose"],
+        "icd": ["I89.0", "I89.01", "I89.02", "I97.2", "I97.21", "I97.22", "I97.89", "C77", "C78", "C79"],
+        "docs": ["Ödem-Stadium", "Umfangsmessung beidseitig", "Stemmer-Zeichen",
+                 "Onkolog. Vordiagnose", "KPE-Komponenten", "Hautbefund (Rötung/Hyperkeratose)"],
     },
     "LY3": {
-        "desc": "Lipödem (kombiniert mit Lymphödem)",
-        "heilmittel": "MLD", "position": "20201",
+        # Lipödem is BVB (Besonderer Verordnungsbedarf), NOT LHB — extrabudgetary through 31.12.2025
+        # Must always be prescribed alongside KPE, not MLD alone
+        "desc": "Lipödem (Besonderer Verordnungsbedarf — BVB bis 31.12.2025)",
+        "heilmittel": "MLD+KPE", "position": "20201",
         "name": "Manuelle Lymphdrainage 45 Min",
-        "duration": 45, "regelfall": 6, "langfristig": True,
-        "icd": ["E88.2"],
-        "docs": ["Stemmer-Zeichen", "Umfangsmessung (cm)", "Konsistenz", "Stadium (1-3)"],
+        "duration": 45, "regelfall": 6, "langfristig": False, "bvb": True,
+        "icd": ["E88.2", "E88.20", "E88.21", "E88.22"],
+        "docs": ["Stemmer-Zeichen", "Umfangsmessung (cm)", "Konsistenz", "Stadium (1-3)",
+                 "KPE-Komponenten", "Hautbefund (Rötung/Hyperkeratose)"],
     },
     "LY4": {
         "desc": "Chronisch venöse Insuffizienz mit sekundärem Lymphödem",
@@ -380,6 +386,7 @@ def _match_dg(icd10: str) -> Optional[str]:
 # may deviate — always check your individual Kassenzulassung.
 
 _GKV_PRICES: dict[str, float] = {
+    "20300": 34.34,   # Physiotherapeutische Diagnostik (Blankoverordnung, ab 01.11.2024)
     "20500": 30.83,   # KG Erstbefundung 30 min (ab 01.01.2026)
     "20501": 29.63,   # KG Einzelbehandlung 20 min (ab 01.01.2026)
     "20502": 29.63,   # KG Hausbesuch 20 min
@@ -527,6 +534,25 @@ _DOC_CHECKERS: dict = {
     "Unfallhergang dokumentiert":      lambda t: "unfall" in t or "hergang" in t,
     "BG-Fallnummer / Aktenzeichen":    lambda t: "bg-fall" in t or "aktenzeichen" in t or "fallnummer" in t,
     "Erstbehandlungsdatum":            lambda t: "erstbehandlung" in t,
+    # KPE 4 mandatory components (§125 SGB V): MLD + Kompression + Entstauungsgymnastik + Hautpflege
+    "KPE-Komponenten":                 lambda t: (
+        any(k in t for k in ["mld", "lymphdrainage"]) and
+        any(k in t for k in ["kompression", "bandagier", "kompressionsklasse", "strumpf"]) and
+        any(k in t for k in ["entstauungsgymnastik", "übung", "bewegungsübung", "aktivierung"])
+    ),
+    # Lymphedema skin assessment (mandatory in LY audit)
+    "Hautbefund (Rötung/Hyperkeratose)": lambda t: any(k in t for k in [
+        "hautbefund", "rötung", "erythem", "hyperkeratose", "papillomatose",
+        "haut trocken", "haut unauffällig", "kein erysipel", "erysipel",
+    ]),
+    # Volume difference ≥10% clinical threshold for lymphedema significance
+    "Umfangsdifferenz ≥10%":           lambda t: bool(re.search(
+        r"(?:10|1[1-9]|[2-9]\d)\s*%|differenz.*\d+\s*cm|\d+\s*cm.*differenz|"
+        r"re\..*\d+.*li\..*\d+|li\..*\d+.*re\..*\d+|"
+        r"(?:mehr|größer|kleiner|unterschied).*\d+\s*cm", t
+    )),
+    # FBA (Finger-Boden-Abstand) — most common WS objective metric
+    "FBA (Finger-Boden-Abstand)":      lambda t: bool(re.search(r"fba|finger.boden", t)),
 }
 
 
@@ -688,6 +714,37 @@ class _GKVEngine:
                 "Cauda-equina-Screening fehlt im Objektiven Befund. "
                 "Bitte ergänzen: 'Blasen-/Mastdarmfunktion: unauffällig' (oder Befund)."
             ))
+
+        # ── 10c. KPE 4-component documentation (LY2/LY3) ─────────────────────
+        if dg in ("LY2", "LY3"):
+            kpe_checker = _DOC_CHECKERS["KPE-Komponenten"]
+            has_kpe = kpe_checker((obj + plan).lower())
+            audit.append(AuditItem(
+                "KPE_4COMP", "KPE 4 Komponenten (§125 SGB V Pflicht)",
+                "PASS" if has_kpe else "FAIL",
+                "" if has_kpe else
+                "KPE: MLD + Kompressionsbandagierung + Entstauungsgymnastik + Hautpflege "
+                "müssen pro Sitzung dokumentiert sein — fehlendes Element = Down-Coding zu MLD."
+            ))
+            if not has_kpe:
+                risk = "WARN"
+
+        # ── 10d. Lipödem BVB-Hinweis ──────────────────────────────────────────
+        if dg == "LY3":
+            audit.append(AuditItem(
+                "LY3_BVB", "Lipödem — Besonderer Verordnungsbedarf",
+                "WARN",
+                "Lipödem (E88.2x) ist BVB, nicht LHB. Rezept muss als "
+                "'Besonderer Verordnungsbedarf' (extrabudgetär) ausgestellt sein — bis 31.12.2025."
+            ))
+
+        # ── 10e. Prescription start-window reminder (§125 SGB V) ──────────────
+        audit.append(AuditItem(
+            "RX_START_WINDOW", "Rezeptfrist-Prüfung (28 Tage)",
+            "WARN",
+            "Behandlungsbeginn innerhalb 28 Tagen ab Rezeptdatum erforderlich "
+            "(14 Tage bei 'dringend'). Häufigste Absetzungsursache — Datum prüfen!"
+        ))
 
         # ── 11. Red flag check — BLOCKS billing ────────────────────────────────
         red = self._red_flag_audit(soap)

@@ -5,7 +5,26 @@ Handles multi-practice deployment with § 125 Abs. 1 SGB V compliance
 import json
 import os
 import platform
+import sys
 from datetime import datetime
+
+# ── Fix stdout/stderr encoding for Windows ────────────────────────────────────
+# Windows console uses cp1252 by default which can't handle Unicode/emojis
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
+elif hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w', encoding='utf-8')
+elif hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 class PracticeConfig:
     """Manages practice-specific configurations"""

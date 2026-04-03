@@ -9,6 +9,26 @@ import os
 import re
 import sys
 
+# ── Fix Windows encoding issues ────────────────────────────────────────────────
+# Windows console uses cp1252 by default which can't handle Unicode/emojis
+if sys.platform == 'win32':
+    # Set UTF-8 for stdout/stderr
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, 'w', encoding='utf-8')
+    elif hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
+
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, 'w', encoding='utf-8')
+    elif hasattr(sys.stderr, 'reconfigure'):
+        try:
+            sys.stderr.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from shared.config_manager import ConfigManager

@@ -2,12 +2,33 @@ import copy
 import json
 import os
 import platform
+import sys
+
+# ── Fix stdout/stderr encoding for Windows ────────────────────────────────────
+# Windows console uses cp1252 by default which can't handle Unicode/emojis
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
+elif hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w', encoding='utf-8')
+elif hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 from .practice_config import PracticeConfig
 
 # Paths - platform-specific
 if platform.system() == "Windows":
-    _DATA_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "Kura")
+    # Try APPDATA first, then LOCALAPPDATA, then user home as fallback
+    appdata = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    _DATA_DIR = os.path.join(appdata, "Kura")
 else:
     # macOS and Linux
     _DATA_DIR = os.path.expanduser("~/Library/Application Support/Kura")

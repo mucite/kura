@@ -65,12 +65,26 @@ reports/
 .LSOverride
 ._*
 
-# Models (large files)
+# Models (large files - NEVER commit)
 models/
+*.pt
+*.gguf
+*.bin
+*.safetensors
+
+# Website and development docs
 website/
 .claude
 
-# Temporary files
+# Temporary files and logs
 *.log
 *.tmp
-**/*.md
+
+# Temporary documentation (bug fixes)
+FIXES_APPLIED.md
+WINDOWS_BOOT_FIX.md
+FINAL_BOOT_FIX_COMPLETE.md
+CLEANUP_COMPLETE.md
+STDOUT_FIX.md
+BUILD_GUIDE.md
+QUICK_BUILD_REFERENCE.md

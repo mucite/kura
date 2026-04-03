@@ -15,9 +15,28 @@ import os
 import platform
 import re
 import subprocess
+import sys
 from datetime import datetime, timedelta
 
 import requests
+
+# ── Fix stdout/stderr encoding for Windows ────────────────────────────────────
+# Windows console uses cp1252 by default which can't handle Unicode/emojis
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
+elif hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w', encoding='utf-8')
+elif hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # ── Digistore24 REST API ──────────────────────────────────────────────────────
 # Docs: https://www.digistore24.com/app/tools.api
@@ -39,14 +58,26 @@ _KEY_RE = re.compile(r'^[A-Z0-9]{5}(-[A-Z0-9]{5}){7}$')
 class LicenseManager:
 
     def __init__(self):
-        # Platform-specific data directory
+        # Platform-specific data directory with robust fallback
         if platform.system() == "Windows":
-            data_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "Kura")
+            # Try APPDATA first, then LOCALAPPDATA, then user home as absolute fallback
+            appdata = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+            data_dir = os.path.join(appdata, "Kura")
         else:
             # macOS and Linux
             data_dir = os.path.expanduser("~/Library/Application Support/Kura")
 
-        os.makedirs(data_dir, exist_ok=True)
+        # Create directory with error handling
+        try:
+            os.makedirs(data_dir, exist_ok=True)
+        except Exception as dir_err:
+            print(f"Warning: Could not create license data directory {data_dir}: {dir_err}")
+            # Fallback to user home if main directory fails
+            data_dir = os.path.join(os.path.expanduser("~"), ".kura_data")
+            try:
+                os.makedirs(data_dir, exist_ok=True)
+            except Exception:
+                print(f"Critical: Could not create fallback directory either")
 
         self.license_file     = os.path.join(data_dir, "license.json")
         self.trial_file       = os.path.join(data_dir, "trial.dat")

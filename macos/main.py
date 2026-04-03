@@ -981,7 +981,7 @@ class KuraApp(rumps.App):
 
         # Simple patient name input
         window = rumps.Window(
-            message="Vorname Nachname (z. B. Max Mustermann):",
+            message="Vorname Nachname (z. B. Müller, Schäfer, Voß):",
             title="Neue Sitzung",
             default_text="",
             ok="Weiter",
@@ -991,8 +991,14 @@ class KuraApp(rumps.App):
         response = window.run()
 
         if response.clicked:
-            # Just use the name - timestamp will make it unique
-            raw_input = response.text.strip().replace(" ", "_")
+            import unicodedata
+            raw = response.text.strip()
+            # NFC-normalise so ä/ö/ü/ß typed via dead keys are one codepoint
+            raw = unicodedata.normalize("NFC", raw)
+            # Keep all letters (including ä ö ü Ä Ö Ü ß) and digits; replace only
+            # filesystem-unsafe characters (/ \ : * ? " < > |) with nothing
+            raw = re.sub(r'[/\\:*?"<>|]', '', raw)
+            raw_input = raw.strip().replace(" ", "_")
             self.patient_name = raw_input if raw_input else "Patient"
 
             # Insurance type dialog — three buttons, GKV is default (OK)
@@ -1261,7 +1267,8 @@ class KuraApp(rumps.App):
             return
 
         # Organize by date since patient names can repeat: archive/YYYY-MM-DD/HHMMSS_PatientName.pdf
-        safe_name = self.patient_name.replace(' ', '_')
+        import unicodedata as _ud
+        safe_name = _ud.normalize("NFC", self.patient_name.replace(' ', '_'))
         now = datetime.now()
         date_folder = now.strftime("%Y-%m-%d")  # ISO format for sorting
         time_str = now.strftime("%H%M%S")  # Include seconds for collision-proof naming

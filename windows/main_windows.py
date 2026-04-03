@@ -255,6 +255,11 @@ class KuraApp:
             messagebox.showerror("Kura", "Bitte geben Sie einen Patientennamen ein.")
             return
 
+        import unicodedata
+        # NFC-normalise so ä/ö/ü/ß are single codepoints (important for file paths)
+        patient = unicodedata.normalize("NFC", patient)
+        # Remove only filesystem-unsafe characters; German letters (äöüÄÖÜß) are kept
+        patient = re.sub(r'[/\\:*?"<>|]', '', patient)
         self.patient_name = patient.replace(" ", "_") or "Patient"
         self.recording = True
         self.seconds_elapsed = 0
@@ -634,7 +639,8 @@ class KuraApp:
             messagebox.showerror("Kura", "Kein Bericht zum Speichern vorhanden.")
             return
 
-        safe_name = self.patient_name.replace(" ", "_")
+        import unicodedata as _ud
+        safe_name = _ud.normalize("NFC", self.patient_name.replace(" ", "_"))
         now = datetime.now()
         date_folder = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H%M%S")
@@ -1102,9 +1108,10 @@ class KuraApp:
         patient_frame.pack(fill="x", padx=10, pady=5)
 
         ctk.CTkLabel(patient_frame, text="Patient:", font=("Arial", 12)).pack(side="left", padx=5)
-        self.patient_entry = ctk.CTkEntry(patient_frame, width=250)
+        self.patient_entry = ctk.CTkEntry(patient_frame, width=250,
+                                          font=("Arial", 12),
+                                          placeholder_text="Müller, Schäfer, Voß …")
         self.patient_entry.pack(side="left", padx=5)
-        self.patient_entry.insert(0, "Weber")
 
         # Insurance type frame
         insurance_frame = ctk.CTkFrame(patient_frame)

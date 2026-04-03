@@ -804,12 +804,14 @@ class _GKVEngine:
             return "LY1"
         if any(k in text for k in ["skoliose", "schroth", "rippenbuckel"]):
             return "WS3"
+        if any(k in text for k in ["hws", "nacken", "zervikal", "trapezius",
+                                   "schädelbasis", "scaleni", "subokzipital",
+                                   "spannungskopfschmerz", "kopfschmerz", "c5", "c6", "c7"]):
+            return "WS1a"
         if any(k in text for k in ["schulter", "impingement", "rotatorenmanschette"]):
             return "EX2"
         if any(k in text for k in ["knie", "gonarthrose", "meniskus"]):
             return "EX3"
-        if any(k in text for k in ["hws", "nacken", "zervikal"]):
-            return "WS1a"
         if any(k in text for k in ["copd", "asthma", "atemweg"]):
             return "AT1"
         if any(k in text for k in ["handgelenk", "handwurzel", "radiusfraktur", "radius",

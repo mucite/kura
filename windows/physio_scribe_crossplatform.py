@@ -434,10 +434,13 @@ class KuraEngine:
         "EX_HWS": {
             "label":    "HWS / Zervikalsyndrom",
             "billing":  "21201",
-            "priority": 43,
+            "priority": 55,
             "triggers": [
                 "hws", "halswirbel", "zervikalsyndrom", "cervical", "nacken",
                 "kopfschmerz", "okzipital", "torticollis", "schleudertrauma",
+                "trapezius", "schädelbasis", "scaleni", "subokzipital",
+                "spannungskopfschmerz", "nackenmuskeln", "kinn-retraktion",
+                "segment c", "c5", "c6", "c7",
             ],
             "icd_prefix": ["M54.2", "M50", "G44"],
             "checklist": [
@@ -912,6 +915,12 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             "Hochlagerndes": "Hochlagern des",
             "Befallung": "Läsion/Dysfunktion",
             # ── Muscles ───────────────────────────────────────────────────────
+            "M. Levator Skapulay": "M. levator scapulae",
+            "Levator Skapulay": "M. levator scapulae",
+            "Levator scapulay": "M. levator scapulae",
+            "Levator Scapulay": "M. levator scapulae",
+            "Wärmeam": "Wärmeanwendung",
+            "Wärme am ": "Wärmeanwendung ",
             "Gastroknemius": "M. gastrocnemius",
             "Gastrocnemius": "M. gastrocnemius",
             "Quadrizeps": "M. quadriceps femoris",
@@ -1646,6 +1655,18 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         t = transcript.lower() if isinstance(transcript, str) else ""
         a_text = (soap.get("A", "") or "").lower()
         combined = f"{t} {a_text}"
+
+        # Tension headache / cervicogenic headache → G44.2 (prevents M45/M51 upcoding)
+        is_tension_ha = any(k in t for k in [
+            "spannungskopfschmerz", "tension headache", "kopfschmerz",
+            "schädelbasis", "subokzipital",
+        ])
+        is_hws_context = any(k in t for k in [
+            "nacken", "hws", "trapezius", "scaleni", "zervik", "cervical",
+        ])
+        if is_tension_ha and is_hws_context:
+            if re.match(r"^M4[5-9]|^M51|^M54$", icd10):
+                return "G44.2"  # Spannungskopfschmerz — no M45/M51 for headache sessions
 
         # M51.1 carve-out: disc herniation with neurological signs is legitimately M5x
         if re.match(r"^M5[0-9]", icd10):

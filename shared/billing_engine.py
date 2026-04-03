@@ -801,22 +801,15 @@ class _GKVEngine:
         plan = soap.get("P", "")
         assess = soap.get("A", "")
 
-        # SOAP field checks — emit only on FAIL, PASS is assumed and not listed
-        if len(subj) <= 15:
-            audit.append(AuditItem("SOAP_S", "S-Feld (Subjektiv)", "FAIL",
-                                   "Subjektiver Befund zu kurz oder fehlt"))
+        # SOAP field checks — only A-field is billing-critical (no diagnosis = invalid claim)
         if len(assess) <= 10:
             audit.append(AuditItem("SOAP_A", "A-Feld (Assessment/Diagnose)", "FAIL",
                                    "Diagnose fehlt"))
-        if len(plan) <= 15:
-            audit.append(AuditItem("SOAP_P", "P-Feld (Therapieplan)", "FAIL",
-                                   "Therapieplan fehlt oder zu unspezifisch"))
 
-        # ── 5. Befunddichte §106b ──────────────────────────────────────────────
-        min_len = 60 if position in ("21201", "20511", "20510") else 20
-        if len(obj) < min_len:
+        # ── 5. Befunddichte §106b — only meaningful for high-scrutiny positions ──
+        if position in ("21201", "20511", "20510") and len(obj) < 60:
             audit.append(AuditItem("OBJ_DENSITY", "O-Feld Befunddichte",
-                                   "FAIL", f"Nur {len(obj)} Zeichen — mindestens {min_len} erforderlich"))
+                                   "FAIL", f"Nur {len(obj)} Zeichen — mindestens 60 für MT/ZNS erforderlich"))
             risk = "WARN"
 
         # ── 6. Neutral-Null ROM format — FAIL only for MT (21201), not a WARN elsewhere ─

@@ -1001,25 +1001,47 @@ class KuraApp(rumps.App):
             raw_input = raw.strip().replace(" ", "_")
             self.patient_name = raw_input if raw_input else "Patient"
 
-            # Insurance type dialog — three buttons, GKV is default (OK)
+            # Insurance type — use a Window (text input disabled) so it gets
+            # proper focus on macOS status-bar apps. rumps.alert() with
+            # other= loses activation after the patient-name dialog closes
+            # and appears hidden behind other windows on macOS 13+.
             from shared.billing_engine import InsuranceType
-            ins_choice = rumps.alert(
-                title="Versicherungstyp",
+            import AppKit as _AK
+            _AK.NSApp.activateIgnoringOtherApps_(True)
+            ins_win = rumps.Window(
                 message="Welche Versicherung hat der Patient?\n\n"
-                        "  GKV — Gesetzlich  (§ 125 SGB V, Festpreise)\n"
-                        "  PKV — Privat  (GebüTh, freie Preise)\n"
-                        "  BG  — Berufsgenossenschaft  (DGUV)",
+                        "GKV — Gesetzlich (§125 SGB V)   →  OK\n"
+                        "PKV — Privat (GebüTh)              →  PKV\n"
+                        "BG  — Berufsgenossenschaft         →  BG",
+                title="Versicherungstyp",
+                default_text="",
                 ok="GKV",
                 cancel="PKV",
-                other="BG",
+                dimensions=(340, 1),
             )
-            # rumps.alert: 1 = ok (GKV), 0 = cancel (PKV), -1 = other (BG)
-            self.insurance_type = {
-                0:  InsuranceType.PKV,
-                -1: InsuranceType.BG,
-            }.get(ins_choice, InsuranceType.GKV)
+            # Swap cancel label to show BG option via the text field hint
+            # Use a second pass: first ask GKV vs other, then distinguish PKV/BG
+            ins_resp = ins_win.run()
+            from shared.billing_engine import InsuranceType
+            if ins_resp.clicked == 1:
+                # "GKV" button
+                self.insurance_type = InsuranceType.GKV
+            else:
+                # "PKV" button — ask if actually BG
+                _AK.NSApp.activateIgnoringOtherApps_(True)
+                bg_choice = rumps.alert(
+                    title="PKV oder BG?",
+                    message="Berufsgenossenschaft (BG / DGUV)?",
+                    ok="BG",
+                    cancel="PKV",
+                )
+                # rumps.alert returns raw NSAlert code: 1000 = ok, 1001 = cancel
+                self.insurance_type = (
+                    InsuranceType.BG if bg_choice == 1000 else InsuranceType.PKV
+                )
 
             # Check microphone permission at first use, not at startup
+            _AK.NSApp.activateIgnoringOtherApps_(True)
             if not self.check_microphone_permission():
                 rumps.alert(
                     "Mikrofon-Berechtigung erforderlich",

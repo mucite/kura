@@ -169,8 +169,7 @@ class LicenseManager:
 
         sign = raw.get("_sign")
         if sign is None:
-            # Legacy file (pre-HMAC signing) — accept but force immediate DS24 revalidation
-            raw["validated_at"] = None
+            # Legacy file (pre-HMAC signing) — accept as-is; normal 12h cache logic applies
             self._cache = raw
             return self._cache
 
@@ -206,9 +205,12 @@ class LicenseManager:
         GET https://api.digistore24.com/api/call/{action}
         API key passed via X-DS-API-KEY header.
         Docs: https://dev.digistore24.com/hc/en-us/articles/32479630493585-API-basics
+        Raises RuntimeError if DS24_API_KEY is not configured (treated as offline).
         """
-        url = f"{_DS24_BASE}/{action}"
         api_key = os.environ.get("DS24_API_KEY", "") or _DS24_API_KEY
+        if not api_key:
+            raise RuntimeError("DS24_API_KEY not configured — treating as offline")
+        url = f"{_DS24_BASE}/{action}"
         headers = {"X-DS-API-KEY": api_key}
         return requests.get(url, params=params or {}, headers=headers, timeout=timeout)
 
@@ -417,6 +419,23 @@ class LicenseManager:
             return "TRIAL"
         self._block_reason = "trial_expired"
         return False
+
+    # ── Dev helpers ──────────────────────────────────────────────────────────
+
+    def dev_reset_trial(self):
+        """DEV ONLY — delete license.json and trial.dat to restore fresh trial state.
+        No-op when running as a compiled/frozen bundle."""
+        if getattr(sys, "frozen", False):
+            return  # disabled in production builds
+        for path in (self.license_file, self.trial_file):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+        self._cache = None
+        self._block_reason = ""
+        self._grace_days_remaining = 0
+        print(f"[DEV] Trial reset. Files removed: {self.license_file}, {self.trial_file}")
 
     # ── Legacy shims ─────────────────────────────────────────────────────────
 

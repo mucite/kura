@@ -774,13 +774,43 @@ EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
 PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 {checklist}
 
-SOAP-STRUKTUR:
-S: Hauptbeschwerde des Patienten (eigene Worte) + Schmerzlokalisation + VAS x/10 + Dauer + Ausloeser
-O: ALLE klinischen Messwerte und Tests des Profils — KEINE Zusammenfassungen
-A: ICD-10-Diagnose | Differentialdiagnose | Red-Flag-Ausschluss
-P: Heilmittel ({prof["label"]}) + Technik + Frequenz + SMART-Funktionsziel | Behandler: n.d.
+SOAP-STRUKTUR — VOLLSTAENDIG AUSSCHREIBEN (kein Kurzhalten, kein Zusammenfassen):
 
-JSON-OUTPUT (alle Felder Pflicht, auch wenn "n.d."):
+S — Subjektiv (Patientenperspektive):
+  • Hauptbeschwerde in den EIGENEN WORTEN des Patienten (direkte Zitate bevorzugt)
+  • Schmerzlokalisation exakt (z.B. "rechte Leiste mit Ausstrahlung in den Oberschenkel")
+  • Schmerzcharakter (ziehend / brennend / stechend / drückend — was der Patient sagt)
+  • VAS aktuell x/10; bei Aktivitaet / in Ruhe falls beides genannt
+  • Dauer und Verlauf (seit wann, schlechter/besser, Verlauf zur Vorsitzung)
+  • Ausloeser / Aggravation / Linderung (was hilft, was verschlimmert)
+  • Funktionsziel des Patienten (was moechte er wieder koennen?)
+  • Relevanter Kontext: OP-Datum / Wochen postoperativ / Hilfsmittel / Alltagssituation
+
+O — Objektiv (Therapeutenbeobachtung — NUR Befunde, KEINE Interventionen):
+  • Inspektion / Gangbild / Haltung (z.B. "Trendelenburg-Hinken rechts, Becken sinkt links bei Einbeinstand")
+  • Alle Messwerte numerisch: ROM in Grad (Neutral-Null), Kraft MRC 0-5, VAS bei Provokation
+  • Alle klinischen Tests mit Ergebnis (z.B. "Trendelenburg-Zeichen: positiv rechts")
+  • Palpationsbefund falls genannt (Druckschmerz, Spannung, Schwellung)
+  • Profil-Pflichtfelder aus der Checkliste oben (alle mit Zahlenwerten oder "n.d.")
+  • KEINE Behandlungsschritte, KEINE Wiederholungen/Saetze in O
+
+A — Assessment (Klinische Einschaetzung des Therapeuten):
+  • ICD-10-Code + Diagnosebezeichnung auf Deutsch
+  • Klinische Begruendung (warum dieser Code, welche Befunde stuetzen ihn)
+  • Differentialdiagnose falls klinisch relevant
+  • Funktionsstatus / Stadium (z.B. "6 Wochen postoperativ, Reha-Phase 2")
+  • Red-Flag-Ausschluss spezifisch (z.B. "Keine Kauda-Symptomatik, keine Blasen-/Mastdarmstörung")
+
+P — Plan (Therapieplan dieser Sitzung + Folgeziel):
+  • Heilmittel ({prof["label"]}) + konkrete Technik / Uebung heute durchgefuehrt
+  • Dosierung / Parameter (Dauer, Wiederholungen, Sets, Widerstand — NUR wenn bekannt)
+  • Heimuebungsprogramm falls besprochen
+  • SMART-Ziel: spezifisch + messbar + mit Zeitrahmen (z.B. "Ziel: Hüftflexion 0-0-110° in 4 EH")
+  • Naechster Behandlungstermin / Frequenz
+  • Krücken- / Hilfsmittel-Empfehlung mit SEITE (kontralateral zur betroffenen Seite!)
+  | Behandler: n.d.
+
+JSON-OUTPUT (alle Felder Pflicht, auch wenn "n.d." — VOLLSTAENDIGE Saetze, keine Stichwortlisten):
 {{
   "icd10": "[spezifischer ICD-10-Code]",
   "soap": {{
@@ -805,7 +835,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         raw = generate(
             self.model, self.tokenizer,
             prompt=prompt,
-            max_tokens=cfg.get("max_tokens", 1800),
+            max_tokens=cfg.get("max_tokens", 2800),
             sampler=sampler,
         )
         return "{" + raw if not raw.strip().startswith("{") else raw

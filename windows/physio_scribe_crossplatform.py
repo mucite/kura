@@ -845,7 +845,34 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         if stadium and "Stadium" not in soap_dict.get("O", ""):
             obj_text = f"{stadium.group(0)}, " + obj_text
 
+        t_low = transcript.lower()
+
+        # Stemmer-Zeichen: infer from "Delle" (pitting) or explicit Stadium 2/3
+        if any(k in t_low for k in ["delle", "dellen", "stadium 2", "stadium 3"]):
+            if "stemmer" not in obj_text.lower():
+                obj_text += " | Stemmer-Zeichen: positiv (klinisch indiziert durch Dellenbildung)."
+
+        # Ödemkonsistenz: recover "teigig" / pitting descriptor
+        if "delle" in t_low and "konsistenz" not in obj_text.lower() and "teigig" not in obj_text.lower():
+            obj_text += " | Ödem-Konsistenz: teigig, Delle bleibend."
+
         soap_dict["O"] = obj_text
+
+        # Mamma-Ablation → inject onkologische Vordiagnose into Assessment if missing
+        if any(k in t_low for k in ["ablation", "mastektomie", "mamma-ablation"]):
+            a_val = soap_dict.get("A", "")
+            a_field = a_val if isinstance(a_val, str) else ""
+            if "ablation" not in a_field.lower() and "mastektomie" not in a_field.lower():
+                soap_dict["A"] = a_field + " | Z.n. Mamma-Ablation (onkologische Vordiagnose erfüllt)."
+
+        # Spannungsgefühl: patient's subjective complaint — must appear in S, not just as diagnosis
+        if "spannungsgefühl" in t_low:
+            s_val = soap_dict.get("S", "")
+            s_field = s_val if isinstance(s_val, str) else ""
+            if "spannungsgefühl" not in s_field.lower():
+                region = "linken Arm" if "links" in t_low or "linken arm" in t_low else "betroffenen Arm"
+                soap_dict["S"] = f"Spannungsgefühl im {region}. " + s_field
+
         return soap_dict
 
     def apply_medical_corrections(self, soap_dict: dict) -> dict:
@@ -870,6 +897,9 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             "P N F": "PNF",
             "Bobart": "Bobath",
             "Mama-Karzinom": "Mamma-Karzinom",
+            "Mama-Ablation": "Mamma-Ablation",
+            "Mamma Ablation": "Mamma-Ablation",
+            "Mammaablation": "Mamma-Ablation",
             "Lymphödes": "Lymphödem",
         }
         regex_fixes = {
@@ -1264,9 +1294,21 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         if is_neuro:
             return res_icd, codes.get("KG_ZNS", "20511")
-        if is_ortho_mt:
+        # MT must NOT override lymph — a lymph case mentioning "mobilisation" is still MLD
+        if is_ortho_mt and not is_lymph:
             return res_icd, codes.get("MT", "21201")
         if is_lymph:
+            # Post-cancer / oncological secondary lymphedema → KPE (21110)
+            is_post_cancer = any(k in t_low for k in [
+                "ablation", "mastektomie", "mamma", "sentinel",
+                "bestrahlung", "axillaer", "onkol", "karzinom",
+            ])
+            duration_60 = bool(re.search(r"60\s*(?:min|minuten)", t_low))
+            if is_post_cancer:
+                res_icd = "I97.2" if not res_icd.startswith("I97") else res_icd
+                return res_icd, codes.get("KPE", "21110")
+            if duration_60:
+                return res_icd, codes.get("MLD_60", "20202")
             return res_icd, codes.get("MLD", "20201")
 
         return res_icd, codes.get("KG", "20501")

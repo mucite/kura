@@ -401,11 +401,12 @@ class KuraEngine:
         "EX_SCHULTER": {
             "label":    "Extremitaeten Schulter (EX2)",
             "billing":  "21201",
-            "priority": 45,
+            "priority": 60,   # raised above EX_HWS (55): nacken/trapezius in shoulder sessions is compensatory
             "triggers": [
                 "schulter", "rotatorenmanschette", "impingement", "supraspinatus",
                 "bizepssehne", "acromion", "omarthrose", "bankart", "slap",
-                "frozen shoulder",
+                "frozen shoulder", "schultergelenk", "glenohumer", "schultersteife",
+                "kapselmuster", "kapsuläres muster", "abduktion schulter",
             ],
             "icd_prefix": ["M75"],
             "checklist": [
@@ -438,11 +439,12 @@ class KuraEngine:
             "billing":  "21201",
             "priority": 55,
             "triggers": [
-                "hws", "halswirbel", "zervikalsyndrom", "cervical", "nacken",
+                "hws", "halswirbel", "zervikalsyndrom", "cervical",
                 "kopfschmerz", "okzipital", "torticollis", "schleudertrauma",
-                "trapezius", "schädelbasis", "scaleni", "subokzipital",
-                "spannungskopfschmerz", "nackenmuskeln", "kinn-retraktion",
+                "schädelbasis", "scaleni", "subokzipital",
+                "spannungskopfschmerz", "kinn-retraktion",
                 "segment c", "c5", "c6", "c7",
+                # "nacken" and "trapezius" removed: compensatory in Frozen Shoulder / EX_SCHULTER sessions
             ],
             "icd_prefix": ["M54.2", "M50", "G44"],
             "checklist": [
@@ -1213,6 +1215,42 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             if any(k in t_low for k in ["hinken", "hinkend", "trendelenburg-gang", "trendelenburg-zeichen"]):
                 if "gangbild" not in obj_text.lower():
                     obj_text += " | Gangbild: Trendelenburg-Hinken (Gluteus-medius-Insuffizienz)"
+
+        # ── Schulter (EX2): recover ROM, kapsulares Muster, Ausweichmechanismus ──
+        is_schulter = any(k in t_low for k in [
+            "schulter", "rotatorenmanschette", "impingement", "supraspinatus",
+            "frozen shoulder", "schultersteife", "kapselmuster", "kapsuläres",
+            "abduktion", "glenohumer",
+        ])
+        if is_schulter:
+            s_flex = re.search(
+                r"(?:flexion|beugung|anteversion)[^.\n\d]*(\d+)\s*(?:grad|°)|"
+                r"(\d+)\s*(?:grad|°)[^.\n]{0,20}(?:flexion|beugung|vorne)",
+                transcript, re.I)
+            if s_flex and "flexion" not in obj_text.lower():
+                val = s_flex.group(1) or s_flex.group(2)
+                obj_text += f" | ROM Schulter Flexion: {val}°"
+            s_abd = re.search(
+                r"(?:abduktion|seitliches heben)[^.\n\d]*(\d+)\s*(?:grad|°)|"
+                r"(\d+)\s*(?:grad|°)[^.\n]{0,20}(?:abduktion|zur seite)",
+                transcript, re.I)
+            if s_abd and "abduktion" not in obj_text.lower():
+                val = s_abd.group(1) or s_abd.group(2)
+                obj_text += f" | ROM Schulter Abduktion: {val}°"
+            s_aro = re.search(
+                r"(?:außenrotation|aro)[^.\n\d]*(\d+)\s*(?:grad|°)", transcript, re.I)
+            if s_aro and "außenrotation" not in obj_text.lower():
+                obj_text += f" | ARO: {s_aro.group(1)}°"
+            elif "außenrotation" in t_low and "0 grad" in t_low and "außenrotation" not in obj_text.lower():
+                obj_text += " | ARO: 0° (kapsulares Muster)"
+            if any(k in t_low for k in ["kapsuläres muster", "kapselmuster", "kapsuläre"]) \
+                    and "muster" not in obj_text.lower():
+                obj_text += " | Kapsuläres Muster: Schulter (ARO > Abd > Flex eingeschränkt)"
+            if any(k in t_low for k in ["ausweichmechanismus", "trapezius zieht", "ohr", "schulter zum ohr"]) \
+                    and "ausweich" not in obj_text.lower():
+                obj_text += " | Ausweichmechanismus: Elevation M. trapezius bei Abduktion"
+            if "schultergelenk" not in obj_text.lower() and "glenohumer" not in obj_text.lower():
+                obj_text += " | Behandeltes Segment: Art. glenohumeralis (Schultergelenk)"
 
         # ── Krücke Seitenkontrolle ─────────────────────────────────────────────
         plan_text = soap_dict.get("P", "")

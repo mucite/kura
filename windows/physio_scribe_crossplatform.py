@@ -966,6 +966,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         """Safety net: if the therapist SAID it, it MUST appear in O."""
         obj_val = soap_dict.get("O", "")
         obj_text = obj_val if isinstance(obj_val, str) else ""
+        t_low = transcript.lower() if isinstance(transcript, str) else ""
 
         schober = re.search(r"Schober.*?(\d+)\s*(?:zu|bis|-)\s*(\d+)", transcript, re.I)
         if schober and "Schober" not in obj_text:
@@ -1138,8 +1139,6 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         stadium = re.search(r"Stadium\s*[1-3]", transcript, re.I)
         if stadium and "Stadium" not in soap_dict.get("O", ""):
             obj_text = f"{stadium.group(0)}, " + obj_text
-
-        t_low = transcript.lower()
 
         # Stemmer-Zeichen: infer from "Delle" (pitting) or explicit Stadium 2/3
         if any(k in t_low for k in ["delle", "dellen", "stadium 2", "stadium 3"]):

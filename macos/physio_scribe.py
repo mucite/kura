@@ -813,6 +813,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         """
         import re
         obj_text = soap_dict.get("O", "")
+        t_low = transcript.lower()
 
         # 1. Recover Schober-Zeichen (e.g., 10 zu 13)
         schober = re.search(r"Schober.*?(\d+)\s*(?:zu|bis|-)\s*(\d+)", transcript, re.I)
@@ -1018,8 +1019,6 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         stadium = re.search(r"Stadium\s*[1-3]", transcript, re.I)
         if stadium and "Stadium" not in obj_text:
             obj_text = f"{stadium.group(0)}, " + obj_text
-
-        t_low = transcript.lower()
 
         # Stemmer-Zeichen: infer from "Delle" (pitting) or explicit Stadium 2/3
         if any(k in t_low for k in ["delle", "dellen", "stadium 2", "stadium 3"]):

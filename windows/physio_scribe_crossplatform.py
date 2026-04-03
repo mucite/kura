@@ -640,7 +640,7 @@ SOAP-STRUKTUR:
 S: Hauptbeschwerde des Patienten (eigene Worte) + Schmerzlokalisation + VAS x/10 + Dauer + Ausloeser
 O: ALLE klinischen Messwerte und Tests des Profils — KEINE Zusammenfassungen
 A: ICD-10-Diagnose | Differentialdiagnose | Red-Flag-Ausschluss
-P: Heilmittel ({prof["billing"]}) + Technik + Frequenz + SMART-Funktionsziel | Behandler: n.d.
+P: Heilmittel ({prof["label"]}) + Technik + Frequenz + SMART-Funktionsziel | Behandler: n.d.
 
 JSON-OUTPUT (alle Felder Pflicht, auch wenn "n.d."):
 {{
@@ -1198,6 +1198,15 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 text = re.sub(pattern_str, right, text, flags=re.IGNORECASE)
             soap_dict[key] = text
 
+        # Strip null/placeholder pain fields the LLM writes when none was mentioned
+        s_field = soap_dict.get("S", "")
+        s_field = re.sub(
+            r'\.?\s*Schmerzlokalisation\s*:\s*(Nicht|Keine|n\.?d\.?|keine Angabe|nicht genannt)[,.]?',
+            '', s_field, flags=re.IGNORECASE
+        ).strip().strip('.')
+        if s_field:
+            soap_dict["S"] = s_field
+
         return soap_dict
 
     def inject_audit_stamps(self, soap: dict) -> dict:
@@ -1218,6 +1227,30 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         a_val = soap_dict.get("A", "")
         a_field = a_val if isinstance(a_val, str) else ""
 
+        # 1. Check transcript for EXPLICIT therapist stadium statement — highest priority
+        explicit_in_transcript = re.search(r"stadium\s*([1-3])", transcript, re.I)
+        if explicit_in_transcript:
+            explicit_num = explicit_in_transcript.group(1)
+            _label_map = {
+                "1": "Stadium 1 (reversibel, pitting)",
+                "2": "Stadium 2 (irreversibel, fibrosiert)",
+                "3": "Stadium 3 (Elephantiasis)",
+            }
+            explicit_stadium = _label_map.get(explicit_num, f"Stadium {explicit_num}")
+            icd_suffix = "02" if explicit_num == "3" else "01"
+            soap_dict["_ly_icd_suffix"] = icd_suffix
+            new_staging = f"Lymphödem {explicit_stadium}."
+            corrected = re.sub(r"Lymphödem\s+Stadium\s*[1-3][^\.\|]*\.", new_staging, a_field)
+            if corrected == a_field:
+                if "Stadium" not in a_field:
+                    soap_dict["A"] = f"{new_staging} {a_field}".strip()
+                else:
+                    soap_dict["A"] = re.sub(r"Stadium\s*[1-3][^,\.\|]*", explicit_stadium, a_field)
+            else:
+                soap_dict["A"] = corrected
+            return soap_dict
+
+        # 2. If no explicit therapist statement, skip if LLM already placed a stadium
         if re.search(r"stadium\s*[1-3]", a_field, re.I):
             return soap_dict
 
@@ -1229,16 +1262,18 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             return soap_dict
 
         is_hard    = any(w in t for w in ["hart", "fibrosiert", "nicht eindrückbar", "derb", "induriert"])
-        is_soft    = any(w in t for w in ["weich", "eindrückbar", "delle", "pitting", "morgens besser", "reversibel"])
+        is_pitting = any(w in t for w in ["delle", "dellen", "pitting", "eindrückbar"])
+        is_prall   = any(w in t for w in ["prall", "pralle"])
+        is_soft    = any(w in t for w in ["weich", "morgens besser", "reversibel"])
         is_massive = any(w in t for w in ["elephantiasis", "massiv", "extrem", "riesig"])
         is_postop  = any(w in t for w in ["post-op", "postoperativ", "postop", "op ", "nach der op",
                                            "mastektomie", "axilläre", "sentinel"])
 
         if is_massive:
             stadium = "Stadium 3 (Elephantiasis)"
-        elif is_hard:
+        elif is_hard or (is_prall and is_pitting):
             stadium = "Stadium 2 (irreversibel, fibrosiert)"
-        elif is_soft:
+        elif is_soft or is_pitting:
             stadium = "Stadium 1 (reversibel, pitting)"
         elif is_postop:
             stadium = "Stadium 1–2 (postoperativ, noch zu klassifizieren)"
@@ -1577,6 +1612,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             is_stadium2_3 = any(k in t_low for k in [
                 "stadium 2", "stadium 3", "irreversibel", "fibrosiert",
                 "elephantiasis", "hart", "derb",
+                "prall", "chronisch", "delle bleibend", "persistierend",
             ])
             two_parts = bool(re.search(
                 r"arm.*bein|bein.*arm|beidseitig|bilateral|"

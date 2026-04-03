@@ -134,16 +134,24 @@ class KuraEngine:
         try:
             import whisper
 
-            # Load from local models/whisper directory
-            whisper_model_path = os.path.join(self.whisper_model_dir, "large-v3.pt")
-
-            if os.path.exists(whisper_model_path):
+            # Try to find available Whisper model in order of preference
+            model_preferences = ["medium.pt", "large-v3.pt", "large-v2.pt", "base.pt", "small.pt"]
+            whisper_model_path = None
+            
+            for model_name in model_preferences:
+                candidate_path = os.path.join(self.whisper_model_dir, model_name)
+                if os.path.exists(candidate_path):
+                    whisper_model_path = candidate_path
+                    print(f"✅ Found Whisper model: {model_name}")
+                    break
+            
+            if whisper_model_path:
                 print(f"✅ Loading Whisper from local: {whisper_model_path}")
                 self.whisper = whisper.load_model(whisper_model_path, device="cpu")
             else:
-                # Fallback: load from default cache with download_root set to our models dir
-                print("⚠️ Local Whisper model not found, downloading to models/whisper...")
-                self.whisper = whisper.load_model("large-v3", device="cpu", download_root=self.whisper_model_dir)
+                # Fallback: download medium model (smaller than large-v3, good quality)
+                print("⚠️ Local Whisper model not found, downloading medium model to models/whisper...")
+                self.whisper = whisper.load_model("medium", device="cpu", download_root=self.whisper_model_dir)
 
             self.whisper_backend = "openai-whisper"
             print("✅ Whisper STT loaded (openai-whisper backend, local model)")

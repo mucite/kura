@@ -1450,7 +1450,6 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         sampler = make_sampler(
             temp=cfg.get("temperature", 0.15),
             top_p=cfg.get("top_p", 0.9),
-            repetition_penalty=cfg.get("repetition_penalty", 1.3),
         )
         raw = generate(
             self.model, self.tokenizer,

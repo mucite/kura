@@ -12,6 +12,18 @@ from datetime import datetime
 import rumps
 from fpdf import FPDF
 from dotenv import load_dotenv
+import AppKit as _AK
+
+def _app_activate():
+    """Switch to Regular activation policy + bring to front.
+    LSUIElement (Accessory) apps cannot receive keyboard focus or appear above
+    other windows without this. Call before every dialog/alert."""
+    _AK.NSApp.setActivationPolicy_(0)   # NSApplicationActivationPolicyRegular
+    _AK.NSApp.activateIgnoringOtherApps_(True)
+
+def _app_deactivate():
+    """Restore LSUIElement (Accessory) policy once dialogs are done."""
+    _AK.NSApp.setActivationPolicy_(1)   # NSApplicationActivationPolicyAccessory
 
 # --- Crash Logging Setup ---
 def setup_crash_logging():
@@ -423,7 +435,7 @@ class KuraApp(rumps.App):
                 f"{footer}"
             )
 
-            import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
+            _app_activate()
             window = rumps.Window(
                 message="Bericht prüfen — bei Bedarf bearbeiten, dann speichern:",
                 title="Kura — Bericht",
@@ -433,6 +445,7 @@ class KuraApp(rumps.App):
                 dimensions=(680, 460),
             )
             response = window.run()
+            _app_deactivate()
             self._review_in_progress = False
 
             if response.clicked:
@@ -804,7 +817,7 @@ class KuraApp(rumps.App):
 
     # --- Practice Config ---
     def _config_locked(self, _):
-        import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
+        _app_activate()
         rumps.alert(
             title="Kura Pro erforderlich",
             message="Praxis-Einstellungen sind nur mit einem aktiven Kura Pro Abo verfuegbar.\n\n"
@@ -812,10 +825,11 @@ class KuraApp(rumps.App):
                     "und individuelle Abrechnungsregeln zu konfigurieren.",
             ok="Abo aktivieren",
         )
+        _app_deactivate()
         self.activate_license(None)
 
     def open_practice_config(self, _):
-        import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
+        _app_activate()
         cfg_path = os.path.expanduser("~/.kura_practice.json")
 
         # Step 1 — Praxis name
@@ -829,11 +843,12 @@ class KuraApp(rumps.App):
         )
         r1 = w1.run()
         if not r1.clicked:
+            _app_deactivate()
             return
         name = r1.text.strip() or "Meine Praxis"
 
         # Step 2 — Betriebsstaettennummer
-        _AK.NSApp.activateIgnoringOtherApps_(True)
+        _app_activate()
         w2 = rumps.Window(
             message="Betriebsstättennummer  (BSNR, 9-stellig):",
             title="Praxis-Einstellungen  2 / 3",
@@ -844,11 +859,12 @@ class KuraApp(rumps.App):
         )
         r2 = w2.run()
         if not r2.clicked:
+            _app_deactivate()
             return
         bsnr = r2.text.strip()
 
         # Step 3 — Location
-        _AK.NSApp.activateIgnoringOtherApps_(True)
+        _app_activate()
         w3 = rumps.Window(
             message="Standort  (Stadt oder Adresse):",
             title="Praxis-Einstellungen  3 / 3",
@@ -859,6 +875,7 @@ class KuraApp(rumps.App):
         )
         r3 = w3.run()
         if not r3.clicked:
+            _app_deactivate()
             return
 
         # Save
@@ -874,6 +891,7 @@ class KuraApp(rumps.App):
                 f"{name} — BSNR {bsnr}",
             )
             # Offer advanced edit
+            _app_activate()
             if rumps.alert(
                 title="Erweiterte Konfiguration",
                 message="Moechten Sie die vollstaendige Konfigurationsdatei oeffnen?\n\n"
@@ -884,6 +902,8 @@ class KuraApp(rumps.App):
                 subprocess.run(["open", cfg_path])
         except Exception as e:
             rumps.alert("Fehler", f"Konnte Einstellungen nicht speichern:\n{e}")
+        finally:
+            _app_deactivate()
 
     def open_gist_override(self, _):
         """
@@ -962,23 +982,19 @@ class KuraApp(rumps.App):
 
     # --- Start Session ---
     def start(self, _):
-        import AppKit as _AK
-
-        def _activate():
-            """Bring app to front — required for every dialog in a LSUIElement (menu-bar) app."""
-            _AK.NSApp.activateIgnoringOtherApps_(True)
-
         if self.recording:
-            _activate()
+            _app_activate()
             rumps.alert("Fehler", "Aufnahme läuft bereits.")
+            _app_deactivate()
             return
 
         # ── License gate — check BEFORE allowing any recording ───────────────
         status = self.license_mgr.verify_locally()
         if status is False:
-            _activate()
+            _app_activate()
             title, msg = self._license_block_message()
             rumps.alert(title=title, message=msg, ok="Lizenz aktivieren")
+            _app_deactivate()
             self.activate_license(None)
             return
         if status is True and self.license_mgr.grace_days_remaining > 0:
@@ -990,12 +1006,13 @@ class KuraApp(rumps.App):
             )
 
         if not self.engine:
-            _activate()
+            _app_activate()
             rumps.alert("Fehler", "KI-Engine nicht bereit.\n\nBitte warten Sie, bis 'KI-Modelle laden...' abgeschlossen ist.\n\nFalls das Problem weiterhin besteht, starten Sie Kura neu.")
+            _app_deactivate()
             return
 
         # Simple patient name input
-        _activate()
+        _app_activate()
         window = rumps.Window(
             message="Vorname Nachname (z. B. Müller, Schäfer, Voß):",
             title="Neue Sitzung",
@@ -1005,6 +1022,10 @@ class KuraApp(rumps.App):
             dimensions=(320, 24),
         )
         response = window.run()
+
+        if not response.clicked:
+            _app_deactivate()
+            return
 
         if response.clicked:
             import unicodedata
@@ -1018,7 +1039,7 @@ class KuraApp(rumps.App):
             self.patient_name = raw_input if raw_input else "Patient"
 
             from shared.billing_engine import InsuranceType
-            _activate()
+            _app_activate()
             ins_win = rumps.Window(
                 message="Welche Versicherung hat der Patient?\n\n"
                         "GKV — Gesetzlich (§125 SGB V)   →  OK\n"
@@ -1039,7 +1060,7 @@ class KuraApp(rumps.App):
                 self.insurance_type = InsuranceType.GKV
             else:
                 # "PKV" button — ask if actually BG
-                _activate()
+                _app_activate()
                 bg_choice = rumps.alert(
                     title="PKV oder BG?",
                     message="Berufsgenossenschaft (BG / DGUV)?",
@@ -1052,7 +1073,7 @@ class KuraApp(rumps.App):
                 )
 
             # Check microphone permission at first use, not at startup
-            _activate()
+            _app_activate()
             if not self.check_microphone_permission():
                 rumps.alert(
                     "Mikrofon-Berechtigung erforderlich",
@@ -1061,8 +1082,10 @@ class KuraApp(rumps.App):
                     "Danach Kura neu starten.",
                     ok="OK"
                 )
+                _app_deactivate()
                 return
 
+            _app_deactivate()   # all dialogs done — restore LSUIElement policy
             self.seconds_elapsed = 0
             self.timer.start()
             self.recording = True
@@ -1324,7 +1347,7 @@ class KuraApp(rumps.App):
 
     # --- Activate License ---
     def activate_license(self, _):
-        import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
+        _app_activate()
         win = rumps.Window(
             message=(
                 "Lizenzschlüssel eingeben:\n\n"
@@ -1342,6 +1365,7 @@ class KuraApp(rumps.App):
 
         if res.clicked == 1:  # Aktivieren
             ok, msg = self.license_mgr.activate(res.text.strip())
+            _app_activate()
             if ok:
                 rumps.alert("Aktivierung erfolgreich", msg)
                 self.update_license_display()
@@ -1350,9 +1374,10 @@ class KuraApp(rumps.App):
         elif res.clicked == 2:  # Jetzt kaufen
             import webbrowser
             webbrowser.open("https://www.checkout-ds24.com/product/681469")
+        _app_deactivate()
 
     def deactivate_license(self, _):
-        import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
+        _app_activate()
         if rumps.alert(
             title="Lizenz deaktivieren?",
             message=(
@@ -1364,8 +1389,10 @@ class KuraApp(rumps.App):
             cancel="Abbrechen",
         ) == 1:
             ok, msg = self.license_mgr.deactivate()
+            _app_activate()
             rumps.alert("Erledigt" if ok else "Fehler", msg)
             self.update_license_display()
+        _app_deactivate()
 
     def save_pdf(self, _):
         if not self.last_report:

@@ -2904,6 +2904,17 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
             elif not isinstance(value, str):
                 value = str(value) if value else ""
+            # Flatten embedded JSON object string: {"key": "val", ...} | rest → key: val | rest
+            if isinstance(value, str) and value.strip().startswith("{"):
+                try:
+                    _dec = json.JSONDecoder()
+                    _obj, _end = _dec.raw_decode(value.strip())
+                    if isinstance(_obj, dict):
+                        _flat = " | ".join(f"{k}: {v}" for k, v in _obj.items() if v)
+                        _rest = value.strip()[_end:].strip().lstrip("|").strip()
+                        value = (_flat + " | " + _rest) if _rest else _flat
+                except Exception:
+                    pass  # leave as-is if embedded JSON is malformed
             if not value or value.strip() in ("N/A", "Fehler", "KI-Fehler", "{}"):
                 value = f"{icd10} | Red Flags klinisch ausgeschlossen." if field == "A" else "n.d."
             soap_clean[field] = value.strip()

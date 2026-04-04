@@ -2275,12 +2275,22 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 soap_clean = {}
                 for field in ["S", "O", "A", "P"]:
                     value = soap_raw.get(field, "")
-                    # Convert non-string values to strings
                     if isinstance(value, dict):
-                        # Flatten nested dict to readable string
                         value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
                     elif not isinstance(value, str):
                         value = str(value) if value else "N/A"
+                    # Flatten embedded JSON object string: {"key": "val"} | rest → key: val | rest
+                    if isinstance(value, str) and value.strip().startswith("{"):
+                        try:
+                            import json as _json
+                            _dec = _json.JSONDecoder()
+                            _obj, _end = _dec.raw_decode(value.strip())
+                            if isinstance(_obj, dict):
+                                _flat = " | ".join(f"{k}: {v}" for k, v in _obj.items() if v)
+                                _rest = value.strip()[_end:].strip().lstrip("|").strip()
+                                value = (_flat + " | " + _rest) if _rest else _flat
+                        except Exception:
+                            pass
                     soap_clean[field] = value.strip() if value else "N/A"
                 
                 icd10_val = data.get("icd10", "M99.9")
@@ -2356,16 +2366,25 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         for field in ["S", "O", "A", "P"]:
             value = soap_dict.get(field, "")
 
-            # Convert non-string values
             if isinstance(value, dict):
-                # Flatten nested dict to readable string
                 value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
             elif not isinstance(value, str):
                 value = str(value) if value else ""
 
-            # Check for empty/placeholder values
+            # Flatten embedded JSON object string: {"key": "val"} | rest → key: val | rest
+            if isinstance(value, str) and value.strip().startswith("{"):
+                try:
+                    import json as _json
+                    _dec = _json.JSONDecoder()
+                    _obj, _end = _dec.raw_decode(value.strip())
+                    if isinstance(_obj, dict):
+                        _flat = " | ".join(f"{k}: {v}" for k, v in _obj.items() if v)
+                        _rest = value.strip()[_end:].strip().lstrip("|").strip()
+                        value = (_flat + " | " + _rest) if _rest else _flat
+                except Exception:
+                    pass
+
             if not value or value.strip() in ("N/A", "Fehler", "KI-Fehler", "Parsing-Fehler", "{}"):
-                # Replace hard-error strings with neutral n.d. so recover_hard_metrics can append
                 if field == "A":
                     value = f"{icd10} | Red Flags klinisch ausgeschlossen."
                 else:

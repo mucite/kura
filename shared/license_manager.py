@@ -11,14 +11,13 @@ Flow:
 
 import hashlib
 import json
+import logging
 import os
 import platform
 import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
-
-import logging
 
 import requests
 
@@ -67,7 +66,7 @@ class LicenseManager:
             try:
                 os.makedirs(data_dir, exist_ok=True)
             except Exception:
-                print(f"Critical: Could not create fallback directory either")
+                print("Critical: Could not create fallback directory either")
 
         self.license_file     = os.path.join(data_dir, "license.json")
         self.trial_file       = os.path.join(data_dir, "trial.dat")

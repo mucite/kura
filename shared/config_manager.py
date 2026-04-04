@@ -3,15 +3,13 @@ import json
 import logging
 import os
 import platform
-import sys
 
 from ._compat import fix_windows_encoding
+from .practice_config import PracticeConfig
 
 fix_windows_encoding()
 
 logger = logging.getLogger("kura.config_manager")
-
-from .practice_config import PracticeConfig
 
 # Paths - platform-specific
 if platform.system() == "Windows":

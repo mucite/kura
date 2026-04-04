@@ -2,7 +2,6 @@
 import json
 import logging
 import os
-import sys
 
 from ._compat import fix_windows_encoding
 

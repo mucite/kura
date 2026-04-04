@@ -4,8 +4,10 @@ All tests use a temp directory — no real license files or DS24 calls.
 """
 import json
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from shared.license_manager import LicenseManager
 
 

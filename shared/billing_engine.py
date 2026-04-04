@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-
 # ── Insurance type ─────────────────────────────────────────────────────────────
 
 class InsuranceType(Enum):
@@ -510,8 +509,8 @@ def _match_dg(icd10: str) -> Optional[str]:
 def _load_gkv_prices() -> dict[str, float]:
     """Load GKV prices from data file. Falls back to 2026 if current year not available."""
     try:
-        import sys
         import os
+        import sys
         from pathlib import Path
 
         # Determine data directory
@@ -744,8 +743,6 @@ _DOC_CHECKERS: dict = {
         r"re\..*\d+.*li\..*\d+|li\..*\d+.*re\..*\d+|"
         r"(?:mehr|größer|kleiner|unterschied).*\d+\s*cm", t
     )),
-    # FBA (Finger-Boden-Abstand) — most common WS objective metric
-    "FBA (Finger-Boden-Abstand)":      lambda t: bool(re.search(r"fba|finger.boden", t)),
 }
 
 
@@ -958,10 +955,6 @@ class _GKVEngine:
         else:
             audit_status = "PASS"
 
-        # ── BG extras ─────────────────────────────────────────────────────────
-        bg_docs = []
-        is_bg = False  # will be overridden by BillingEngine dispatcher
-
         return BillingResult(
             insurance_type=InsuranceType.GKV,
             position_number=position,
@@ -1067,7 +1060,6 @@ class _GKVEngine:
     def _red_flag_audit(self, soap: dict) -> list:
         items = []
         obj = soap.get("O", "").lower()
-        assess = soap.get("A", "").lower()
         text_all = " ".join(str(v) for v in soap.values()).lower()
 
         # Special handling for "Taubheit" - check for "pelzig" which is benign numbness/tingling
@@ -1173,9 +1165,6 @@ class _PKVEngine:
         likelihood = self._score_likelihood(icd10, soap)
         hints = self._hints(soap, transcript, position)
 
-        obj = soap.get("O", "")
-        subj = soap.get("S", "")
-
         # ── 2. Missing mandatory documentation (WARN = PKV may reject) ────────
         for doc in entry["docs"]:
             present = _check_doc(doc, soap)
@@ -1220,12 +1209,18 @@ class _PKVEngine:
     def _score_likelihood(self, icd10: str, soap: dict) -> str:
         score = 0
         obj = soap.get("O", "")
-        if re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", obj): score += 2
-        if re.search(r"vas\s*\d|schmerz.*\d+/10|nrs\s*\d", (soap.get("S", "") + obj).lower()): score += 1
-        if len(obj) > 100: score += 2
-        if icd10 not in ("M99.9", "N/A", ""): score += 2
-        if re.search(r"\d+\s*(cm|°|grad)", obj.lower()): score += 1
-        if len(soap.get("P", "")) > 60: score += 1
+        if re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", obj):
+            score += 2
+        if re.search(r"vas\s*\d|schmerz.*\d+/10|nrs\s*\d", (soap.get("S", "") + obj).lower()):
+            score += 1
+        if len(obj) > 100:
+            score += 2
+        if icd10 not in ("M99.9", "N/A", ""):
+            score += 2
+        if re.search(r"\d+\s*(cm|°|grad)", obj.lower()):
+            score += 1
+        if len(soap.get("P", "")) > 60:
+            score += 1
         return "HOCH" if score >= 7 else "MITTEL" if score >= 4 else "GERING"
 
     def _hints(self, soap: dict, transcript: str, position: str) -> list:

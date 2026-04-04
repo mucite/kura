@@ -6,8 +6,8 @@ Robust error handling with user-friendly messages and logging.
 import functools
 import logging
 import traceback
-from typing import Any, Callable, Optional, TypeVar, Union
 from datetime import datetime
+from typing import Any, Callable, Optional, TypeVar
 
 logger = logging.getLogger("kura.errors")
 
@@ -108,9 +108,9 @@ def handle_startup_error(error: Exception, component: str) -> None:
     # Map technical errors to user-friendly messages
     if isinstance(error, MemoryError):
         user_msg = (
-            f"Nicht genug Arbeitsspeicher verfügbar.\n\n"
-            f"Bitte schließen Sie andere Programme und starten Sie Kura neu.\n"
-            f"Mindestens 8GB RAM empfohlen."
+            "Nicht genug Arbeitsspeicher verfügbar.\n\n"
+            "Bitte schließen Sie andere Programme und starten Sie Kura neu.\n"
+            "Mindestens 8GB RAM empfohlen."
         )
     elif isinstance(error, FileNotFoundError):
         user_msg = (
@@ -138,13 +138,13 @@ def handle_startup_error(error: Exception, component: str) -> None:
 
     try:
         with open(error_file, 'w', encoding='utf-8') as f:
-            f.write(f"Kura Startup Error Report\n")
+            f.write("Kura Startup Error Report\n")
             f.write(f"{'=' * 60}\n\n")
             f.write(f"Timestamp: {datetime.now()}\n")
             f.write(f"Component: {component}\n")
             f.write(f"Error Type: {type(error).__name__}\n")
             f.write(f"Error Message: {error}\n\n")
-            f.write(f"Traceback:\n")
+            f.write("Traceback:\n")
             f.write(traceback.format_exc())
             f.write(f"\n{'=' * 60}\n")
     except Exception as e:

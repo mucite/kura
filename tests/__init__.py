@@ -3,7 +3,6 @@ Kura Medical Test Suite
 =======================
 Comprehensive tests for core functionality.
 """
-import pytest
 import sys
 from pathlib import Path
 

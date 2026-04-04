@@ -6,7 +6,7 @@ Shared logic for Whisper STT + Llama NLP across macOS and Windows.
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Callable
+from typing import Callable, Dict, Optional
 
 logger = logging.getLogger("kura.ai.engine")
 

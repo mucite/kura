@@ -15,7 +15,7 @@ from typing import Optional
 
 class KuraLogFormatter(logging.Formatter):
     """Custom formatter with color coding for terminal output."""
-    
+
     COLORS = {
         'DEBUG': '\033[36m',      # Cyan
         'INFO': '\033[32m',       # Green
@@ -24,7 +24,7 @@ class KuraLogFormatter(logging.Formatter):
         'CRITICAL': '\033[1;31m', # Bold Red
         'RESET': '\033[0m'        # Reset
     }
-    
+
     def format(self, record):
         if sys.stderr.isatty():  # Only colorize if terminal
             levelname = record.levelname
@@ -44,7 +44,7 @@ def get_log_directory() -> Path:
         log_dir = Path(appdata) / "Kura" / "Logs"
     else:
         log_dir = Path.home() / ".local" / "share" / "kura" / "logs"
-    
+
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir
 
@@ -58,23 +58,23 @@ def setup_logging(
 ) -> logging.Logger:
     """
     Setup centralized logging for Kura Medical.
-    
+
     Args:
         level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_to_file: Whether to log to rotating file
         log_to_console: Whether to log to console
         max_bytes: Max log file size before rotation
         backup_count: Number of backup files to keep
-        
+
     Returns:
         Configured root logger
     """
-    
+
     # Create root logger
     logger = logging.getLogger("kura")
     logger.setLevel(getattr(logging, level.upper()))
     logger.handlers.clear()  # Remove any existing handlers
-    
+
     # Console handler with color
     if log_to_console:
         console_handler = logging.StreamHandler(sys.stderr)
@@ -84,12 +84,12 @@ def setup_logging(
         )
         console_handler.setFormatter(console_formatter)
         logger.addHandler(console_handler)
-    
+
     # Rotating file handler
     if log_to_file:
         log_dir = get_log_directory()
         log_file = log_dir / "kura.log"
-        
+
         file_handler = logging.handlers.RotatingFileHandler(
             log_file,
             maxBytes=max_bytes,
@@ -97,7 +97,7 @@ def setup_logging(
             encoding='utf-8'
         )
         file_handler.setLevel(logging.DEBUG)
-        
+
         # Detailed format for file logs
         file_formatter = logging.Formatter(
             '%(asctime)s | %(levelname)-8s | %(name)-20s | %(funcName)-15s | %(message)s',
@@ -105,19 +105,19 @@ def setup_logging(
         )
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)
-        
+
         logger.info(f"Logging initialized - File: {log_file}")
-    
+
     return logger
 
 
 def get_logger(name: str) -> logging.Logger:
     """
     Get a logger for a specific module.
-    
+
     Args:
         name: Logger name (usually __name__)
-        
+
     Returns:
         Configured logger instance
     """
@@ -126,38 +126,38 @@ def get_logger(name: str) -> logging.Logger:
 
 class PerformanceLogger:
     """Context manager for logging performance metrics."""
-    
+
     def __init__(self, operation: str, logger: Optional[logging.Logger] = None):
         self.operation = operation
         self.logger = logger or get_logger("performance")
         self.start_time = None
-    
+
     def __enter__(self):
         self.start_time = datetime.now()
         self.logger.debug(f"Starting: {self.operation}")
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         duration = (datetime.now() - self.start_time).total_seconds()
-        
+
         if exc_type is None:
             self.logger.info(f"Completed: {self.operation} ({duration:.2f}s)")
         else:
             self.logger.error(
                 f"Failed: {self.operation} ({duration:.2f}s) - {exc_type.__name__}: {exc_val}"
             )
-        
+
         return False  # Don't suppress exceptions
 
 
 def log_system_info():
     """Log system information for debugging."""
     logger = get_logger("system")
-    
+
     logger.info(f"Platform: {platform.system()} {platform.release()}")
     logger.info(f"Python: {sys.version.split()[0]}")
     logger.info(f"Architecture: {platform.machine()}")
-    
+
     # Log memory info if available
     try:
         import psutil

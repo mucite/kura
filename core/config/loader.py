@@ -3,11 +3,11 @@ Configuration Loader - Loads pricing and profile data from JSON files.
 Supports yearly pricing updates and automatic version detection.
 """
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
-import logging
 
 logger = logging.getLogger("kura.config.loader")
 

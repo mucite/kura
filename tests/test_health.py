@@ -3,10 +3,9 @@ Unit tests for SystemHealthChecker.
 License checks are mocked — no real files or DS24 calls.
 """
 import sys
-import pytest
 from unittest.mock import MagicMock, patch
-from core.health import HealthCheckResult, SystemHealthChecker
 
+from core.health import HealthCheckResult, SystemHealthChecker
 
 # ── HealthCheckResult dataclass ───────────────────────────────────────────────
 

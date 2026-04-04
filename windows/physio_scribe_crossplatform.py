@@ -474,8 +474,17 @@ class KuraEngine:
                 "schädelbasis", "scaleni", "subokzipital",
                 "spannungskopfschmerz", "kinn-retraktion",
                 "segment c", "c2/c3", "c3/c4", "c4/c5", "c5/c6", "c6/c7", "c7/th1",
-                # "nacken" and "trapezius" excluded — appear as compensatory findings
-                # in shoulder sessions and would override EX_SCHULTER incorrectly.
+                # Lay-vocabulary additions — patients rarely say "HWS":
+                "nackenschmerz", "nackensteifigkeit", "nackenmuskulatur",
+                "atlas", "atlasgelenk", "atlaskompression",
+                "kopfgelenk", "kopfgelenksreihe",
+                "hinterkopf", "hinterkopfschmerz",
+                "geier-hals", "vorköpfige haltung", "doppelkinn",
+                "tiefe halsflexoren", "tiefe nackenflexoren",
+                "zervikogener kopfschmerz",
+                # "nacken" alone excluded — appears in shoulder sessions as a
+                # compensatory finding and would override EX_SCHULTER incorrectly.
+                # "trapezius" excluded for same reason.
             ],
             "icd_prefix": ["M54.2", "M50", "G44"],
             "checklist": [
@@ -827,8 +836,29 @@ class KuraEngine:
         — match_count breaks ties when two profiles share the same priority
           (shouldn't happen with deduplicated priorities, but keeps routing
           deterministic if future edits accidentally create a tie).
+
+        Step 0 runs first: ultra-specific anatomical terms that can only belong
+        to one profile override the score ranking entirely.
         """
         t = transcript.lower()
+
+        # ── Step 0: Definitive-term override ─────────────────────────────────
+        # These terms are anatomically exclusive to one profile.
+        # Their presence guarantees that profile regardless of priority/score.
+        _DEFINITIVE: dict = {
+            "EX_HWS": [
+                "atlas-übergang", "atlasgelenk", "atlaskompression",
+                "kopfgelenk", "kopfgelenksreihe",
+                "geier-hals", "vorköpfige haltung",
+                "doppelkinn",        # deep neck flexor rehab — exclusively HWS
+                "hinterkopfschmerz", "okzipitaler kopfschmerz",
+                "zervikogener kopfschmerz",
+            ],
+        }
+        for def_pid, def_terms in _DEFINITIVE.items():
+            if any(term in t for term in def_terms):
+                if def_pid in self._PROFILES:
+                    return def_pid
 
         # Age extraction — "4 Jahre alt", "4-jaehrig", "4 J."
         age = None
@@ -919,6 +949,27 @@ class KuraEngine:
         }
         inspection_ex = _inspection_examples.get(profile_id, "Schonhaltung, sichtbare Bewegungseinschränkung")
 
+        _smart_goal_examples = {
+            "EX_SCHULTER": "Ziel: Schulterabduktion auf 120° in 6 EH",
+            "EX_HWS":      "Ziel: HWS-Rotation auf 60° bds. in 4 EH",
+            "EX_LWS":      "Ziel: FBA 10 cm in 6 EH, beschwerdefrei bei Flexion",
+            "EX_HUefte":   "Ziel: Hüftflexion 0-0-110° in 4 EH",
+            "EX_HUFTE":    "Ziel: Hüftflexion 0-0-110° in 4 EH",
+            "EX_KNIE":     "Ziel: Knieflexion 0-0-120° in 6 EH",
+            "EX_FUSS":     "Ziel: OSG-Dorsalextension 0-0-20° in 4 EH, schmerzfreies Abrollen",
+            "GEB":         "Ziel: Beckenbodenkraft Oxford 3/5 in 6 EH",
+            "KGG":         "Ziel: 10 Wiederholungen Beinpresse 40 kg ohne Schmerz in 4 EH",
+            "GER":         "Ziel: 10m Tandemgang ohne Hilfsmittel in 6 EH",
+        }
+        smart_goal_ex = _smart_goal_examples.get(profile_id, "Ziel: [Funktion] auf [Messwert] in [N] EH")
+
+        # Krücken recommendation only makes clinical sense for lower-limb profiles.
+        _lower_limb_profiles = {"EX_KNIE", "EX_HUefte", "EX_HUFTE", "EX_FUSS", "GER", "POST_OP"}
+        kruecken_line = (
+            "  • Krücken- / Hilfsmittel-Empfehlung mit SEITE (kontralateral zur betroffenen Seite!)"
+            if profile_id in _lower_limb_profiles else ""
+        )
+
         return f"""<|start_header_id|>system<|end_header_id|>
 Du bist ein klinischer Dokumentationsexperte fuer deutsche Physiotherapie (Paragraph 106b SGB V).
 DIAGNOSE-PROFIL: {prof["label"]}  |  Abrechnung: {prof["billing"]}
@@ -976,9 +1027,9 @@ P — Plan (Therapieplan dieser Sitzung + Folgeziel):
   • Heilmittel ({prof["label"]}) + konkrete Technik / Uebung heute durchgefuehrt
   • Dosierung / Parameter (Dauer, Wiederholungen, Sets, Widerstand — NUR wenn bekannt)
   • Heimuebungsprogramm falls besprochen
-  • SMART-Ziel: spezifisch + messbar + mit Zeitrahmen (z.B. "Ziel: Hüftflexion 0-0-110° in 4 EH")
+  • SMART-Ziel: spezifisch + messbar + mit Zeitrahmen (z.B. "{smart_goal_ex}")
   • Naechster Behandlungstermin / Frequenz
-  • Krücken- / Hilfsmittel-Empfehlung mit SEITE (kontralateral zur betroffenen Seite!)
+{kruecken_line}
   | Behandler: n.d.
 
 JSON-OUTPUT (alle Felder Pflicht, auch wenn "n.d." — VOLLSTAENDIGE Saetze, keine Stichwortlisten):
@@ -1482,6 +1533,64 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             if "schultergelenk" not in obj_text.lower() and "glenohumer" not in obj_text.lower():
                 obj_text += " | Behandeltes Segment: Art. glenohumeralis (Schultergelenk)"
 
+        # ── HWS / Zervikalsyndrom (EX_HWS): recover ROM, palpation, segment ──────
+        is_hws = (profile_id == "EX_HWS") or any(k in t_low for k in [
+            "hws", "halswirbel", "zervikalsynd", "kopfgelenk", "atlas", "hinterkopf",
+            "nackenschmerz", "nackenmuskulatur",
+        ])
+        if is_hws:
+            # HWS Rotation — "Rotation nach links ist bei etwa 45 Grad"
+            rot_li = re.search(
+                r"rotation\s+(?:nach\s+)?links[^.\n\d]*(\d+)\s*(?:grad|°)|"
+                r"(\d+)\s*(?:grad|°)[^.\n]{0,30}rotation\s+(?:nach\s+)?links",
+                transcript, re.I)
+            rot_re = re.search(
+                r"rotation\s+(?:nach\s+)?rechts[^.\n\d]*(\d+)\s*(?:grad|°)|"
+                r"(\d+)\s*(?:grad|°)[^.\n]{0,30}rotation\s+(?:nach\s+)?rechts",
+                transcript, re.I)
+            rot_li_val = (rot_li.group(1) or rot_li.group(2)) if rot_li else None
+            rot_re_val = (rot_re.group(1) or rot_re.group(2)) if rot_re else None
+
+            # "blockiert" / "schluss" / "eingeschränkt" at a given degree
+            block_deg = re.search(
+                r"(\d+)\s*(?:grad|°)[^.\n]{0,40}(?:blockier|schluss|eingeschränkt|geht nicht)|"
+                r"(?:blockier|schluss|eingeschränkt)[^.\n]{0,40}(\d+)\s*(?:grad|°)",
+                transcript, re.I)
+            if block_deg and not rot_li_val and not rot_re_val:
+                val = block_deg.group(1) or block_deg.group(2)
+                rot_li_val = val  # assume left (blocked side mentioned first in transcript)
+
+            if (rot_li_val or rot_re_val) and "rom hws" not in obj_text.lower() and "rotation" not in obj_text.lower():
+                li_str = f"0-0-{rot_li_val}" if rot_li_val else "n.d."
+                re_str = f"0-0-{rot_re_val}" if rot_re_val else "n.d."
+                obj_text += f" | ROM HWS: Rotation li {li_str} / re {re_str} (NZM)"
+
+            # Seitneigung — "Seitneigung ist auch eingeschränkt"
+            if re.search(r"seitneigung[^.\n]{0,30}eingeschränkt|eingeschränkte[rn]?\s+seitneigung", transcript, re.I):
+                if "seitneigung" not in obj_text.lower() and "latflex" not in obj_text.lower():
+                    obj_text += " | Seitneigung: eingeschränkt bds. (Ausmaß n.d.)"
+
+            # Palpation — M. trapezius / Levator tension
+            if re.search(r"trapezius|levator", transcript, re.I):
+                if "palpation" not in obj_text.lower() and "trapezius" not in obj_text.lower():
+                    tension = "erhöhter Muskeltonus"
+                    if re.search(r"beton|hart|steif|fest", transcript, re.I):
+                        tension = "stark erhöhter Muskeltonus (fest wie Beton)"
+                    obj_text += f" | Palpation: M. trapezius + M. levator scapulae: {tension}"
+
+            # Segment — Atlas/C0-C1 when "atlas" or "kopfgelenk" mentioned
+            if re.search(r"atlas|atlasgelenk|kopfgelenk|c0|c1|c2", transcript, re.I):
+                if "behandeltes segment" not in obj_text.lower() and "segment" not in obj_text.lower():
+                    obj_text += " | Behandeltes Segment: C0/C1 (Atlas-Okziput-Gelenk)"
+            elif re.search(r"c\d/c\d|c\d/th\d", transcript, re.I):
+                seg = re.search(r"(c\d/c\d|c\d/th\d)", transcript, re.I)
+                if seg and "behandeltes segment" not in obj_text.lower():
+                    obj_text += f" | Behandeltes Segment: {seg.group(1).upper()}"
+
+            # Spurling-Test — if not documented, mark as nicht durchgeführt
+            if "spurling" not in obj_text.lower():
+                obj_text += " | Spurling-Test: nicht durchgeführt"
+
         # ── Krücke Seitenkontrolle ─────────────────────────────────────────────
         plan_text = soap_dict.get("P", "")
         kruecke_m = re.search(
@@ -1508,6 +1617,11 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                     soap_dict["P"] = plan_text + warning
 
         soap_dict["O"] = self._dedup_o_field(obj_text)
+
+        # Deduplicate P-field — LLM loop artifacts produce repeated sentences
+        p_raw = soap_dict.get("P", "")
+        if p_raw:
+            soap_dict["P"] = self._dedup_o_field(p_raw)
 
         # Mamma-Ablation → inject onkologische Vordiagnose into Assessment if missing
         if any(k in t_low for k in ["ablation", "mastektomie", "mamma-ablation"]):
@@ -1844,9 +1958,44 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         if s_field:
             soap_dict["S"] = s_field
 
-        # Cross-domain SMART goal sanity check
+        # ── P-field sanitizer ─────────────────────────────────────────────────
+
+        # 1. Krücken recommendation: only clinically valid for lower-limb profiles.
+        _lower_limb_profiles = {"EX_KNIE", "EX_HUefte", "EX_HUFTE", "EX_FUSS", "GER", "POST_OP"}
+        if profile_id not in _lower_limb_profiles:
+            p_field = soap_dict.get("P", "")
+            if isinstance(p_field, str):
+                _p_no_kruecken = re.sub(
+                    r'[\|,]?\s*Krücken[^|.\n]*(?=[|.]|$)',
+                    '', p_field, flags=re.I
+                ).strip(' |,.')
+                if _p_no_kruecken != p_field:
+                    soap_dict["P"] = re.sub(r'\s{2,}', ' ', _p_no_kruecken).strip()
+
+        # 2. Cross-body SMART goal check — two layers:
+        #    a) Profile-specific: known wrong-body anatomy in SMART goal
+        #    b) Generic: "Ziel: ROM <word>" where <word> absent from all SOAP fields
+        _SMART_FORBIDDEN: dict = {
+            "EX_HWS":     ["hüftflex", "hüftext", "knieflex", "knieext",
+                           "hüfte 0-", "knie 0-", "sprunggelenk"],
+            "EX_SCHULTER": ["hüftflex", "hüftext", "knieflex", "hüfte 0-", "knie 0-"],
+            "EX_FUSS":    ["hüftflex", "schulterabd", "hüfte 0-"],
+            "EX_KNIE":    ["hüftflex", "schulterabd", "schulter 0-"],
+        }
         p_field = soap_dict.get("P", "")
         if isinstance(p_field, str):
+            p_low = p_field.lower()
+            _forbidden_in_p = _SMART_FORBIDDEN.get(profile_id, [])
+            if any(f in p_low for f in _forbidden_in_p):
+                soap_dict["P"] = re.sub(
+                    r'(?:SMART-)?Ziel\s*:?\s*[^|.\n]*(?:Hüftflex|Hüftext|Knieflex|Knieext|'
+                    r'Hüfte\s+\d|Knie\s+\d|Sprunggelenk)[^|.\n]*',
+                    'Ziel: n.d. — bitte profilkorrektes Funktionsziel ergaenzen',
+                    p_field, flags=re.I
+                )
+                p_field = soap_dict.get("P", "")
+
+            # Generic cross-domain check
             _smart_m = re.search(r'Ziel\s*:\s*ROM\s+(\w+)', p_field, re.I)
             if _smart_m:
                 _goal_part = _smart_m.group(1).lower()

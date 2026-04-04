@@ -1067,7 +1067,7 @@ class _GKVEngine:
 
             # Check for negation or documentation of screening
             negated = any(n in context for n in [
-                "negativ", "ausgeschlossen", "kein", "keine", "ohne", "unauffällig",
+                "negativ", "ausgeschlossen", "kein", "keine", "nicht", "ohne", "unauffällig",
                 "verneint", "normal", "regelrecht", "o.b.n.", "obn", "geprüft",
                 "screening negativ", "test negativ"
             ])
@@ -1076,6 +1076,16 @@ class _GKVEngine:
             if flag.lower() == "taubheit" and has_pelzig:
                 if any(k in obj for k in ["pelzig", "missempfindung", "parästhesie", "kribbel"]):
                     continue  # PASS suppressed — documented screening, no alert needed
+
+            # Special case: "Taubheitsgefühle" — compound word is a symptom descriptor,
+            # not a confirmed pathological finding. If "gefühl" follows the match within
+            # the same word, treat same as negated unless also in O-field as a finding.
+            if flag.lower() == "taubheit":
+                match_end = idx + len("taubheit")
+                if text_all[match_end:match_end + 8].startswith("sgefühl") or \
+                   text_all[match_end:match_end + 8].startswith("sgefuhl"):
+                    if flag.lower() not in obj:
+                        continue  # Compound "Taubheitsgefühle" in S/A without O-finding — not a block
 
             if negated:
                 pass  # PASS suppressed — red flag excluded, nothing to show

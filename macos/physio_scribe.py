@@ -853,11 +853,13 @@ class KuraEngine:
             "billing":  "20201",
             "priority": 70,
             "triggers": [
-                # NOTE: do NOT use bare "lymph" — matches "Lymphabfluss", "Lymphknoten"
-                # in orthopaedic/HWS contexts and causes false LY profile selection.
-                "lymphoedem", "lymphdrainage", "mld", "kpe", "entstauung", "stemmer",
+                # NOTE: do NOT use "lymphdrainage" or "mld" — these are treatment
+                # TECHNIQUES also used for acute sports injuries (sprains, haematoma)
+                # and cause false LY profile selection over EX_FUSS.
+                # Require actual DISEASE terms: lymphoedem, lipoedem, kpe, entstauung.
+                "lymphoedem", "kpe", "entstauung", "stemmer",
                 "lipoedem", "mastektomie", "axillaer", "sentinel", "erysipel",
-                "sekundaeres oedema",
+                "sekundaeres oedema", "primäres ödem", "chronisches ödem",
             ],
             "icd_prefix": ["I89", "Q82", "C77", "I97"],
             "checklist": [
@@ -1005,10 +1007,12 @@ class KuraEngine:
         "EX_FUSS": {
             "label":    "Extremitaeten Fuss / Sprunggelenk (EX5)",
             "billing":  "21201",
-            "priority": 40,
+            "priority": 50,
             "triggers": [
                 "fuss", "sprunggelenk", "osg", "usg", "achillessee", "plantarfasziitis",
                 "hallux", "fersenschmerz", "peroneus", "bandruptur",
+                "außenknöchel", "aussenknöchel", "malleolus", "knöchel",
+                "umknicken", "umgeknickt", "supinationstrauma", "ligament",
             ],
             "icd_prefix": ["M79.3", "M72.2", "S93"],
             "checklist": [
@@ -1351,6 +1355,19 @@ class KuraEngine:
         pain_ex    = _pain_examples.get(profile_id, "lokaler Schmerz, ggf. Ausstrahlung")
         red_flag_ex = _red_flag_examples.get(profile_id, "Red Flags klinisch ausgeschlossen")
 
+        _inspection_examples = {
+            "EX_SCHULTER": "Schulterachse re. hochgezogen, Skapula protrahiert",
+            "EX_HWS":      "Kopfhaltung in Vorneigung, Schultern hochgezogen bds.",
+            "EX_LWS":      "Schonhaltung nach re., Beckenschiefstand, Hyperlordose",
+            "EX_HUefte":   "Trendelenburg-Hinken re., Becken sinkt li. bei Einbeinstand",
+            "EX_HUFTE":    "Trendelenburg-Hinken re., Becken sinkt li. bei Einbeinstand",
+            "EX_KNIE":     "Knieachse valgus li., geringgradige Schwellung med. Gelenkspalt",
+            "EX_FUSS":     "Schwellung Außenknöchel li., Hämatom unter Malleolus lateralis, Entlastungshinken",
+            "LY":          "diffuse Schwellung Unterschenkel re., Haut gespannt und glänzend",
+            "AT":          "Atemexkursion eingeschränkt, Schulteratmung sichtbar",
+        }
+        inspection_ex = _inspection_examples.get(profile_id, "Schonhaltung, sichtbare Bewegungseinschränkung")
+
         return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 Du bist ein klinischer Dokumentationsexperte fuer deutsche Physiotherapie (Paragraph 106b SGB V).
 DIAGNOSE-PROFIL: {prof["label"]}  |  Abrechnung: {prof["billing"]}
@@ -1370,6 +1387,8 @@ EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
 12. SMART-ZIEL ist ein FUTURE TARGET, NICHT der aktuelle Befund: "Ziel: Abduktion auf 60° steigern in 6 EH" — NIEMALS aktuelle Einschraenkungswerte als Ziel nennen (falsch: "Ziel: Abduktion bei 45°").
 13. KÖRPERREGION-TREUE: S- und O-Feld dokumentieren AUSSCHLIESSLICH Beschwerden und Befunde des behandelten Körperbereichs ({prof["label"]}). Beschwerden aus anderen Körperregionen (z.B. Leiste/Knie/LWS bei Schulter-Profil; Schulter/HWS bei Hüft-Profil) werden NICHT in den Bericht aufgenommen — auch wenn sie im Transkript beiläufig erwähnt werden.
 14. POST-OP vs. IDIOPATHISCH: M75.0 (Adhäsive Kapsulitis / Frozen Shoulder) ist eine idiopathische Erkrankung ohne chirurgischen Auslöser. Falls das Transkript "postoperativ" erwähnt UND die Diagnose M75.0 ist: Verwende stattdessen die Diagnose M75.5 (Periarthritis humeroscapularis) oder Z96.6 (Z.n. Schulter-OP) — kombiniere NIEMALS M75.0 mit einem postoperativen Kontext.
+15. KEINE WIEDERHOLUNGEN: Jeder Befund, jeder Test und jede Messung erscheint im O-Feld genau EINMAL. Gleichlautende Saetze NIEMALS wiederholen.
+16. TESTS NUR KLINISCHE UNTERSUCHUNGEN: "Tests:" im O-Feld duerfen AUSSCHLIESSLICH klinische Tests enthalten (z.B. Schubladen-Test, Stemmer-Zeichen, VAS-Messung, Schubladentest). KEINE Heimuebungen ("Zehen Richtung Nase"), KEINE Therapieschritte ("MLD durchgefuehrt"), KEINE Patientendialog-Fragmente ("Alles klar", "Bis Montag", "Langsam"), KEINE Zeitangaben. Was in der Behandlung getan wurde → gehoert in das P-Feld.
 
 PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 {checklist}
@@ -1387,7 +1406,7 @@ S — Subjektiv (Patientenperspektive):
   • Relevanter Kontext: OP-Datum / Wochen postoperativ / Hilfsmittel / Alltagssituation
 
 O — Objektiv (Therapeutenbeobachtung — NUR Befunde, KEINE Interventionen):
-  • Inspektion / Gangbild / Haltung (z.B. "Trendelenburg-Hinken rechts, Becken sinkt links bei Einbeinstand")
+  • Inspektion / Gangbild / Haltung (z.B. "{inspection_ex}")
   • Alle Messwerte numerisch: ROM in Grad (Neutral-Null), Kraft MRC 0-5, VAS bei Provokation
   • Alle klinischen Tests mit Ergebnis (z.B. "Trendelenburg-Zeichen: positiv rechts")
   • Palpationsbefund falls genannt (Druckschmerz, Spannung, Schwellung)
@@ -1431,6 +1450,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         sampler = make_sampler(
             temp=cfg.get("temperature", 0.15),
             top_p=cfg.get("top_p", 0.9),
+            repetition_penalty=cfg.get("repetition_penalty", 1.3),
         )
         raw = generate(
             self.model, self.tokenizer,
@@ -1439,6 +1459,49 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             sampler=sampler,
         )
         return "{" + raw if not raw.strip().startswith("{") else raw
+
+    # Patterns that identify non-clinical "Tests:" entries (social/instruction fragments)
+    _NON_CLINICAL_TEST_RE = re.compile(
+        r'^(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|'
+        r'\d+[-–]\d+\s*wochen?|alles\s+klar|bis\s+\w+|verständnis|verstanden|'
+        r'langsam\b|übung\s+für\s+heute|rückenlage[\s,].*(?:nase|locker)|'
+        r'volle\s+beweglichkeit|lauf-abc\b|einbeinstand(?:\s|,|$)|lauftraining\b)',
+        re.I
+    )
+
+    @staticmethod
+    def _dedup_o_field(text: str) -> str:
+        """
+        Remove duplicate sentences from the O-field (prevents LLM loop artifacts)
+        and strip non-clinical 'Tests: X' entries (social phrases, home-exercise
+        instructions that leaked from the transcript).
+        """
+        if not text:
+            return text
+
+        # Split on sentence-ending patterns while preserving the delimiter
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        seen: set = set()
+        result = []
+        for sent in sentences:
+            s = sent.strip()
+            if not s:
+                continue
+            key = re.sub(r'\s+', ' ', s.lower())
+
+            # Filter non-clinical "Tests: <social/instruction fragment>"
+            if re.match(r'^Tests:\s+', s, re.I):
+                test_body = s[s.index(':') + 1:].strip()
+                # Grab just the test name (before first comma)
+                test_name = test_body.split(',')[0].strip()
+                if PhysioScribeEngine._NON_CLINICAL_TEST_RE.match(test_name):
+                    continue
+
+            if key not in seen:
+                seen.add(key)
+                result.append(s)
+
+        return ' '.join(result)
 
     def recover_hard_metrics(self, transcript, soap_dict):
         """
@@ -1806,7 +1869,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                     )
                     soap_dict["P"] = plan_text + warning
 
-        soap_dict["O"] = obj_text
+        soap_dict["O"] = self._dedup_o_field(obj_text)
 
         # Mamma-Ablation → inject onkologische Vordiagnose into Assessment if missing
         if any(k in t_low for k in ["ablation", "mastektomie", "mamma-ablation"]):

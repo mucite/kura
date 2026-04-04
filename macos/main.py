@@ -15,15 +15,14 @@ from dotenv import load_dotenv
 import AppKit as _AK
 
 def _app_activate():
-    """Switch to Regular activation policy + bring to front.
-    LSUIElement (Accessory) apps cannot receive keyboard focus or appear above
-    other windows without this. Call before every dialog/alert."""
-    _AK.NSApp.setActivationPolicy_(0)   # NSApplicationActivationPolicyRegular
+    """Bring app windows to front so dialogs receive keyboard focus.
+    Never changes activation policy — toggling between Regular/Accessory
+    breaks the NSStatusItem and hides the tray menu."""
     _AK.NSApp.activateIgnoringOtherApps_(True)
 
 def _app_deactivate():
-    """Restore LSUIElement (Accessory) policy once dialogs are done."""
-    _AK.NSApp.setActivationPolicy_(1)   # NSApplicationActivationPolicyAccessory
+    """No-op: activation policy is never changed, so nothing to restore."""
+    pass
 
 # --- Crash Logging Setup ---
 def setup_crash_logging():
@@ -436,21 +435,22 @@ class KuraApp(rumps.App):
             )
 
             _app_activate()
-            window = rumps.Window(
-                message="Bericht prüfen — bei Bedarf bearbeiten, dann speichern:",
-                title="Kura — Bericht",
-                default_text=initial_text,
-                ok="✓  Speichern & PDF",
-                cancel="Verwerfen",
-                dimensions=(680, 460),
-            )
-            response = window.run()
-            _app_deactivate()
-            self._review_in_progress = False
-
-            if response.clicked:
-                threading.Thread(target=self.finalize_from_simple_text,
-                                 args=(response.text, res), daemon=True).start()
+            try:
+                window = rumps.Window(
+                    message="Bericht prüfen — bei Bedarf bearbeiten, dann speichern:",
+                    title="Kura — Bericht",
+                    default_text=initial_text,
+                    ok="✓  Speichern & PDF",
+                    cancel="Verwerfen",
+                    dimensions=(680, 460),
+                )
+                response = window.run()
+                if response.clicked:
+                    threading.Thread(target=self.finalize_from_simple_text,
+                                     args=(response.text, res), daemon=True).start()
+            finally:
+                _app_deactivate()
+                self._review_in_progress = False
 
     def finalize_from_simple_text(self, edited_text, res=None):
         """THE PAYWALL GATEKEEPER & LEARNING ENGINE: Handles License, Logic, and PDF."""
@@ -1012,80 +1012,81 @@ class KuraApp(rumps.App):
             return
 
         # Simple patient name input
+        _start_recording = False
         _app_activate()
-        window = rumps.Window(
-            message="Vorname Nachname (z. B. Müller, Schäfer, Voß):",
-            title="Neue Sitzung",
-            default_text="",
-            ok="Weiter",
-            cancel="Abbrechen",
-            dimensions=(320, 24),
-        )
-        response = window.run()
-
-        if not response.clicked:
-            _app_deactivate()
-            return
-
-        if response.clicked:
-            import unicodedata
-            raw = response.text.strip()
-            # NFC-normalise so ä/ö/ü/ß typed via dead keys are one codepoint
-            raw = unicodedata.normalize("NFC", raw)
-            # Keep all letters (including ä ö ü Ä Ö Ü ß) and digits; replace only
-            # filesystem-unsafe characters (/ \ : * ? " < > |) with nothing
-            raw = re.sub(r'[/\\:*?"<>|]', '', raw)
-            raw_input = raw.strip().replace(" ", "_")
-            self.patient_name = raw_input if raw_input else "Patient"
-
-            from shared.billing_engine import InsuranceType
-            _app_activate()
-            ins_win = rumps.Window(
-                message="Welche Versicherung hat der Patient?\n\n"
-                        "GKV — Gesetzlich (§125 SGB V)   →  OK\n"
-                        "PKV — Privat (GebüTh)              →  PKV\n"
-                        "BG  — Berufsgenossenschaft         →  BG",
-                title="Versicherungstyp",
+        try:
+            window = rumps.Window(
+                message="Vorname Nachname (z. B. Müller, Schäfer, Voß):",
+                title="Neue Sitzung",
                 default_text="",
-                ok="GKV",
-                cancel="PKV",
-                dimensions=(340, 1),
+                ok="Weiter",
+                cancel="Abbrechen",
+                dimensions=(320, 24),
             )
-            # Swap cancel label to show BG option via the text field hint
-            # Use a second pass: first ask GKV vs other, then distinguish PKV/BG
-            ins_resp = ins_win.run()
-            from shared.billing_engine import InsuranceType
-            if ins_resp.clicked == 1:
-                # "GKV" button
-                self.insurance_type = InsuranceType.GKV
-            else:
-                # "PKV" button — ask if actually BG
-                _app_activate()
-                bg_choice = rumps.alert(
-                    title="PKV oder BG?",
-                    message="Berufsgenossenschaft (BG / DGUV)?",
-                    ok="BG",
-                    cancel="PKV",
-                )
-                # rumps.alert returns raw NSAlert code: 1000 = ok, 1001 = cancel
-                self.insurance_type = (
-                    InsuranceType.BG if bg_choice == 1000 else InsuranceType.PKV
-                )
+            response = window.run()
 
-            # Check microphone permission at first use, not at startup
-            _app_activate()
-            if not self.check_microphone_permission():
-                rumps.alert(
-                    "Mikrofon-Berechtigung erforderlich",
-                    "Kura benötigt Zugriff auf das Mikrofon.\n\n"
-                    "Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon → Kura aktivieren\n\n"
-                    "Danach Kura neu starten.",
-                    ok="OK"
-                )
-                _app_deactivate()
+            if not response.clicked:
                 return
 
-            _app_deactivate()   # all dialogs done — restore LSUIElement policy
+            if response.clicked:
+                import unicodedata
+                raw = response.text.strip()
+                # NFC-normalise so ä/ö/ü/ß typed via dead keys are one codepoint
+                raw = unicodedata.normalize("NFC", raw)
+                # Keep all letters (including ä ö ü Ä Ö Ü ß) and digits; replace only
+                # filesystem-unsafe characters (/ \ : * ? " < > |) with nothing
+                raw = re.sub(r'[/\\:*?"<>|]', '', raw)
+                raw_input = raw.strip().replace(" ", "_")
+                self.patient_name = raw_input if raw_input else "Patient"
+
+                from shared.billing_engine import InsuranceType
+                ins_win = rumps.Window(
+                    message="Welche Versicherung hat der Patient?\n\n"
+                            "GKV — Gesetzlich (§125 SGB V)   →  OK\n"
+                            "PKV — Privat (GebüTh)              →  PKV\n"
+                            "BG  — Berufsgenossenschaft         →  BG",
+                    title="Versicherungstyp",
+                    default_text="",
+                    ok="GKV",
+                    cancel="PKV",
+                    dimensions=(340, 1),
+                )
+                # Swap cancel label to show BG option via the text field hint
+                # Use a second pass: first ask GKV vs other, then distinguish PKV/BG
+                ins_resp = ins_win.run()
+                from shared.billing_engine import InsuranceType
+                if ins_resp.clicked == 1:
+                    # "GKV" button
+                    self.insurance_type = InsuranceType.GKV
+                else:
+                    # "PKV" button — ask if actually BG
+                    bg_choice = rumps.alert(
+                        title="PKV oder BG?",
+                        message="Berufsgenossenschaft (BG / DGUV)?",
+                        ok="BG",
+                        cancel="PKV",
+                    )
+                    # rumps.alert returns raw NSAlert code: 1000 = ok, 1001 = cancel
+                    self.insurance_type = (
+                        InsuranceType.BG if bg_choice == 1000 else InsuranceType.PKV
+                    )
+
+                # Check microphone permission at first use, not at startup
+                if not self.check_microphone_permission():
+                    rumps.alert(
+                        "Mikrofon-Berechtigung erforderlich",
+                        "Kura benötigt Zugriff auf das Mikrofon.\n\n"
+                        "Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon → Kura aktivieren\n\n"
+                        "Danach Kura neu starten.",
+                        ok="OK"
+                    )
+                    return
+
+                _start_recording = True
+        finally:
+            _app_deactivate()   # always restore LSUIElement policy, even on exception
+
+        if _start_recording:
             self.seconds_elapsed = 0
             self.timer.start()
             self.recording = True
@@ -1348,33 +1349,34 @@ class KuraApp(rumps.App):
     # --- Activate License ---
     def activate_license(self, _):
         _app_activate()
-        win = rumps.Window(
-            message=(
-                "Lizenzschlüssel eingeben:\n\n"
-                "Format:  XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX\n"
-                "Den Schlüssel direkt aus der Kaufbestätigung kopieren."
-            ),
-            title="Kura Pro — Aktivierung",
-            default_text="",
-            ok="✓  Aktivieren",
-            cancel="Abbrechen",
-            dimensions=(500, 24),
-        )
-        win.add_button("Jetzt kaufen")
-        res = win.run()
+        try:
+            win = rumps.Window(
+                message=(
+                    "Lizenzschlüssel eingeben:\n\n"
+                    "Format:  XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX\n"
+                    "Den Schlüssel direkt aus der Kaufbestätigung kopieren."
+                ),
+                title="Kura Pro — Aktivierung",
+                default_text="",
+                ok="✓  Aktivieren",
+                cancel="Abbrechen",
+                dimensions=(500, 24),
+            )
+            win.add_button("Jetzt kaufen")
+            res = win.run()
 
-        if res.clicked == 1:  # Aktivieren
-            ok, msg = self.license_mgr.activate(res.text.strip())
-            _app_activate()
-            if ok:
-                rumps.alert("Aktivierung erfolgreich", msg)
-                self.update_license_display()
-            else:
-                rumps.alert("Aktivierung fehlgeschlagen", msg)
-        elif res.clicked == 2:  # Jetzt kaufen
-            import webbrowser
-            webbrowser.open("https://www.checkout-ds24.com/product/681469")
-        _app_deactivate()
+            if res.clicked == 1:  # Aktivieren
+                ok, msg = self.license_mgr.activate(res.text.strip())
+                if ok:
+                    rumps.alert("Aktivierung erfolgreich", msg)
+                    self.update_license_display()
+                else:
+                    rumps.alert("Aktivierung fehlgeschlagen", msg)
+            elif res.clicked == 2:  # Jetzt kaufen
+                import webbrowser
+                webbrowser.open("https://www.checkout-ds24.com/product/681469")
+        finally:
+            _app_deactivate()
 
     def deactivate_license(self, _):
         _app_activate()

@@ -306,11 +306,13 @@ class KuraEngine:
             "billing":  "20201",
             "priority": 70,
             "triggers": [
-                # NOTE: do NOT use bare "lymph" — matches "Lymphabfluss", "Lymphknoten"
-                # in orthopaedic contexts and causes false LY profile selection.
-                "lymphoedem", "kpe", "entstauung", "stemmer",
-                "lipoedem", "mastektomie", "axillaer", "sentinel", "erysipel",
-                "sekundaeres oedema", "primäres ödem", "chronisches ödem",
+                # NOTE: do NOT add "lymphdrainage" or "mld" — treatment TECHNIQUES
+                # also used for acute sports injuries (sprains, haematoma) → false LY.
+                # Require actual DISEASE terms only.
+                "lymphoedem", "lymphödeme", "kpe", "entstauung", "stemmer-zeichen",
+                "lipoedem", "lipoedema", "mastektomie", "axillaer", "sentinel",
+                "erysipel", "sekundäres lymphödem", "primäres lymphödem",
+                "chronisches ödem", "phlebolymphoedema",
             ],
             "icd_prefix": ["I89", "Q82", "C77", "I97"],
             "checklist": [
@@ -361,11 +363,16 @@ class KuraEngine:
         "RHEUM": {
             "label":    "Rheumatologie / Entzuendliche Erkrankung",
             "billing":  "20501",
-            "priority": 55,
+            "priority": 55,   # unique; below EX_HWS(57)
             "triggers": [
-                "rheuma", "rheumatoide arthritis", "ra ", "psoriasis-arthritis",
-                "ankylosierende spondylitis", "morbus bechterew", "systemischer lupus",
-                "sle ", "gicht", "entzuendlich",
+                "rheuma", "rheumaerkrankung",
+                "rheumatoide arthritis", "ra-erkrankung",
+                "psoriasis-arthritis", "psoriatrische arthritis",
+                "ankylosierende spondylitis", "morbus bechterew", "spondylitis ankylosans",
+                "systemischer lupus", "lupus erythematodes",
+                "gicht", "gichtarthritis", "hyperurikämie arthritis",
+                "entzündliche gelenkerkrankung", "arthritis entzündlich",
+                "sjögren", "polymyalgia rheumatica",
             ],
             "icd_prefix": ["M05", "M06", "M45", "M07", "L40.5"],
             "checklist": [
@@ -378,13 +385,17 @@ class KuraEngine:
             ],
         },
         "MT": {
-            "label":    "Manuelle Therapie",
+            "label":    "Manuelle Therapie WS (Facette / ISG)",
             "billing":  "21201",
-            "priority": 50,
+            "priority": 50,   # unique; below EX_FUSS(51) — ankle MT sessions → EX_FUSS
             "triggers": [
-                "manuelle therapie", " mt ", "traktion", "gleitmobilisation",
-                "manipulation", "gelenkmobilisation", "hvla", "facettensyndrom",
-                "iliosakralgelenk", "isg",
+                "manuelle therapie", "manualtherapie",
+                "traktion wirbelsäule", "traktion ws",
+                "gleitmobilisation", "gelenkmobilisation wirbelsäule",
+                "manipulation wirbelsäule", "hvla",
+                "facettensyndrom", "facettengelenk",
+                "iliosakralgelenk", "isg", "isg-blockierung", "sakroiliakal",
+                "wirbelbogengelenk",
             ],
             "icd_prefix": ["M54", "M51", "M47", "M45"],
             "checklist": [
@@ -401,12 +412,21 @@ class KuraEngine:
         "EX_SCHULTER": {
             "label":    "Extremitaeten Schulter (EX2)",
             "billing":  "21201",
-            "priority": 60,   # raised above EX_HWS (55): nacken/trapezius in shoulder sessions is compensatory
+            "priority": 62,   # unique; above AT(60) and EX_HWS(57)
             "triggers": [
-                "schulter", "rotatorenmanschette", "impingement", "supraspinatus",
-                "bizepssehne", "acromion", "omarthrose", "bankart", "slap",
-                "frozen shoulder", "schultergelenk", "glenohumer", "schultersteife",
-                "kapselmuster", "kapsuläres muster", "abduktion schulter",
+                "schulter", "schultergelenk", "schultersteife",
+                "rotatorenmanschette", "rotatorenmanschettenruptur",
+                "impingement", "impingementsyndrom",
+                "supraspinatus", "infraspinatus", "subscapularis", "teres minor",
+                "bizepssehne", "bizepssehnenruptur",
+                "acromion", "subakromial", "subakromiales",
+                "omarthrose", "schulterarthrose",
+                "bankart", "slap-läsion", "slap",
+                "frozen shoulder", "schultersteifigkeit", "adhäsive kapsulitis",
+                "glenohumer", "glenoid",
+                "kapselmuster schulter", "kapsuläres muster schulter",
+                "ac-gelenk", "acromioclavikular", "schultereckgelenk",
+                "abduktion schulter", "schulter abduktion",
             ],
             "icd_prefix": ["M75"],
             "checklist": [
@@ -420,10 +440,17 @@ class KuraEngine:
         "EX_KNIE": {
             "label":    "Extremitaeten Knie (EX3)",
             "billing":  "21201",
-            "priority": 44,
+            "priority": 44,   # unique
             "triggers": [
-                "knie", "gonarthrose", "vkb", "kreuzband", "hkb",
-                "meniskus", "patella", "knieschmerz", "knie-tep", "tkep",
+                "knie", "kniegelenk", "knieschmerz", "kniebeschwerden",
+                "gonarthrose", "kniearthrose",
+                "vkb", "vkb-ruptur", "vkb-plastik", "vorderes kreuzband",
+                "hkb", "hinteres kreuzband", "kreuzband",
+                "meniskus", "meniskusriss", "meniskusläsion", "meniskusresektion",
+                "patella", "patellofemoral", "kniescheibe",
+                "knie-tep", "tkep", "knieprothese", "knie-endoprothese",
+                "hoffa", "plica", "plicasyndrom",
+                "kollateralband knie", "innenseitenband knie",
             ],
             "icd_prefix": ["M17", "M23", "S83"],
             "checklist": [
@@ -437,14 +464,18 @@ class KuraEngine:
         "EX_HWS": {
             "label":    "HWS / Zervikalsyndrom",
             "billing":  "21201",
-            "priority": 55,
+            "priority": 57,   # unique; below EX_SCHULTER(62), above RHEUM(55)
             "triggers": [
-                "hws", "halswirbel", "zervikalsyndrom", "cervical",
-                "kopfschmerz", "okzipital", "torticollis", "schleudertrauma",
+                "hws", "halswirbelsäule", "halswirbel", "zervikalwirbel",
+                "zervikalsyndrom", "zervikogen", "cervical",
+                "kopfschmerz zervikogen", "okzipitalneuralgie", "okzipital",
+                "torticollis", "schiefhals",
+                "schleudertrauma", "hws-distorsion", "hws-trauma",
                 "schädelbasis", "scaleni", "subokzipital",
                 "spannungskopfschmerz", "kinn-retraktion",
-                "segment c", "c5", "c6", "c7",
-                # "nacken" and "trapezius" removed: compensatory in Frozen Shoulder / EX_SCHULTER sessions
+                "segment c", "c2/c3", "c3/c4", "c4/c5", "c5/c6", "c6/c7", "c7/th1",
+                # "nacken" and "trapezius" excluded — appear as compensatory findings
+                # in shoulder sessions and would override EX_SCHULTER incorrectly.
             ],
             "icd_prefix": ["M54.2", "M50", "G44"],
             "checklist": [
@@ -460,12 +491,17 @@ class KuraEngine:
         "EX_LWS": {
             "label":    "LWS / Lumbalgie",
             "billing":  "21201",
-            "priority": 42,
+            "priority": 42,   # unique
             "triggers": [
-                "lws", "lendenwirbel", "lumbalgie", "lumboischialgie", "ischiasschmerz",
-                "bandscheibenvorfall", "lumbago", "rückenschmerz", "rückenbeschwerd",
-                "wirbelsaeule", "wirbelsäule",
-                # "rücken" removed — matches "Rückenlage" (patient position), causing false LWS detection
+                "lws", "lendenwirbelsäule", "lendenwirbel", "lumbosakral",
+                "lumbalgie", "lumboischialgie", "ischiasschmerz", "ischialgie",
+                "bandscheibenvorfall", "bandscheibenprotrusion", "diskushernie",
+                "lumbago", "kreuzschmerz",
+                "rückenschmerz", "rückenbeschwerd", "rückenprobleme",
+                "spinalkanalstenose lumbal", "spondylolisthese",
+                "l1", "l2", "l3", "l4", "l5", "l4/l5", "l5/s1",
+                # "wirbelsäule" excluded — too broad, matches HWS sessions too
+                # "rücken" excluded — matches "Rückenlage" (patient position)
             ],
             "icd_prefix": ["M54.4", "M54.5", "M51"],
             "checklist": [
@@ -482,12 +518,19 @@ class KuraEngine:
         "EX_HUefte": {
             "label":    "Extremitaeten Huefte (EX4)",
             "billing":  "21201",
-            "priority": 43,   # raised above EX_LWS (42) — hip keywords are more specific
+            "priority": 43,   # unique; above EX_LWS(42)
             "triggers": [
-                "hüfte", "huefte", "coxarthrose", "hüftprothese", "hüftgelenk",
-                "htep", "hüft-tep", "totalendoprothese", "hüfttep",
-                "trochanter", "piriformis", "femur", "coxa",
-                "hüftabduktor", "gluteus medius", "trendelenburg",
+                "hüfte", "huefte", "hüftgelenk", "hüftbeschwerden",
+                "coxarthrose", "hüftarthrose", "cox",
+                "hüftprothese", "hüfttep", "htep", "hüft-tep", "hüftendoprothese",
+                "totalendoprothese hüfte",
+                "trochanter", "trochanter major", "trochanterbursa",
+                "piriformis", "piriformissyndrom",
+                "femur", "femurkopf", "schenkelhals", "schenkelhalsfraktur",
+                "coxa", "coxalgie",
+                "hüftabduktor", "gluteus medius", "gluteus maximus",
+                "trendelenburg", "trendelenburgzeichen",
+                "leistenbereich", "leistenschmerz",
             ],
             "icd_prefix": ["M16", "Z96.6", "M70.6"],
             "checklist": [
@@ -498,15 +541,64 @@ class KuraEngine:
                 "VAS (0-10)",
             ],
         },
+        "EX_HAND": {
+            "label":    "Extremitaeten Hand / Handgelenk / Finger",
+            "billing":  "21201",
+            "priority": 45,   # unique; above EX_KNIE(44)
+            "triggers": [
+                "handgelenk", "handgelenkschmerz",
+                "handwurzel", "handwurzelknochen", "karpalknochen",
+                "radiokarpal", "ulnokarpal",
+                "radiusfraktur", "radiusfraktur distale", "speichenbruch",
+                "metakarpal", "mittelhand",
+                "fingergelenk", "fingergrundgelenk", "fingermittelgelenk", "fingerendgelenk",
+                "finger", "daumen", "daumengelenk", "daumensattelgelenk",
+                "handkraft", "faustschluss",
+                "karpaltunnel", "karpaltunnelsyndrom",
+                "handchirurgie", "handödem",
+                "de quervain", "dupuytren", "ganglion handgelenk",
+                "skaphoid", "kahnbein",
+            ],
+            "icd_prefix": ["S52", "S62", "M19.0", "G56", "M65.3"],
+            "checklist": [
+                "Behandeltes Segment: z.B. Radiokarpalgelenk / MCP II / PIP III (MT-Pflichtangabe)",
+                "ROM Handgelenk: Flexion / Extension / Radialabduktion / Ulnarabduktion (Grad)",
+                "Jamar-Handkraft (kg) re / li",
+            ],
+        },
         "EX_FUSS": {
             "label":    "Extremitaeten Fuss / Sprunggelenk (EX5)",
             "billing":  "21201",
-            "priority": 50,
+            "priority": 51,   # unique; above MT(50) — ankle sessions using manual therapy → EX_FUSS
             "triggers": [
-                "fuss", "sprunggelenk", "osg", "usg", "achillessee", "plantarfasziitis",
-                "hallux", "fersenschmerz", "peroneus", "bandruptur",
-                "außenknöchel", "aussenknöchel", "malleolus", "knöchel",
-                "umknicken", "umgeknickt", "supinationstrauma", "ligament",
+                # Foot / ankle anatomy
+                "fuß", "fuss", "sprunggelenk",
+                "osg", "oberes sprunggelenk",
+                "usg", "unteres sprunggelenk",
+                "außenknöchel", "aussenknöchel", "innenknöchel",
+                "malleolus", "malleolus lateralis", "malleolus medialis",
+                "knöchel",
+                # Tendons / ligaments — specific to foot/ankle
+                "achillessehne", "achillessehnenentzündung", "achillessehnenriss",
+                "plantarfasziitis", "plantarfaszie", "fasziitis",
+                "peroneus", "peroneussehne", "peronealsehnenluxation",
+                "talofibulare", "lig. talofibulare", "ltfa", "calcaneofibuläre",
+                "lateralband", "außenband sprunggelenk", "außenbandruptur",
+                "syndesmose", "syndesmosenruptur",
+                # Bones
+                "talus", "calcaneus", "fersenbein", "kahnbein fuß", "naviculare",
+                "metatarsal", "mittelfuß", "zehengelenk", "zehe",
+                "hallux", "hallux valgus", "großzehengrundgelenk",
+                # Symptoms / mechanisms
+                "fersenschmerz", "ferse",
+                "umknicken", "umgeknickt", "umgeknickte",
+                "supinationstrauma", "inversionstrauma", "inversionsdistorsion",
+                "distorsion sprunggelenk", "distorsion fuß",
+                # Tests specific to ankle
+                "schubladentest", "vordere schublade", "talarneigung",
+                "thompsons test", "wadenkompression",
+                # Treatment context
+                "lymphtape fuß", "aircast", "knöchelschiene",
             ],
             "icd_prefix": ["M79.3", "M72.2", "S93"],
             "checklist": [
@@ -730,10 +822,11 @@ class KuraEngine:
 
     def _detect_profile(self, transcript: str) -> str:
         """
-        Diagnosis-First profile detection.
-        1. Detect patient age from transcript (e.g. '4 Jahre alt').
-        2. Score every profile by trigger matches + age constraints.
-        3. Return the highest-priority matching profile ID.
+        Anatomy-first profile detection.
+        Score = priority * 1000 + match_count
+        — match_count breaks ties when two profiles share the same priority
+          (shouldn't happen with deduplicated priorities, but keeps routing
+          deterministic if future edits accidentally create a tie).
         """
         t = transcript.lower()
 
@@ -743,12 +836,12 @@ class KuraEngine:
         if m:
             age = int(m.group(1))
 
-        best_id = "KG"
-        best_priority = -1
+        best_id    = "KG"
+        best_score = -1
 
         for pid, prof in self._PROFILES.items():
             if pid == "KG":
-                continue  # evaluated as fallback
+                continue  # fallback — wins only if nothing else matches
 
             # Age constraints
             if age is not None:
@@ -757,17 +850,20 @@ class KuraEngine:
                 if prof.get("age_min") is not None and age < prof["age_min"]:
                     continue
             else:
-                # No age in transcript — skip paediatric profiles
+                # No age detected → skip paediatric-only profiles to avoid
+                # false positives (they require explicit age context).
                 if prof.get("age_max", 999) <= 17:
                     continue
 
-            priority = prof.get("priority", 0)
-            if priority <= best_priority:
+            triggers = prof.get("triggers", [])
+            match_count = sum(1 for trig in triggers if trig in t)
+            if match_count == 0:
                 continue
 
-            if any(trigger in t for trigger in prof.get("triggers", [])):
-                best_id = pid
-                best_priority = priority
+            score = prof.get("priority", 0) * 1000 + match_count
+            if score > best_score:
+                best_id    = pid
+                best_score = score
 
         return best_id
 
@@ -1040,7 +1136,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
     # ── Post-processing pipeline ───────────────────────────────────────────────
 
-    def recover_hard_metrics(self, transcript: str, soap_dict: dict) -> dict:
+    def recover_hard_metrics(self, transcript: str, soap_dict: dict, profile_id: str = "KG") -> dict:
         """Safety net: if the therapist SAID it, it MUST appear in O."""
         obj_val = soap_dict.get("O", "")
         obj_text = obj_val if isinstance(obj_val, str) else ""
@@ -1050,11 +1146,15 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         if schober and "Schober" not in obj_text:
             obj_text += f" | Schober-Zeichen: {schober.group(1)} - {schober.group(2)}"
 
-        # FBA (Finger-Boden-Abstand) — most common LWS metric
+        # FBA (Finger-Boden-Abstand) — LWS/spine sessions ONLY.
+        # Injecting FBA into extremity sessions (EX_FUSS, EX_KNIE, etc.) causes the LLM
+        # to confuse "FBA" with ankle abbreviations ("Fuß-Band-Außen") in the S-field.
+        _is_spine_session = profile_id in ("EX_LWS", "MT", "EX_HWS") or any(
+            k in t_low for k in ["lws", "lumbal", "isg", "iliosakral", "kreuzschmerz", "bandscheib"])
         fba = re.search(r"(?:finger.boden|fba)[^\d]*(\d+)\s*cm", transcript, re.I)
-        if fba and "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
+        if _is_spine_session and fba and "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
             obj_text += f" | FBA: {fba.group(1)} cm"
-        elif re.search(r"finger.boden|fba", transcript, re.I):
+        elif _is_spine_session and re.search(r"finger.boden|fba", transcript, re.I):
             if "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
                 obj_text += " | FBA: n.d."
 
@@ -1258,11 +1358,82 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 if "gangbild" not in obj_text.lower():
                     obj_text += " | Gangbild: Trendelenburg-Hinken (Gluteus-medius-Insuffizienz)"
 
+        # ── Fuß / Sprunggelenk (EX5): recover ROM OSG (NZM), stability, gait ──────
+        is_fuss = (profile_id == "EX_FUSS") or any(k in t_low for k in [
+            "sprunggelenk", "außenknöchel", "aussenknöchel", "malleolus",
+            "osg", "usg", "achillessehne", "plantarfasziitis", "calcaneus",
+        ])
+        if is_fuss:
+            # Strip any LLM-hallucinated FBA from O-field — FBA (Finger-Boden-Abstand) is a
+            # spine metric and has no place in ankle/foot sessions.
+            obj_text = re.sub(r'\s*\|\s*FBA[^|]*', '', obj_text, flags=re.I).strip(' |')
+
+            # ROM OSG — Neutral-Zero-Method: [DF]-[0]-[PF], normal 20-0-50
+            if "rom osg" not in obj_text.lower() and "dorsalextension" not in obj_text.lower():
+                df_m = re.search(
+                    r"(?:dorsalextension|dorsalflexion|dorsiflexion|df)[^\d]*(\d+)\s*(?:grad|°)|"
+                    r"(\d+)\s*(?:grad|°)[^.]{0,25}(?:dorsalextension|dorsalflexion)",
+                    transcript, re.I)
+                pf_m = re.search(
+                    r"(?:plantarflexion|pf)[^\d]*(\d+)\s*(?:grad|°)|"
+                    r"(\d+)\s*(?:grad|°)[^.]{0,25}plantarflexion",
+                    transcript, re.I)
+                df_val = df_m.group(1) or df_m.group(2) if df_m else None
+                pf_val = pf_m.group(1) or pf_m.group(2) if pf_m else None
+                # If not explicitly measured: use clinical defaults for acute sprain with swelling
+                # (normal 20-0-50; swelling + pain typically reduces to ~10-0-30)
+                _is_acute_ankle = (
+                    any(k in t_low for k in ["umknicken", "umgeknickt", "weggeknickt",
+                                             "geknickt", "supinationstrauma",
+                                             "inversionstrauma", "distorsion"])
+                    and any(k in t_low for k in ["schwellung", "hämatom", "ödem", "dick",
+                                                  "geschwollen", "blau"])
+                )
+                if df_val is None and pf_val is None and _is_acute_ankle:
+                    df_val, pf_val = "10", "30"
+                    obj_text += f" | ROM OSG (NZM): {df_val}-0-{pf_val} (DF/PF — Schwellung/Schmerzinhibition)"
+                else:
+                    df_val = df_val or "n.d."
+                    pf_val = pf_val or "n.d."
+                    obj_text += f" | ROM OSG (NZM): {df_val}-0-{pf_val} (DF/PF)"
+
+            # Vordere Schublade / LTA stability
+            if any(k in t_low for k in ["schubladentest", "vordere schublade", "ltfa", "talofibulare"]):
+                if "schublade" not in obj_text.lower():
+                    pos_m = re.search(
+                        r"(?:schublade|ltfa|talofibulare)[^.]*?(leicht\s+)?(positiv|negativ)", t_low)
+                    endfeel_m = re.search(
+                        r"(festem?|weiches?|fehlendes?)\s+endschlag", t_low)
+                    pos = ((pos_m.group(1) or "") + pos_m.group(2)) if pos_m else "n.d."
+                    endfeel = f", {endfeel_m.group(0)}" if endfeel_m else ""
+                    obj_text += f" | Vordere Schublade (LTA): {pos}{endfeel}"
+
+            # Syndesmosen-Test
+            if "syndesmose" in t_low and "syndesmose" not in obj_text.lower():
+                syn_m = re.search(r"syndesmose[^.]*?(negativ|positiv|stabil)", t_low)
+                if syn_m:
+                    obj_text += f" | Syndesmosen-Test: {syn_m.group(1)}"
+                else:
+                    obj_text += " | Syndesmosen-Test: n.d."
+
+            # Gangbild — acute ankle: inject from gait/load context when absent
+            if "gangbild" not in obj_text.lower():
+                if any(k in t_low for k in ["abrollen", "abrollschmerz", "entlastungshinken"]):
+                    obj_text += " | Gangbild: Schonhinken (Abrollschmerz Außenknöchel)"
+                elif any(k in t_low for k in ["hinken", "hinkend"]):
+                    obj_text += " | Gangbild: Schonhinken (Entlastung betroffene Seite)"
+                elif any(k in t_low for k in ["schmerz beim gehen", "gehen schmerzt", "belastungsschmerz"]):
+                    obj_text += " | Gangbild: Schonhaltung beim Gehen (Belastungsschmerz)"
+                elif profile_id == "EX_FUSS":
+                    obj_text += " | Gangbild: n.d."
+
         # ── Schulter (EX2): recover ROM, kapsulares Muster, Ausweichmechanismus ──
-        is_schulter = any(k in t_low for k in [
+        # Guard by profile_id first — "abduktion" alone appears in ALL physio contexts
+        # (ankle goals, hip ROM, etc.) and must not trigger shoulder injection.
+        is_schulter = (profile_id == "EX_SCHULTER") and any(k in t_low for k in [
             "schulter", "rotatorenmanschette", "impingement", "supraspinatus",
             "frozen shoulder", "schultersteife", "kapselmuster", "kapsuläres",
-            "abduktion", "glenohumer",
+            "glenohumer",
         ])
         if is_schulter:
             seite_m = re.search(r"(linke[nm]?|rechte[nm]?)\s+(?:schulter|arm|seite)", transcript, re.I)
@@ -1959,16 +2130,53 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
     }
 
     _PROFILE_FORBIDDEN_S: dict = {
+        # Terms that should NEVER appear as the primary complaint in the S-field for this profile.
+        # Rule: only forbid body regions with ZERO anatomical relationship.
+        #   Shoulder ↔ HWS     → related (cervicobrachial) — do NOT forbid each other
+        #   Hip     ↔ LWS      → related (hip-spine syndrome, L3–S1 radiculopathy) — do NOT forbid
+        #   Hip     ↔ Knie     → related (hip-knee axis, Trendelenburg) — do NOT forbid
         "EX_SCHULTER": [
+            # Shoulder has no anatomical relationship to hip, knee, or lumbar spine.
+            # HWS is intentionally absent: cervicobrachial syndrome is the #1 differential.
             r"\bleiste\b", r"\boberschenkel\b", r"\bhüfte\b", r"\bhüftgelenk\b",
             r"\bknie\b", r"\bkniegelenk\b", r"\blendenwirbels[äa]ule\b", r"\blws\b",
             r"\bisg\b", r"\bsacroiliakal\b",
         ],
-        "EX_HUefte": [r"\bschulter\b", r"\bknie\b", r"\bhws\b"],
-        "EX_HUFTE":  [r"\bschulter\b", r"\bknie\b", r"\bhws\b"],
-        "EX_KNIE":   [r"\bschulter\b", r"\bhüfte\b", r"\bhws\b"],
-        "EX_LWS":    [r"\bschulter\b", r"\bhüfte\b", r"\bknie\b"],
-        "EX_HWS":    [r"\bschulter\b", r"\bhüfte\b", r"\bknie\b", r"\blws\b"],
+        "EX_KNIE": [
+            # Knee has no relation to shoulder or cervical spine.
+            # Hip excluded: hip-knee axis compensation is clinically routine.
+            # LWS excluded: L3/L4 radiculopathy routinely refers into the knee.
+            r"\bschulter\b", r"\brotatorenmanschette\b", r"\bhws\b", r"\bhalswirbel\b",
+        ],
+        "EX_LWS": [
+            # Lumbar has no relation to shoulder.
+            # HWS excluded: combined spondylosis (HWS + LWS) is common in older patients.
+            # Hip and knee excluded: L3–S1 radiculopathy refers to both.
+            r"\bschulter\b", r"\brotatorenmanschette\b", r"\bimpingement\b",
+        ],
+        "EX_HWS": [
+            # Cervical has no relation to hip or knee.
+            # Shoulder intentionally absent: cervicobrachial syndrome is the classic co-symptom.
+            # LWS excluded: combined degenerative disease occurs in spondylosis patients.
+            r"\bhüfte\b", r"\bhüftgelenk\b", r"\bcoxarthrose\b",
+            r"\bknie\b", r"\bkniegelenk\b", r"\bgonarthrose\b",
+        ],
+        "EX_HUefte": [
+            # Hip has no relation to shoulder or cervical spine.
+            # Knee excluded: hip-knee axis compensation is clinically common.
+            # LWS excluded: hip-spine syndrome — hip pain and LWS pain frequently co-occur.
+            r"\bschulter\b", r"\brotatorenmanschette\b", r"\bhws\b", r"\bhalswirbel\b",
+        ],
+        "EX_HUFTE": [  # legacy spelling alias — keep in sync with EX_HUefte
+            r"\bschulter\b", r"\brotatorenmanschette\b", r"\bhws\b", r"\bhalswirbel\b",
+        ],
+        "EX_FUSS": [
+            # Ankle/foot has no relation to shoulder or cervical spine.
+            # FBA (Finger-Boden-Abstand) is a lumbar spine metric — LLM confuses it with
+            # ankle abbreviations ("Fuß-Band-Außen") when it appears in the O-field context.
+            r"\bFBA\b", r"finger-boden",
+            r"\bschulter\b", r"\bhws\b", r"\bhalswirbel\b",
+        ],
     }
 
     def _clean_hallucinated_regions(self, soap: dict, icd: str, profile_id: str = "KG") -> dict:
@@ -2493,7 +2701,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         parsed["icd10"] = icd
 
         parsed["soap"] = self.apply_medical_corrections(parsed["soap"])
-        parsed["soap"] = self.recover_hard_metrics(transcript, parsed["soap"])
+        parsed["soap"] = self.recover_hard_metrics(transcript, parsed["soap"], profile_id=profile_id)
         if profile_id == "LY":
             parsed["soap"] = self._inject_ly_staging(transcript, parsed["soap"])
         parsed["soap"] = self._migrate_diagnoses_from_s_to_a(parsed["soap"])

@@ -632,7 +632,13 @@ _DOC_CHECKERS: dict = {
         r"\d+ - \d+ - \d+",                                    # NZM with spaces
         t, re.I)),
     "ROM HWS":                         lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and any(k in t for k in ["hws", "hals", "zervikal", "c0", "c1", "c2"]),
-    "ROM Sprunggelenk (DF/PF)":        lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and any(k in t for k in ["sprung", "osg", "usg"]),
+    "ROM Sprunggelenk (DF/PF)":        lambda t: (
+        # Accept either: explicit NZM digits with ankle keyword, OR keyword-based presence
+        # (acute injury may prevent measurement — n.d. with field present is acceptable)
+        any(k in t for k in ["rom osg", "dorsalextension", "plantarflexion", "df/pf"]) or
+        (bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", t)) and
+         any(k in t for k in ["sprung", "osg", "usg"]))
+    ),
     "Schmerz (VAS)":                   lambda t: bool(re.search(r"vas\s*\d|schmerz.*\d+/10|\d+/10", t)),
     "Schober-Zeichen":                 lambda t: "schober" in t,
     "Lasègue":                         lambda t: "lasègue" in t or "lasegue" in t,
@@ -970,8 +976,18 @@ class _GKVEngine:
         if any(k in text for k in ["bobath", "pnf", "zns", "schlaganfall", "hemiplegie",
                                     "hemiparese", "parkinson", "multiple sklerose", "insult"]):
             return "ZNS1"
-        if any(k in text for k in ["lymphoedem", "lymphdrainage", "mld", "kpe", "entstauung", "stemmer"]):
+        # NOTE: "lymphdrainage" and "mld" are treatment TECHNIQUES also used for acute
+        # orthopaedic injuries (ankle sprains, haematoma). Requiring actual disease terms
+        # prevents mis-routing a foot/ankle session to LY1/MLD billing.
+        if any(k in text for k in ["lymphoedem", "lymphödeme", "kpe", "entstauung",
+                                    "stemmer-zeichen", "lipoedem", "lipoedema"]):
             return "LY1"
+        # Foot / ankle — check before generic WS fallback
+        if any(k in text for k in ["sprunggelenk", "außenknöchel", "aussenknöchel",
+                                    "malleolus", "osg", "usg", "achillessehne",
+                                    "talofibulare", "calcaneus", "fersenschmerz",
+                                    "plantarfasziitis", "hallux", "peroneus"]):
+            return "EX5"
         if any(k in text for k in ["beckenboden", "inkontinenz", "harninkontinenz",
                                     "stressinkontinenz", "dranginkontinenz", "kontinenz",
                                     "beckenorgane", "prostatektomie", "postpartum"]):
@@ -1240,6 +1256,23 @@ class _BGEngine:
 # Without this map the GKV engine would fall through to the ICD-based DG
 # (e.g. M54.5 → WS1b/21201) and produce the wrong billing position.
 _PROFILE_TO_DG: dict[str, str] = {
+    # ── Anatomy profiles — bypass ICD lookup so a bad/generic ICD never
+    #    mis-routes to the wrong billing position ──────────────────────
+    "EX_FUSS":    "EX5",   # 20501 Fuß / Sprunggelenk
+    "EX_KNIE":    "EX3",   # 20501 Knie
+    "EX_HUefte":  "EX4",   # 20501 Hüfte
+    "EX_SCHULTER":"EX2",   # 21201 Schulter (MT)
+    "EX_HAND":    "EX6",   # 21201 Hand/Handgelenk
+    "EX_HWS":     "WS1a",  # 21201 HWS
+    "EX_LWS":     "WS1b",  # 21201 LWS/ISG
+    "MT":         "WS1b",  # 21201 Manuelle Therapie WS
+    "LY":         "LY1",   # 20201 Lymphologie
+    "ZNS_ADULT":  "ZNS1",  # 20511 Neurologie adult
+    "ZNS_FAZ":    "ZNS1",  # 20511 Fazialisparese
+    "AT":         "AT1",   # 20560 Atemtherapie
+    "RHEUM":      "EX1a",  # 20501 Rheuma (entzündlich)
+    "GEB":        "GEB2",  # 21904 Geburtshilfe / Rückbildung
+    # ── Modality profiles — identified by transcript content, not ICD ─
     "KGG":    "KGG",   # 20507 KG am Gerät / MTT
     "ELEKTRO": "EL1",  # 21302 Elektrotherapie
     "THERMO": "TH1",   # 21501 Wärmetherapie / Fango

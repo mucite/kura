@@ -912,7 +912,12 @@ class KuraEngine:
 
     def build_prompt(self, transcript: str, profile_id: str = "KG") -> str:
         learning_notes = self.learning_mgr.get_relevant_prefs(transcript)
-        style_injection = f"\nBEVORZUGTE CODES DES THERAPEUTEN:\n{learning_notes}\n" if learning_notes else ""
+        few_shot_block = self.learning_mgr.format_few_shot_block(transcript, profile_id)
+        style_injection = ""
+        if learning_notes:
+            style_injection += f"\nBEVORZUGTE CODES DES THERAPEUTEN:\n{learning_notes}\n"
+        if few_shot_block:
+            style_injection += f"\n{few_shot_block}\n"
         checklist = self._profile_checklist(profile_id)
         prof = self._PROFILES.get(profile_id, self._PROFILES["KG"])
 

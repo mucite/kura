@@ -490,19 +490,31 @@ class KuraApp(rumps.App):
             # the AI result is missing (avoid UnboundLocalError).
             user_icd = icd_match.group(1) if icd_match else None
 
-            if user_icd and res:
+            if res:
                 ai_icd = res.get('icd10')
                 transcript = res.get('transcript', "")
+                final_icd = user_icd or ai_icd or "M99.9"
+                was_corrected = bool(user_icd and user_icd != ai_icd)
 
-                # If the therapist manually fixed a hallucination (e.g., M37.0 -> M41.2)
-                if user_icd != ai_icd:
-                    # Assuming you've initialized self.engine.learning_mgr
+                if was_corrected:
                     try:
                         self.engine.learning_mgr.log_correction(transcript, ai_icd, user_icd)
                         print(f"🧠 Sharpener: Learned {user_icd} for this context.")
                     except Exception:
-                        # Learning should not block finalization; ignore failures
                         print("⚠️ Learning manager failed to log correction.")
+
+                # Always log the accepted session for few-shot learning
+                try:
+                    soap = res.get('soap', {})
+                    profile_id = res.get('profile_id', 'KG')
+                    self.engine.learning_mgr.log_session(
+                        transcript, soap, final_icd, profile_id, was_corrected
+                    )
+                    stats = self.engine.learning_mgr.stats()
+                    print(f"🧠 Learning: {stats['total_sessions']} sessions stored "
+                          f"({stats['corrected_sessions']} corrected)")
+                except Exception as e:
+                    print(f"⚠️ Learning log error: {e}")
 
             # --- B. CLIPBOARD LOGIC ---
             # Strip Kura header and billing footer — paste only clean SOAP into practice software

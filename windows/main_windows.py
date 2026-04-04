@@ -627,15 +627,29 @@ class KuraApp:
         # Learning engine
         icd_match = re.search(r"ICD-10:\s*([A-Z][0-9][0-9]\.[0-9])", edited_text)
         user_icd = icd_match.group(1) if icd_match else None
-        if user_icd and self.engine:
+        if self.engine:
             ai_icd = res.get("icd10")
             transcript = res.get("transcript", "")
-            if user_icd != ai_icd:
+            final_icd = user_icd or ai_icd or "M99.9"
+            was_corrected = bool(user_icd and user_icd != ai_icd)
+            if was_corrected:
                 try:
                     self.engine.learning_mgr.log_correction(transcript, ai_icd, user_icd)
                     print(f"🧠 Learning: recorded correction {ai_icd} → {user_icd}")
                 except Exception:
                     pass
+            # Always log the accepted session for few-shot learning
+            try:
+                soap = res.get("soap", {})
+                profile_id = res.get("profile_id", "KG")
+                self.engine.learning_mgr.log_session(
+                    transcript, soap, final_icd, profile_id, was_corrected
+                )
+                stats = self.engine.learning_mgr.stats()
+                print(f"🧠 Learning: {stats['total_sessions']} sessions stored "
+                      f"({stats['corrected_sessions']} corrected)")
+            except Exception as e:
+                print(f"Learning log error: {e}")
 
         # Clipboard
         soap_only = re.sub(r'^KURA[^\n]*\n[-─]+\n\n?', '', edited_text)

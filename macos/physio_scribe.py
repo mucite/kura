@@ -1330,6 +1330,27 @@ class KuraEngine:
         checklist = self._profile_checklist(profile_id)
         prof      = self._PROFILES.get(profile_id, self._PROFILES["KG"])
 
+        # Profile-specific examples to prevent LLM from copying wrong body-region templates
+        _pain_examples = {
+            "EX_SCHULTER": "linke Schulter, Ausstrahlung in den Arm",
+            "EX_HWS":      "Nacken/HWS mit Ausstrahlung in den Arm",
+            "EX_LWS":      "Lendenwirbelsäule, Ausstrahlung ins Bein",
+            "EX_HUefte":   "rechte Hüfte mit Ausstrahlung in den Oberschenkel",
+            "EX_HUFTE":    "rechte Hüfte mit Ausstrahlung in den Oberschenkel",
+            "EX_KNIE":     "linkes Knie, Schmerz bei Treppensteigen",
+            "EX_FUSS":     "linkes Sprunggelenk, Schmerz beim Abrollen",
+        }
+        _red_flag_examples = {
+            "EX_SCHULTER": "keine Parästhesien in Hand/Fingern, kein Kraftverlust im Arm, kein Verdacht auf vollständige RM-Ruptur",
+            "EX_HWS":      "keine Arm-Parästhesien, keine Dysphagie, keine Myelopathiezeichen",
+            "EX_LWS":      "keine Blasen-/Mastdarmstörung, keine Kauda-Symptomatik, keine Lähmung",
+            "EX_HUefte":   "keine Femurhalsfraktur, keine AVN-Zeichen, kein Tumorverdacht",
+            "EX_HUFTE":    "keine Femurhalsfraktur, keine AVN-Zeichen, kein Tumorverdacht",
+            "EX_KNIE":     "keine Kompartment-Zeichen, kein Tumorverdacht, keine tief. Venenthrombose",
+        }
+        pain_ex    = _pain_examples.get(profile_id, "lokaler Schmerz, ggf. Ausstrahlung")
+        red_flag_ex = _red_flag_examples.get(profile_id, "Red Flags klinisch ausgeschlossen")
+
         return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 Du bist ein klinischer Dokumentationsexperte fuer deutsche Physiotherapie (Paragraph 106b SGB V).
 DIAGNOSE-PROFIL: {prof["label"]}  |  Abrechnung: {prof["billing"]}
@@ -1347,6 +1368,8 @@ EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
 10. PROFIL-PARAMETER exakt im O-Feld (als Zahlenwerte, niemals als Prosa-Zusammenfassung): KGG/MTT → Geraet + Last (kg) + Wdh x Saetze; ELEKTRO → Stromform (TENS/IFC/Galvano) + Frequenz (Hz) + Intensitaet (mA) + Elektroden-Platzierung; THERMO/Fango → Modalitaet + Behandlungsregion + Temperatur (°C oder "angenehm warm"); BECKEN → Oxford-Skala (0-5) + Kontraktionsdauer (sek) + Serienzahl.
 11. O-FELD NUR BEFUNDERGEBNISSE: Das O-Feld enthaelt AUSSCHLIESSLICH dokumentierte Messwerte und Testresultate — NIEMALS Therapeutenanweisungen ("Heben Sie...", "Legen Sie sich..."), Patientenanfragen ("Mehr geht nicht?") oder Behandlungsschritte ("Ich fixiere jetzt..."). ROM immer im Neutral-Null-Format: z.B. "ROM Schulter (li) NZM: Flex/Ext: 80-0-0 | Abd/Add: 45-0-10 | IRO/ARO: n.d.-0-0". Tests die nicht durchfuehrbar waren: "[Testname]: nicht testbar (Schmerzinhibition)" — nicht weglassen.
 12. SMART-ZIEL ist ein FUTURE TARGET, NICHT der aktuelle Befund: "Ziel: Abduktion auf 60° steigern in 6 EH" — NIEMALS aktuelle Einschraenkungswerte als Ziel nennen (falsch: "Ziel: Abduktion bei 45°").
+13. KÖRPERREGION-TREUE: S- und O-Feld dokumentieren AUSSCHLIESSLICH Beschwerden und Befunde des behandelten Körperbereichs ({prof["label"]}). Beschwerden aus anderen Körperregionen (z.B. Leiste/Knie/LWS bei Schulter-Profil; Schulter/HWS bei Hüft-Profil) werden NICHT in den Bericht aufgenommen — auch wenn sie im Transkript beiläufig erwähnt werden.
+14. POST-OP vs. IDIOPATHISCH: M75.0 (Adhäsive Kapsulitis / Frozen Shoulder) ist eine idiopathische Erkrankung ohne chirurgischen Auslöser. Falls das Transkript "postoperativ" erwähnt UND die Diagnose M75.0 ist: Verwende stattdessen die Diagnose M75.5 (Periarthritis humeroscapularis) oder Z96.6 (Z.n. Schulter-OP) — kombiniere NIEMALS M75.0 mit einem postoperativen Kontext.
 
 PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 {checklist}
@@ -1355,7 +1378,7 @@ SOAP-STRUKTUR — VOLLSTAENDIG AUSSCHREIBEN (kein Kurzhalten, kein Zusammenfasse
 
 S — Subjektiv (Patientenperspektive):
   • Hauptbeschwerde in den EIGENEN WORTEN des Patienten (direkte Zitate bevorzugt)
-  • Schmerzlokalisation exakt (z.B. "rechte Leiste mit Ausstrahlung in den Oberschenkel")
+  • Schmerzlokalisation exakt (z.B. "{pain_ex}")
   • Schmerzcharakter (ziehend / brennend / stechend / drückend — was der Patient sagt)
   • VAS aktuell x/10; bei Aktivitaet / in Ruhe falls beides genannt
   • Dauer und Verlauf (seit wann, schlechter/besser, Verlauf zur Vorsitzung)
@@ -1376,7 +1399,7 @@ A — Assessment (Klinische Einschaetzung des Therapeuten):
   • Klinische Begruendung (warum dieser Code, welche Befunde stuetzen ihn)
   • Differentialdiagnose falls klinisch relevant
   • Funktionsstatus / Stadium (z.B. "6 Wochen postoperativ, Reha-Phase 2")
-  • Red-Flag-Ausschluss spezifisch (z.B. "Keine Kauda-Symptomatik, keine Blasen-/Mastdarmstörung")
+  • Red-Flag-Ausschluss spezifisch fuer dieses Profil (z.B. "{red_flag_ex}")
 
 P — Plan (Therapieplan dieser Sitzung + Folgeziel):
   • Heilmittel ({prof["label"]}) + konkrete Technik / Uebung heute durchgefuehrt
@@ -2681,12 +2704,59 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         ],
     }
 
+    # Wrong anatomical body terms in S-field per profile (pipe-separated regex alts)
+    _PROFILE_FORBIDDEN_S: dict = {
+        "EX_SCHULTER": [
+            r"\bleiste\b", r"\boberschenkel\b", r"\bhüfte\b", r"\bhüftgelenk\b",
+            r"\bknie\b", r"\bkniegelenk\b", r"\blendenwirbels[äa]ule\b", r"\blws\b",
+            r"\bisg\b", r"\bsacroiliakal\b",
+        ],
+        "EX_HUefte": [r"\bschulter\b", r"\bknie\b", r"\bhws\b"],
+        "EX_HUFTE":  [r"\bschulter\b", r"\bknie\b", r"\bhws\b"],
+        "EX_KNIE":   [r"\bschulter\b", r"\bhüfte\b", r"\bhws\b"],
+        "EX_LWS":    [r"\bschulter\b", r"\bhüfte\b", r"\bknie\b"],
+        "EX_HWS":    [r"\bschulter\b", r"\bhüfte\b", r"\bknie\b", r"\blws\b"],
+    }
+
     def _clean_hallucinated_regions(self, soap: dict, icd: str, profile_id: str = "KG") -> dict:
         """
-        Remove out-of-scope diagnosis terms from the A field.
-        E.g. a Schulter patient should not be diagnosed with Gonarthrose.
-        Only removes terms that are NOT negated (negated = already a ruled-out differential).
+        Remove out-of-scope diagnosis terms from the A field and wrong anatomical
+        region terms from the S-field (e.g. "Leiste/Oberschenkel" in a shoulder report).
+        Only removes terms that are NOT negated.
         """
+        # ── S-field: strip wrong body-region pain locations ───────────────────
+        s_forbidden = self._PROFILE_FORBIDDEN_S.get(profile_id, [])
+        if s_forbidden:
+            s = soap.get("S", "")
+            s_parts = re.split(r'(?<=[.!?|])\s*', s)
+            s_clean = []
+            for part in s_parts:
+                part_stripped = part.strip()
+                if not part_stripped:
+                    continue
+                removed = False
+                for pattern in s_forbidden:
+                    m = re.search(pattern, part_stripped, re.I)
+                    if m:
+                        before = part_stripped[:m.start()]
+                        nearby = before.split()[-6:]
+                        if not self._NEGATION_RE.search(" ".join(nearby)):
+                            print(f"[SanityCheck] Removed off-region S term '{pattern}': {part_stripped[:60]}")
+                            removed = True
+                            break
+                if not removed:
+                    s_clean.append(part_stripped)
+            soap["S"] = " ".join(s_clean).strip()
+
+        # ── Post-op + M75.0 contradiction ────────────────────────────────────
+        if profile_id == "EX_SCHULTER" and icd.startswith("M75.0"):
+            s = soap.get("S", "")
+            if re.search(r'postoperativ|post-op|\bop\b|\boperation\b|wochen\s+postop', s, re.I):
+                soap["S"] = re.sub(
+                    r'[^|.]*(?:postoperativ|post-op|\bop\b|\boperation\b|wochen\s+postop)[^|.]*[|.]?\s*',
+                    '', s, flags=re.I).strip().strip('|').strip()
+                print("[SanityCheck] Removed postoperativ from S (M75.0 is idiopathic)")
+
         forbidden = self._PROFILE_FORBIDDEN_A.get(profile_id, [])
         if not forbidden:
             return soap

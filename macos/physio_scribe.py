@@ -1321,10 +1321,11 @@ class KuraEngine:
         label    = prof["label"]
         billing  = prof["billing"]
         items    = "\n".join(f"- {item}" for item in prof["checklist"])
-        icd_hint = ", ".join(prof.get("icd_prefix", [])) or "nach Befund"
+        prefixes = prof.get("icd_prefix", [])
+        icd_hint = prefixes[0] if prefixes else "nach Befund"
         return (
             f"PROFIL: {label}  |  Abrechnung: {billing}\n"
-            f"ICD-10-Hinweis: {icd_hint}\n"
+            f"ICD-10-Hinweis: waehle NUR EINEN passenden Code (typisch: {icd_hint}.x)\n"
             f"PFLICHTFELDER O-Feld:\n{items}"
         )
 
@@ -1387,8 +1388,8 @@ EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
 12. SMART-ZIEL ist ein FUTURE TARGET, NICHT der aktuelle Befund: "Ziel: Abduktion auf 60° steigern in 6 EH" — NIEMALS aktuelle Einschraenkungswerte als Ziel nennen (falsch: "Ziel: Abduktion bei 45°").
 13. KÖRPERREGION-TREUE: S- und O-Feld dokumentieren AUSSCHLIESSLICH Beschwerden und Befunde des behandelten Körperbereichs ({prof["label"]}). Beschwerden aus anderen Körperregionen (z.B. Leiste/Knie/LWS bei Schulter-Profil; Schulter/HWS bei Hüft-Profil) werden NICHT in den Bericht aufgenommen — auch wenn sie im Transkript beiläufig erwähnt werden.
 14. POST-OP vs. IDIOPATHISCH: M75.0 (Adhäsive Kapsulitis / Frozen Shoulder) ist eine idiopathische Erkrankung ohne chirurgischen Auslöser. Falls das Transkript "postoperativ" erwähnt UND die Diagnose M75.0 ist: Verwende stattdessen die Diagnose M75.5 (Periarthritis humeroscapularis) oder Z96.6 (Z.n. Schulter-OP) — kombiniere NIEMALS M75.0 mit einem postoperativen Kontext.
-15. KEINE WIEDERHOLUNGEN: Jeder Befund, jeder Test und jede Messung erscheint im O-Feld genau EINMAL. Gleichlautende Saetze NIEMALS wiederholen.
-16. TESTS NUR KLINISCHE UNTERSUCHUNGEN: "Tests:" im O-Feld duerfen AUSSCHLIESSLICH klinische Tests enthalten (z.B. Schubladen-Test, Stemmer-Zeichen, VAS-Messung, Schubladentest). KEINE Heimuebungen ("Zehen Richtung Nase"), KEINE Therapieschritte ("MLD durchgefuehrt"), KEINE Patientendialog-Fragmente ("Alles klar", "Bis Montag", "Langsam"), KEINE Zeitangaben. Was in der Behandlung getan wurde → gehoert in das P-Feld.
+15. Jeden Befund und Test genau einmal im O-Feld dokumentieren.
+16. O-Feld-Tests: nur echte klinische Untersuchungen (Schubladentest, Lasègue, ROM, Stemmer). Behandlungsschritte und Heimuebungen gehoeren ins P-Feld.
 
 PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 {checklist}
@@ -1468,6 +1469,24 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         re.I
     )
 
+    # Patterns of rule text the LLM sometimes copies verbatim into content fields
+    _RULE_TEXT_RE = re.compile(
+        r'Keine\s+Wiederholungen(?:/Saetze)?|'
+        r'Keine\s+Zeitangaben|Keine\s+Heimuebungen|Keine\s+Therapieschritte|'
+        r'Keine\s+Patientendialog-Fragmente|Keine\s+Behandlungsschritte|'
+        r'KEINE\s+WIEDERHOLUNGEN|KEINE\s+BEHANDLUNGSSCHRITTE',
+        re.I
+    )
+
+    @staticmethod
+    def _strip_rule_text(text: str) -> str:
+        """Truncate the field at the first point where the LLM starts copying rule text."""
+        m = PhysioScribeEngine._RULE_TEXT_RE.search(text)
+        if m:
+            truncated = text[:m.start()].rstrip(', ')
+            return truncated if truncated else text
+        return text
+
     @staticmethod
     def _dedup_o_field(text: str) -> str:
         """
@@ -1477,6 +1496,8 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         """
         if not text:
             return text
+
+        text = PhysioScribeEngine._strip_rule_text(text)
 
         # Split on sentence-ending patterns while preserving the delimiter
         sentences = re.split(r'(?<=[.!?])\s+', text)
@@ -2492,7 +2513,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         parsed = self.parse_robust_json(raw_output)
 
         # ICD correction (domain detection + keyword-based upgrade)
-        icd, _ = self.suggest_billing(parsed["icd10"], parsed["soap"], transcript)
+        icd, _ = self.suggest_billing(parsed["icd10"], parsed["soap"], transcript, profile_id=profile_id)
         parsed["icd10"] = icd
 
         parsed["soap"] = self.apply_medical_corrections(parsed["soap"])
@@ -2536,7 +2557,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             "profile_label": prof_label,
         }
 
-    def suggest_billing(self, icd10: str, soap: dict, transcript: str):
+    def suggest_billing(self, icd10: str, soap: dict, transcript: str, profile_id: str = ""):
         """
         Supports Orthopedic, Neurological, and Lymphatic Physiotherapy.
         Orders priority: ZNS > MT > MLD > KG.
@@ -2550,7 +2571,12 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         # --- 1. DOMAIN DETECTION ---
         is_neuro = any(k in full_text for k in
                        ["bobath", "pnf", "neuro", "zns", "hemiparese", "ataxie", "spastik", "insult", "schlaganfall"])
-        is_lymph = any(k in full_text for k in ["mld", "lymph", "ödem", "kpe", "entstauung", "stemmer"])
+        # is_lymph only fires when the PROFILE is lymphatic — "mld"/"lymphdrainage" are
+        # also treatment techniques used in orthopaedic contexts (ankle sprains, etc.).
+        _ly_profile = profile_id in ("LY", "LY1", "") or not profile_id
+        is_lymph = _ly_profile and any(
+            k in full_text for k in ["lymphoedem", "lymphödem", "kpe", "entstauung", "stemmer", "lipödem"]
+        )
         is_ortho_mt = any(k in full_text for k in
                           ["manuelle therapie", " mt ", "traktion", "gleitmobilisation", "manipulation",
                            "mobilisation"])
@@ -2977,6 +3003,8 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                         value = (_flat + " | " + _rest) if _rest else _flat
                 except Exception:
                     pass  # leave as-is if embedded JSON is malformed
+            # Strip any rule text the LLM copied verbatim into the field
+            value = self._strip_rule_text(value)
             if not value or value.strip() in ("N/A", "Fehler", "KI-Fehler", "{}"):
                 value = f"{icd10} | Red Flags klinisch ausgeschlossen." if field == "A" else "n.d."
             soap_clean[field] = value.strip()

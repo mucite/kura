@@ -2811,13 +2811,19 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             data = json.loads(repaired)
             icd10 = data.get("icd10", "M99.9")
             soap_raw = data.get("soap", {})
+            # Rescue ICD if LLM embedded it in A-field instead of top-level
+            if icd10 == "M99.9":
+                a_text = str(soap_raw.get("A", "") if isinstance(soap_raw, dict) else "")
+                _icd_rescue = re.search(r'\b([A-Z]\d{2})\s*\.?\s*(\d+)\b', a_text)
+                if _icd_rescue:
+                    icd10 = _icd_rescue.group(1) + "." + _icd_rescue.group(2)
         except Exception as e1:
             _log.warning("JSON parse failed after repair: %s — trying regex extraction", e1)
             # Strategy 2: regex field extraction
             soap_raw = _extract_fields_regex(text)
-            icd_m = re.search(r'"icd10"\s*:\s*"([A-Z]\d{2}[\.\d]*)"', text)
+            icd_m = re.search(r'"icd10"\s*:\s*"([A-Z]\d{2}[\.\d\s]*)"', text)
             if icd_m:
-                icd10 = icd_m.group(1)
+                icd10 = re.sub(r'\s', '', icd_m.group(1))  # strip spaces e.g. "M75. 0" → "M75.0"
             if not soap_raw:
                 _log.warning("Regex extraction also failed. Raw output (first 300): %s", text[:300])
 

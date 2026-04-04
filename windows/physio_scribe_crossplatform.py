@@ -2215,8 +2215,15 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                         value = str(value) if value else "N/A"
                     soap_clean[field] = value.strip() if value else "N/A"
                 
+                icd10_val = data.get("icd10", "M99.9")
+                # Rescue ICD if LLM embedded it in A-field instead of top-level
+                if icd10_val == "M99.9":
+                    a_text = soap_clean.get("A", "")
+                    _icd_rescue = re.search(r'\b([A-Z]\d{2})\s*\.?\s*(\d+)\b', a_text)
+                    if _icd_rescue:
+                        icd10_val = _icd_rescue.group(1) + "." + _icd_rescue.group(2)
                 return {
-                    "icd10": data.get("icd10", "M99.9"),
+                    "icd10": icd10_val,
                     "soap": soap_clean,
                     "billing_suggestion": data.get("billing_suggestion", "20501"),
                 }
@@ -2242,8 +2249,8 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                     else:
                         soap_dict[field] = "N/A"
 
-            icd_match = re.search(r'"icd10"\s*:\s*"([A-Z]\d{2}\.?\d*)"', text)
-            icd = icd_match.group(1) if icd_match else "M99.9"
+            icd_match = re.search(r'"icd10"\s*:\s*"([A-Z]\d{2}[\.\d\s]*)"', text)
+            icd = re.sub(r'\s', '', icd_match.group(1)) if icd_match else "M99.9"
 
             billing_match = re.search(r'"billing_suggestion"\s*:\s*"(\d+)"', text)
             billing = billing_match.group(1) if billing_match else "20501"

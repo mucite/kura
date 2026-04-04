@@ -667,6 +667,7 @@ _DOC_CHECKERS: dict = {
     "Neurolog. Screening":             lambda t: any(k in t for k in ["reflex", "sensibilität", "kraft", "mmt", "neurolog"]),
     "Neurolog. Befund":                lambda t: any(k in t for k in ["neurolog", "reflex", "sensibilität", "ashworth", "barthel"]),
     "Krafttest (Jobe/Hawkins)":        lambda t: any(k in t for k in ["jobe", "hawkins", "nicht testbar", "nicht wertbar", "schmerzinhibition"]),
+    "Provokationstest (Hawkins/Jobe)": lambda t: any(k in t for k in ["hawkins", "jobe", "nicht testbar", "nicht wertbar", "schmerzinhibition"]),
     "Painful Arc":                     lambda t: "painful arc" in t or "schmerzbogen" in t or "blockade" in t or "bewegungslimitierung" in t,
     "Cobb-Winkel":                     lambda t: "cobb" in t,
     "Rippenbuckel":                    lambda t: "rippenbuckel" in t or "rippe" in t,

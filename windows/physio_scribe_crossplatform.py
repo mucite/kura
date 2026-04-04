@@ -94,9 +94,10 @@ class KuraEngine:
             import contextlib
 
             candidates = [
-                os.path.join(self.model_dir, "Llama-3.1-8B-Instruct-4bit-GGUF", "Llama-3.1-8B-Instruct-Q4_K_M.gguf"),
-                os.path.join(self.model_dir, "Llama-3.1-8B-Instruct-4bit", "Llama-3.1-8B-Instruct-Q4_K_M.gguf"),
-                os.path.join(self.model_dir, "Llama-3.1-8B-Instruct-Q4_K_M.gguf"),
+                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-4bit-GGUF", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
+                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-4bit", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
+                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
+                os.path.join(self.model_dir, "llama-3.2-3b-medical.Q4_K_M.gguf"),
                 os.path.join(self.model_dir, "Mistral-7B-Instruct-v0.1.Q4_K_M.gguf"),
             ]
 
@@ -104,7 +105,7 @@ class KuraEngine:
             if not llm_path:
                 raise FileNotFoundError(
                     "No GGUF model found in models/ directory.\n"
-                    "Download Llama-3.1-8B-Instruct-Q4_K_M.gguf from HuggingFace and place it in models/."
+                    "Download Llama-3.2-3B-Instruct-Q4_K_M.gguf from HuggingFace and place it in models/."
                 )
 
             print(f"✅ Loading LLM: {os.path.basename(llm_path)}")

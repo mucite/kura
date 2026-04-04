@@ -79,12 +79,3 @@ website/
 # Temporary files and logs
 *.log
 *.tmp
-
-# Temporary documentation (bug fixes)
-FIXES_APPLIED.md
-WINDOWS_BOOT_FIX.md
-FINAL_BOOT_FIX_COMPLETE.md
-CLEANUP_COMPLETE.md
-STDOUT_FIX.md
-BUILD_GUIDE.md
-QUICK_BUILD_REFERENCE.md

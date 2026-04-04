@@ -64,7 +64,8 @@ See `SCRIPTS.md` for details.
 Professional code signing certificate included:
 - **Valid**: 10 years (2026-2036)
 - **Status**: Fully configured
-- **Password**: `trial2929`
+- **Password**: Stored securely in environment variable `KURA_CERT_PASSWORD`
+- Configure: Set `KURA_CERT_PASSWORD` in your CI/CD secrets or local `.env`
 - Used automatically by build scripts
 
 ---

@@ -16,27 +16,17 @@ import platform
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+import logging
 
 import requests
 
-# ── Fix stdout/stderr encoding for Windows ────────────────────────────────────
-# Windows console uses cp1252 by default which can't handle Unicode/emojis
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
-elif hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+from ._compat import fix_windows_encoding
 
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w', encoding='utf-8')
-elif hasattr(sys.stderr, 'reconfigure'):
-    try:
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+fix_windows_encoding()
+
+logger = logging.getLogger("kura.license")
 
 # ── Digistore24 REST API ──────────────────────────────────────────────────────
 # Docs: https://www.digistore24.com/app/tools.api
@@ -193,8 +183,7 @@ class LicenseManager:
         self._cache = to_write
         try:
             with open(self.license_file, "w", encoding="utf-8") as f:
-                if f is not None:
-                    json.dump(to_write, f, indent=2, ensure_ascii=False)
+                json.dump(to_write, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"License save error: {e}")
 
@@ -251,8 +240,8 @@ class LicenseManager:
                 "hardware_id":  self.hardware_id,
                 "mac":          self.mac_address,
                 "status":       "active",
-                "validated_at": datetime.utcnow().isoformat(),
-                "activated_at": datetime.utcnow().isoformat(),
+                "validated_at": datetime.now(timezone.utc).isoformat(),
+                "activated_at": datetime.now(timezone.utc).isoformat(),
             })
             return True, "Kura Pro wurde erfolgreich aktiviert."
 
@@ -278,7 +267,9 @@ class LicenseManager:
         if last:
             try:
                 last_dt = datetime.fromisoformat(last)
-                now_dt  = datetime.utcnow()
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                now_dt  = datetime.now(timezone.utc)
                 # Clock-rollback attack: validated_at is suspiciously in the future
                 if last_dt > now_dt + timedelta(minutes=5):
                     print("License: clock skew detected — forcing revalidation.")
@@ -302,7 +293,7 @@ class LicenseManager:
             data = resp.json()
             if resp.status_code == 200 and data.get("result") == "success":
                 cache["status"]       = "active"
-                cache["validated_at"] = datetime.utcnow().isoformat()
+                cache["validated_at"] = datetime.now(timezone.utc).isoformat()
                 self._save(cache)
                 return True
             # DS24 explicitly rejected — subscription cancelled/expired
@@ -315,7 +306,10 @@ class LicenseManager:
             # Offline — apply grace period
             if last:
                 try:
-                    age = datetime.utcnow() - datetime.fromisoformat(last)
+                    last_dt_grace = datetime.fromisoformat(last)
+                    if last_dt_grace.tzinfo is None:
+                        last_dt_grace = last_dt_grace.replace(tzinfo=timezone.utc)
+                    age = datetime.now(timezone.utc) - last_dt_grace
                     if age < timedelta(days=_GRACE_DAYS):
                         days_left = max(0, _GRACE_DAYS - age.days)
                         self._grace_days_remaining = days_left
@@ -395,8 +389,7 @@ class LicenseManager:
         mac       = self._trial_hmac(payload)
         try:
             with open(self.trial_file, "w") as f:
-                if f is not None:
-                    f.write(f"{payload}:{mac}")
+                f.write(f"{payload}:{mac}")
         except Exception as e:
             print(f"Trial increment error: {e}")
 
@@ -435,7 +428,7 @@ class LicenseManager:
         self._cache = None
         self._block_reason = ""
         self._grace_days_remaining = 0
-        print(f"[DEV] Trial reset. Files removed: {self.license_file}, {self.trial_file}")
+        logger.debug(f"[DEV] Trial reset. Files removed: {self.license_file}, {self.trial_file}")
 
     # ── Legacy shims ─────────────────────────────────────────────────────────
 

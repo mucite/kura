@@ -3,28 +3,17 @@ Practice Configuration Manager
 Handles multi-practice deployment with § 125 Abs. 1 SGB V compliance
 """
 import json
+import logging
 import os
 import platform
 import sys
 from datetime import datetime
 
-# ── Fix stdout/stderr encoding for Windows ────────────────────────────────────
-# Windows console uses cp1252 by default which can't handle Unicode/emojis
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
-elif hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+from ._compat import fix_windows_encoding
 
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w', encoding='utf-8')
-elif hasattr(sys.stderr, 'reconfigure'):
-    try:
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+fix_windows_encoding()
+
+logger = logging.getLogger("kura.practice_config")
 
 class PracticeConfig:
     """Manages practice-specific configurations"""
@@ -136,8 +125,7 @@ class PracticeConfig:
         self.config["last_modified"] = datetime.now().isoformat()
         try:
             with open(self.practice_file, 'w', encoding='utf-8') as f:
-                if f is not None:
-                    json.dump(self.config, f, indent=2, ensure_ascii=False)
+                json.dump(self.config, f, indent=2, ensure_ascii=False)
             print(f"✅ Practice config saved: {self.practice_file}")
         except Exception as write_err:
             print(f"Practice config save error: {write_err}")
@@ -155,8 +143,8 @@ class PracticeConfig:
             "created_at": datetime.now().isoformat()
         })
         self.save()
-        print(f"✅ User {username} added to practice {self.practice_name}")
-    
+        logger.info(f"User {username} added to practice {self.practice_name}")
+
     def get_icd10_for_keywords(self, keywords: list):
         """Get recommended ICD-10 code based on keywords"""
         keywords_lower = [k.lower() for k in keywords]

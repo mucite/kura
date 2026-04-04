@@ -1,0 +1,254 @@
+{
+  "_comment": "GKV Festpreise §125 SGB V - gültig ab 01.01.2026",
+  "_source": "Vergütungsvereinbarung GKV-Spitzenverband/ZVK/IFK vom 15.11.2025",
+  "_valid_from": "2026-01-01",
+  "_valid_until": "2026-12-31",
+  "_last_updated": "2026-01-15",
+  "_update_frequency": "yearly",
+  "_note": "Prices negotiated annually. Update this file in Q4 each year based on new Vergütungsvereinbarung.",
+
+  "physiotherapie": {
+    "20300": {
+      "name": "Physiotherapeutische Diagnostik (Blankoverordnung)",
+      "price_eur": 34.34,
+      "duration_min": 30,
+      "note": "Seit 01.11.2024"
+    },
+    "20500": {
+      "name": "KG Erstbefundung",
+      "price_eur": 30.83,
+      "duration_min": 30
+    },
+    "20501": {
+      "name": "KG Einzelbehandlung",
+      "price_eur": 29.63,
+      "duration_min": 20,
+      "note": "Standard physiotherapy session"
+    },
+    "20507": {
+      "name": "KG am Gerät (KGG/MTT)",
+      "price_eur": 55.81,
+      "duration_min": 45,
+      "note": "Medical training therapy, equipment-based"
+    },
+    "20502": {
+      "name": "KG Hausbesuch",
+      "price_eur": 29.63,
+      "duration_min": 20
+    },
+    "20503": {
+      "name": "KG Gruppe 2-5 Pat.",
+      "price_eur": 13.76,
+      "duration_min": 25
+    },
+    "20504": {
+      "name": "KG Gruppe 6-8 Pat.",
+      "price_eur": 10.29,
+      "duration_min": 45
+    },
+    "20510": {
+      "name": "KG-ZNS Erstbefundung",
+      "price_eur": 36.87,
+      "duration_min": 30
+    },
+    "20511": {
+      "name": "KG-ZNS Einzelbehandlung (Bobath/PNF)",
+      "price_eur": 42.69,
+      "duration_min": 45,
+      "note": "Neurological physiotherapy"
+    },
+    "20512": {
+      "name": "KG-ZNS Hausbesuch",
+      "price_eur": 42.69,
+      "duration_min": 45
+    },
+    "20560": {
+      "name": "KG atemtherapeutisch",
+      "price_eur": 29.63,
+      "duration_min": 20
+    },
+    "20601": {
+      "name": "KG Gruppenbehandlung",
+      "price_eur": 13.26,
+      "duration_min": 45,
+      "note": "2-5 patients"
+    },
+    "20902": {
+      "name": "KG Bewegungsbad Einzel",
+      "price_eur": 33.87,
+      "duration_min": 30,
+      "note": "Aquatherapy individual"
+    },
+    "21004": {
+      "name": "KG Bewegungsbad Gruppe 3 Pat.",
+      "price_eur": 24.16,
+      "duration_min": 30
+    },
+    "21005": {
+      "name": "KG Bewegungsbad Gruppe 4-5 Pat.",
+      "price_eur": 15.97,
+      "duration_min": 30
+    }
+  },
+
+  "manuelle_therapie": {
+    "21200": {
+      "name": "MT Erstbefundung",
+      "price_eur": 42.71,
+      "duration_min": 30
+    },
+    "21201": {
+      "name": "MT Folgebehandlung",
+      "price_eur": 35.59,
+      "duration_min": 20,
+      "note": "Manual therapy - most common MT position"
+    }
+  },
+
+  "lymphdrainage": {
+    "20201": {
+      "name": "MLD Standardbehandlung 45 Min",
+      "price_eur": 53.94,
+      "duration_min": 45,
+      "note": "Standard manual lymphatic drainage"
+    },
+    "20202": {
+      "name": "MLD Ganzbehandlung 60 Min",
+      "price_eur": 71.94,
+      "duration_min": 60
+    },
+    "20205": {
+      "name": "MLD Teilbehandlung 30 Min",
+      "price_eur": 35.97,
+      "duration_min": 30
+    },
+    "21100": {
+      "name": "KPE Phase I - MLD-Anteil",
+      "price_eur": 53.94,
+      "duration_min": 60,
+      "note": "Complex decongestive therapy"
+    },
+    "21110": {
+      "name": "KPE Phase I 60 Min",
+      "price_eur": 58.42,
+      "duration_min": 60
+    },
+    "21111": {
+      "name": "KPE Phase II 30 Min",
+      "price_eur": 46.26,
+      "duration_min": 30
+    }
+  },
+
+  "massage": {
+    "20102": {
+      "name": "Unterwasserdruckstrahlmassage",
+      "price_eur": 33.75,
+      "duration_min": 20,
+      "note": "Underwater pressure jet massage"
+    },
+    "20106": {
+      "name": "Klassische Massage (KMT)",
+      "price_eur": 21.63,
+      "duration_min": 20
+    },
+    "20107": {
+      "name": "Bindegewebsmassage (BGM)",
+      "price_eur": 25.98,
+      "duration_min": 20
+    },
+    "20108": {
+      "name": "Segmentmassage",
+      "price_eur": 21.63,
+      "duration_min": 20
+    }
+  },
+
+  "elektrotherapie": {
+    "21302": {
+      "name": "Elektrotherapie (TENS/IFC/Galvano)",
+      "price_eur": 8.43,
+      "duration_min": 15
+    },
+    "21303": {
+      "name": "Elektrotherapie bei Lähmungen (EMS)",
+      "price_eur": 18.70,
+      "duration_min": 20
+    },
+    "21310": {
+      "name": "Elektrotherapie Teilkörper",
+      "price_eur": 14.48,
+      "duration_min": 15
+    },
+    "21312": {
+      "name": "Elektrotherapie Vollkörper",
+      "price_eur": 27.61,
+      "duration_min": 20
+    }
+  },
+
+  "thermotherapie": {
+    "21501": {
+      "name": "Fango/Warmpackung",
+      "price_eur": 16.16,
+      "duration_min": 20
+    },
+    "21517": {
+      "name": "Wärmestrahler (Rotlicht)",
+      "price_eur": 7.43,
+      "duration_min": 15
+    },
+    "21530": {
+      "name": "Heiße Rolle",
+      "price_eur": 13.47,
+      "duration_min": 15
+    },
+    "21531": {
+      "name": "Ultraschall-Wärme",
+      "price_eur": 14.66,
+      "duration_min": 15
+    },
+    "21534": {
+      "name": "Kältetherapie",
+      "price_eur": 11.95,
+      "duration_min": 15
+    }
+  },
+
+  "geburtshilfe": {
+    "21901": {
+      "name": "Geburtsvorbereitung",
+      "price_eur": 11.40,
+      "duration_min": 45,
+      "note": "Prenatal preparation"
+    },
+    "21904": {
+      "name": "Rückbildungsgymnastik",
+      "price_eur": 11.40,
+      "duration_min": 45,
+      "note": "Postnatal pelvic floor rehabilitation"
+    }
+  },
+
+  "_pricing_updates": {
+    "2026": {
+      "increase_percent": 2.8,
+      "negotiation_date": "2025-11-15",
+      "effective_date": "2026-01-01",
+      "source": "GKV-Spitzenverband Rahmenempfehlungen §125 Abs. 1 SGB V"
+    },
+    "2027": {
+      "expected_negotiation": "2026-11-01",
+      "expected_increase": "2.5-3.5% (inflation-linked)",
+      "note": "Update this file after Vergütungsvereinbarung 2027 is published"
+    }
+  },
+
+  "_update_instructions": {
+    "when": "Q4 of each year after new Vergütungsvereinbarung is published",
+    "how": "Replace prices in this file with new official rates",
+    "validation": "Cross-check with IFK/ZVK official price lists",
+    "backup": "Keep previous year's file as gkv_prices_YYYY.json for audit trail"
+  }
+}
+

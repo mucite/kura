@@ -1,4 +1,5 @@
 import json
+import logging
 import multiprocessing
 import os
 import re
@@ -8,6 +9,8 @@ import time
 import sys
 import traceback
 from datetime import datetime
+
+app_logger = logging.getLogger("kura.app")
 
 import rumps
 from fpdf import FPDF
@@ -177,7 +180,7 @@ class KuraApp(rumps.App):
         user_data_dir = os.path.expanduser("~/Documents/Kura")
         self.report_dir = os.path.join(user_data_dir, "reports")
         os.makedirs(self.report_dir, exist_ok=True)
-        print(f"📁 Reports directory: {self.report_dir}")
+        app_logger.info(f"Reports directory: {self.report_dir}")
 
         # --- License Manager ---
         self.license_mgr = LicenseManager()

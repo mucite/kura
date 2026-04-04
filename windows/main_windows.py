@@ -82,7 +82,7 @@ def setup_crash_logging():
                         traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
                     f.write(f"\nPython: {sys.version}\nBase path: {os.path.dirname(os.path.realpath(__file__))}\n")
         except Exception as log_err:
-            print(f"Error writing crash log: {log_err}")
+            app_logger.error(f"Error writing crash log: {log_err}")
         messagebox.showerror("Kura Fehler", f"Kura ist abgestürzt.\nLog-Datei: {log_file}")
         sys.exit(1)
 

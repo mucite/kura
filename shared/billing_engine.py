@@ -155,7 +155,7 @@ _HMK: dict[str, dict] = {
         "icd": ["M75"],
         # 3 billing-critical items only (§106b): segment + provocation test + ROM
         "docs": ["Behandeltes Segment (Art. glenohumeralis)", "Provokationstest (Hawkins/Jobe)",
-                 "ROM Schulter (Neutral-Null)"],
+                 "ROM Schulter (Abd/Flex/AR/IR)"],
     },
     "EX3": {
         "desc": "Kniegelenk – Gonarthrose, postoperativ, Meniskusläsion",
@@ -204,7 +204,7 @@ _HMK: dict[str, dict] = {
         "duration": 20, "regelfall": 6, "langfristig": False,
         "icd": ["M50", "M53", "M54.0", "M54.1", "M54.2", "M99.0", "M99.1"],
         # 3 billing-critical: segment (MT-Pflicht) + provocation + ROM
-        "docs": ["Behandeltes Segment (C/Th)", "Provokationstest (Spurling/Slump)", "ROM HWS (Neutral-Null)"],
+        "docs": ["Behandeltes Segment (C/Th)", "Provokationstest (Spurling/Slump)", "ROM HWS"],
     },
     "WS1b": {
         "desc": "LWS/ISG – segmentale Funktionsstörung, Lumbago, Ischialgie",
@@ -502,58 +502,72 @@ def _match_dg(icd10: str) -> Optional[str]:
     return None
 
 
-# ── GKV fixed prices — Bundesbasiszulassung ab 01.01.2026 ────────────────────
-# Source: Vergütungsvereinbarung §125 Abs. 1 SGB V, GKV-Spitzenverband / ZVK / IFK
-# ⚠️  VERIFY before each billing year: prices are renegotiated annually.
-# These figures reflect the 2026 agreed rates. Praxis-specific Zulassungsverträge
-# may deviate — always check your individual Kassenzulassung.
+# ── GKV fixed prices — Loaded dynamically from data files ────────────────────
+# Source: data/gkv_prices_YYYY.json (updated annually)
+# Vergütungsvereinbarung §125 Abs. 1 SGB V, GKV-Spitzenverband / ZVK / IFK
+# ⚠️  Prices are negotiated annually and loaded from JSON for easy updates
 
-_GKV_PRICES: dict[str, float] = {
-    "20300": 34.34,   # Physiotherapeutische Diagnostik (Blankoverordnung, ab 01.11.2024)
-    "20500": 30.83,   # KG Erstbefundung 30 min (ab 01.01.2026)
-    "20501": 29.63,   # KG Einzelbehandlung 20 min (ab 01.01.2026)
-    "20507": 55.81,   # KG am Gerät (KGG/MTT) 45 min (ab 01.01.2026) — Gist: KG_Gerät
-    "20502": 29.63,   # KG Hausbesuch 20 min
-    "20503": 13.76,   # KG Gruppe 2–5 Pat. 25 min
-    "20504": 10.29,   # KG Gruppe 6–8 Pat. 45 min
-    "20510": 36.87,   # KG-ZNS Erstbefundung 30 min
-    "20511": 42.69,   # KG-ZNS Einzelbehandlung 45 min
-    "20512": 42.69,   # KG-ZNS Hausbesuch 45 min
-    "20560": 29.63,   # KG atemtherapeutisch 20 min
-    "21200": 42.71,   # MT Erstbefundung 30 min
-    "21201": 35.59,   # MT Folgebehandlung 20 min (Manuelle Therapie, § 125 SGB V X1201)
-    "20201": 53.94,   # MLD Standardbehandlung 45 min (ab 01.01.2026)
-    "20202": 71.94,   # MLD Ganzbehandlung 60 min
-    "20205": 35.97,   # MLD Teilbehandlung 30 min
-    "21100": 53.94,   # KPE Phase I — MLD-Anteil
-    "21110": 58.42,   # KPE Phase I 60 min
-    "21111": 46.26,   # KPE Phase II 30 min
-    "21901": 11.40,   # Geburtsvorbereitung (Gist-confirmed)
-    "21904": 11.40,   # Rückbildungsgymnastik (Gist-confirmed)
-    # Massagen (Gist fees_2026)
-    "20102": 33.75,   # UW-Massage (Unterwasserdruckstrahl)
-    "20106": 21.63,   # Klassische Massage (KMT)
-    "20107": 25.98,   # Bindegewebsmassage (BGM)
-    "20108": 21.63,   # Segmentmassage
-    # Gruppentherapie
-    "20601": 13.26,   # KG-Gruppe 45 min
-    "20401": 8.43,    # Übungsbehandlung Gruppe
-    # Elektrotherapie
-    "21302": 8.43,    # Elektrotherapie (TENS/IFC/Galvano)
-    "21303": 18.70,   # Elektrotherapie bei Lähmungen (EMS)
-    "21310": 14.48,   # Elektrotherapie Teilkörper
-    "21312": 27.61,   # Elektrotherapie Vollkörper
-    # Thermotherapie
-    "21501": 16.16,   # Fango / Warmpackung
-    "21517": 7.43,    # Wärmestrahler (Rotlicht)
-    "21530": 13.47,   # Heiße Rolle
-    "21531": 14.66,   # Ultraschall-Wärme
-    "21534": 11.95,   # Kältetherapie
-    # Aquatherapie
-    "20902": 33.87,   # KG Bewegungsbad Einzel
-    "21004": 24.16,   # KG Bewegungsbad Gruppe 3 Pat.
-    "21005": 15.97,   # KG Bewegungsbad Gruppe 4–5 Pat.
-}
+def _load_gkv_prices() -> dict[str, float]:
+    """Load GKV prices from data file. Falls back to 2026 if current year not available."""
+    try:
+        import sys
+        import os
+        from pathlib import Path
+
+        # Determine data directory
+        if getattr(sys, 'frozen', False):
+            base = Path(getattr(sys, '_MEIPASS', os.path.dirname(sys.executable)))
+        else:
+            base = Path(__file__).parent.parent
+
+        data_dir = base / "data"
+
+        # Try current year first
+        from datetime import datetime
+        current_year = datetime.now().year
+        pricing_file = data_dir / f"gkv_prices_{current_year}.json"
+
+        if not pricing_file.exists():
+            pricing_file = data_dir / "gkv_prices_2026.json"
+
+        if pricing_file.exists():
+            import json
+            try:
+                with open(pricing_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                print(f"Warning: Could not load pricing file {pricing_file.name}: {e}")
+                data = {}
+
+            # Flatten all categories into single price dict
+            prices = {}
+            for category in data.values():
+                if isinstance(category, dict):
+                    for position, details in category.items():
+                        if isinstance(details, dict) and "price_eur" in details:
+                            prices[position] = details["price_eur"]
+
+            return prices
+
+    except Exception as e:
+        print(f"Warning: Could not load pricing data from file: {e}")
+
+    # Fallback to hardcoded 2026 prices
+    return {
+        "20300": 34.34, "20500": 30.83, "20501": 29.63, "20507": 55.81,
+        "20502": 29.63, "20503": 13.76, "20504": 10.29, "20510": 36.87,
+        "20511": 42.69, "20512": 42.69, "20560": 29.63, "21200": 42.71,
+        "21201": 35.59, "20201": 53.94, "20202": 71.94, "20205": 35.97,
+        "21100": 53.94, "21110": 58.42, "21111": 46.26, "21901": 11.40,
+        "21904": 11.40, "20102": 33.75, "20106": 21.63, "20107": 25.98,
+        "20108": 21.63, "20601": 13.26, "20401": 8.43, "21302": 8.43,
+        "21303": 18.70, "21310": 14.48, "21312": 27.61, "21501": 16.16,
+        "21517": 7.43, "21530": 13.47, "21531": 14.66, "21534": 11.95,
+        "20902": 33.87, "21004": 24.16, "21005": 15.97,
+    }
+
+# Load prices at module import
+_GKV_PRICES: dict[str, float] = _load_gkv_prices()
 
 # ── PKV market price ranges (GebüTh reference 2026) ──────────────────────────
 # ⚠️ Orientierungswerte — kein Rechtsanspruch, Erstattung vertragsabhängig
@@ -639,7 +653,7 @@ _DOC_CHECKERS: dict = {
         (bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", t)) and
          any(k in t for k in ["sprung", "osg", "usg"]))
     ),
-    "Schmerz (VAS)":                   lambda t: bool(re.search(r"vas\s*\d|schmerz.*\d+/10|\d+/10", t)),
+    "Schmerz (VAS)":                   lambda t: bool(re.search(r"vas\s*\d|schmerz.*\d+/10|nrs\s*\d|schmerz.*nrs", t)),
     "Schober-Zeichen":                 lambda t: "schober" in t,
     "Lasègue":                         lambda t: "lasègue" in t or "lasegue" in t,
     "Stemmer-Zeichen":                 lambda t: "stemmer" in t,
@@ -674,6 +688,10 @@ _DOC_CHECKERS: dict = {
     "Neurolog. Befund":                lambda t: any(k in t for k in ["neurolog", "reflex", "sensibilität", "ashworth", "barthel"]),
     "Krafttest (Jobe/Hawkins)":        lambda t: any(k in t for k in ["jobe", "hawkins", "nicht testbar", "nicht wertbar", "schmerzinhibition"]),
     "Provokationstest (Hawkins/Jobe)": lambda t: any(k in t for k in ["hawkins", "jobe", "nicht testbar", "nicht wertbar", "schmerzinhibition"]),
+    # Spurling/Slump: present AND not explicitly "nicht durchgeführt"
+    "Provokationstest (Spurling/Slump)": lambda t: bool(re.search(r"spurling|slump", t, re.I)) and not bool(
+        re.search(r"(?:spurling|slump)[^.]{0,40}nicht\s+durchge?f[üu]hrt", t, re.I)
+    ),
     "Painful Arc":                     lambda t: "painful arc" in t or "schmerzbogen" in t or "blockade" in t or "bewegungslimitierung" in t,
     "Cobb-Winkel":                     lambda t: "cobb" in t,
     "Rippenbuckel":                    lambda t: "rippenbuckel" in t or "rippe" in t,
@@ -736,7 +754,8 @@ def _check_doc(doc_name: str, soap: dict) -> bool:
     checker = _DOC_CHECKERS.get(doc_name)
     if checker:
         return checker(text)
-    return any(w.lower() in text for w in doc_name.split() if len(w) > 3)
+    words = re.findall(r'\w+', doc_name)
+    return any(w.lower() in text for w in words if len(w) > 3)
 
 
 # ── GKV engine ────────────────────────────────────────────────────────────────
@@ -827,7 +846,7 @@ class _GKVEngine:
             risk = "WARN"
 
         # ── 6. Neutral-Null ROM format — FAIL only for MT (21201), not a WARN elsewhere ─
-        if position == "21201" and "°" in obj:
+        if position == "21201" and bool(re.search(r"°|\bgrad\b", obj, re.I)):
             has_nn = bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", obj))
             if not has_nn:
                 audit.append(AuditItem("ROM_FORMAT", "ROM Neutral-Null-Methode",
@@ -1202,7 +1221,7 @@ class _PKVEngine:
         score = 0
         obj = soap.get("O", "")
         if re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", obj): score += 2
-        if re.search(r"vas\s*\d|\d+/10", (soap.get("S", "") + obj).lower()): score += 1
+        if re.search(r"vas\s*\d|schmerz.*\d+/10|nrs\s*\d", (soap.get("S", "") + obj).lower()): score += 1
         if len(obj) > 100: score += 2
         if icd10 not in ("M99.9", "N/A", ""): score += 2
         if re.search(r"\d+\s*(cm|°|grad)", obj.lower()): score += 1
@@ -1215,7 +1234,7 @@ class _PKVEngine:
         p = soap.get("P", "")
         if not re.search(r"\d+ - \d+ - \d+", obj):
             hints.append("💡 Neutral-Null-Werte im O-Feld erhöhen PKV-Erstattung erheblich.")
-        if re.search(r"vas\s*\d|\d+/10", (soap.get("S", "") + obj).lower()) is None:
+        if re.search(r"vas\s*\d|schmerz.*\d+/10|nrs\s*\d", (soap.get("S", "") + obj).lower()) is None:
             hints.append("💡 VAS-Score im S-Feld — PKV prüft Schmerzquantifizierung.")
         if len(p) < 60:
             hints.append("💡 P-Feld präzisieren — PKV erwartet konkretes Outcome-Ziel.")
@@ -1307,8 +1326,9 @@ class BillingEngine:
             config_rules={},   # from ConfigManager.billing_rules
             profile_id="KGG",  # optional — overrides ICD-based billing for modality profiles
         )
-        print(result.format_audit_report())
-        print(result.format_billing_line())
+        # Use the logger for output
+        logger.info(result.format_audit_report())
+        logger.info(result.format_billing_line())
     """
 
     def __init__(self):

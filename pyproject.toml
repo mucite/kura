@@ -1,0 +1,71 @@
+# Kura Medical Test Configuration
+# pytest configuration and fixtures
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Output options
+addopts = [
+    "-v",                    # Verbose output
+    "--strict-markers",      # Strict marker checking
+    "--tb=short",            # Short traceback format
+    "--cov=core",            # Coverage for core module
+    "--cov=shared",          # Coverage for shared module
+    "--cov-report=html",     # HTML coverage report
+    "--cov-report=term-missing",  # Show missing lines in terminal
+]
+
+# Test markers
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "requires_models: marks tests that require AI models to be loaded",
+    "requires_gpu: marks tests that require GPU/Metal",
+]
+
+# Coverage options
+[tool.coverage.run]
+source = ["core", "shared"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/build/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstract",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line too long — handled separately
+    "E741",   # ambiguous variable names (l, O, I) — used in medical Neutral-Null notation
+]
+exclude = ["scripts/", "windows/", "macos/"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_return_any = false
+no_implicit_optional = true
+exclude = ["scripts/", "windows/", "macos/", "tests/"]
+

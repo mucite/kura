@@ -1,25 +1,14 @@
 # shared/learning_manager.py
 import json
+import logging
 import os
 import sys
 
-# ── Fix stdout/stderr encoding for Windows ────────────────────────────────────
-# Windows console uses cp1252 by default which can't handle Unicode/emojis
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
-elif hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+from ._compat import fix_windows_encoding
 
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w', encoding='utf-8')
-elif hasattr(sys.stderr, 'reconfigure'):
-    try:
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+fix_windows_encoding()
+
+logger = logging.getLogger("kura.learning")
 
 
 class LearningManager:
@@ -34,8 +23,8 @@ class LearningManager:
             try:
                 with open(self.memory_path, "r") as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Could not load practice memory, starting fresh: {e}")
         return {"icd_preferences": {}}
 
     def log_correction(self, transcript, ai_icd, user_icd):
@@ -53,10 +42,10 @@ class LearningManager:
 
         try:
             with open(self.memory_path, "w") as f:
-                if f is not None:
-                    json.dump(self.memory, f, indent=2)
+                json.dump(self.memory, f, indent=2)
+            logger.debug(f"ICD preference logged: {user_icd} for context in transcript")
         except Exception as mem_err:
-            print(f"Learning memory save error: {mem_err}")
+            logger.error(f"Learning memory save error: {mem_err}")
 
     def get_relevant_prefs(self, transcript):
         """Returns a string of preferences to inject into the AI prompt."""

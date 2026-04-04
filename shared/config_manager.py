@@ -1,26 +1,15 @@
 import copy
 import json
+import logging
 import os
 import platform
 import sys
 
-# ── Fix stdout/stderr encoding for Windows ────────────────────────────────────
-# Windows console uses cp1252 by default which can't handle Unicode/emojis
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
-elif hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+from ._compat import fix_windows_encoding
 
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w', encoding='utf-8')
-elif hasattr(sys.stderr, 'reconfigure'):
-    try:
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+fix_windows_encoding()
+
+logger = logging.getLogger("kura.config_manager")
 
 from .practice_config import PracticeConfig
 
@@ -101,8 +90,7 @@ class ConfigManager:
                 # Save as local cache so override can reference real keys
                 try:
                     with open(_GIST_CACHE, "w", encoding="utf-8") as f:
-                        if f is not None:
-                            json.dump(remote, f, indent=2, ensure_ascii=False)
+                        json.dump(remote, f, indent=2, ensure_ascii=False)
                 except Exception as write_err:
                     print(f"Cache-Schreibfehler: {write_err}")
                 print(f"Gist-Sync OK: v{self.data.get('version')}")
@@ -194,10 +182,9 @@ class ConfigManager:
             }
         try:
             with open(_LOCAL_OVERRIDE, "w", encoding="utf-8") as f:
-                if f is not None:
-                    json.dump(template, f, indent=2, ensure_ascii=False)
+                json.dump(template, f, indent=2, ensure_ascii=False)
         except Exception as write_err:
-            print(f"Override-Template Schreibfehler: {write_err}")
+            logger.error(f"Override-Template Schreibfehler: {write_err}")
             return None
         return _LOCAL_OVERRIDE
 

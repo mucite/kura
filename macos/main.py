@@ -423,6 +423,7 @@ class KuraApp(rumps.App):
                 f"{footer}"
             )
 
+            import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
             window = rumps.Window(
                 message="Bericht prüfen — bei Bedarf bearbeiten, dann speichern:",
                 title="Kura — Bericht",
@@ -803,6 +804,7 @@ class KuraApp(rumps.App):
 
     # --- Practice Config ---
     def _config_locked(self, _):
+        import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
         rumps.alert(
             title="Kura Pro erforderlich",
             message="Praxis-Einstellungen sind nur mit einem aktiven Kura Pro Abo verfuegbar.\n\n"
@@ -813,6 +815,7 @@ class KuraApp(rumps.App):
         self.activate_license(None)
 
     def open_practice_config(self, _):
+        import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
         cfg_path = os.path.expanduser("~/.kura_practice.json")
 
         # Step 1 — Praxis name
@@ -830,6 +833,7 @@ class KuraApp(rumps.App):
         name = r1.text.strip() or "Meine Praxis"
 
         # Step 2 — Betriebsstaettennummer
+        _AK.NSApp.activateIgnoringOtherApps_(True)
         w2 = rumps.Window(
             message="Betriebsstättennummer  (BSNR, 9-stellig):",
             title="Praxis-Einstellungen  2 / 3",
@@ -844,6 +848,7 @@ class KuraApp(rumps.App):
         bsnr = r2.text.strip()
 
         # Step 3 — Location
+        _AK.NSApp.activateIgnoringOtherApps_(True)
         w3 = rumps.Window(
             message="Standort  (Stadt oder Adresse):",
             title="Praxis-Einstellungen  3 / 3",
@@ -957,13 +962,21 @@ class KuraApp(rumps.App):
 
     # --- Start Session ---
     def start(self, _):
+        import AppKit as _AK
+
+        def _activate():
+            """Bring app to front — required for every dialog in a LSUIElement (menu-bar) app."""
+            _AK.NSApp.activateIgnoringOtherApps_(True)
+
         if self.recording:
+            _activate()
             rumps.alert("Fehler", "Aufnahme läuft bereits.")
             return
 
         # ── License gate — check BEFORE allowing any recording ───────────────
         status = self.license_mgr.verify_locally()
         if status is False:
+            _activate()
             title, msg = self._license_block_message()
             rumps.alert(title=title, message=msg, ok="Lizenz aktivieren")
             self.activate_license(None)
@@ -977,10 +990,12 @@ class KuraApp(rumps.App):
             )
 
         if not self.engine:
+            _activate()
             rumps.alert("Fehler", "KI-Engine nicht bereit.\n\nBitte warten Sie, bis 'KI-Modelle laden...' abgeschlossen ist.\n\nFalls das Problem weiterhin besteht, starten Sie Kura neu.")
             return
 
         # Simple patient name input
+        _activate()
         window = rumps.Window(
             message="Vorname Nachname (z. B. Müller, Schäfer, Voß):",
             title="Neue Sitzung",
@@ -1002,13 +1017,8 @@ class KuraApp(rumps.App):
             raw_input = raw.strip().replace(" ", "_")
             self.patient_name = raw_input if raw_input else "Patient"
 
-            # Insurance type — use a Window (text input disabled) so it gets
-            # proper focus on macOS status-bar apps. rumps.alert() with
-            # other= loses activation after the patient-name dialog closes
-            # and appears hidden behind other windows on macOS 13+.
             from shared.billing_engine import InsuranceType
-            import AppKit as _AK
-            _AK.NSApp.activateIgnoringOtherApps_(True)
+            _activate()
             ins_win = rumps.Window(
                 message="Welche Versicherung hat der Patient?\n\n"
                         "GKV — Gesetzlich (§125 SGB V)   →  OK\n"
@@ -1029,7 +1039,7 @@ class KuraApp(rumps.App):
                 self.insurance_type = InsuranceType.GKV
             else:
                 # "PKV" button — ask if actually BG
-                _AK.NSApp.activateIgnoringOtherApps_(True)
+                _activate()
                 bg_choice = rumps.alert(
                     title="PKV oder BG?",
                     message="Berufsgenossenschaft (BG / DGUV)?",
@@ -1042,7 +1052,7 @@ class KuraApp(rumps.App):
                 )
 
             # Check microphone permission at first use, not at startup
-            _AK.NSApp.activateIgnoringOtherApps_(True)
+            _activate()
             if not self.check_microphone_permission():
                 rumps.alert(
                     "Mikrofon-Berechtigung erforderlich",
@@ -1314,6 +1324,7 @@ class KuraApp(rumps.App):
 
     # --- Activate License ---
     def activate_license(self, _):
+        import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
         win = rumps.Window(
             message=(
                 "Lizenzschlüssel eingeben:\n\n"
@@ -1341,6 +1352,7 @@ class KuraApp(rumps.App):
             webbrowser.open("https://www.checkout-ds24.com/product/681469")
 
     def deactivate_license(self, _):
+        import AppKit as _AK; _AK.NSApp.activateIgnoringOtherApps_(True)
         if rumps.alert(
             title="Lizenz deaktivieren?",
             message=(

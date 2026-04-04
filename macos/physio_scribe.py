@@ -1345,6 +1345,8 @@ EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
 8. KPE-DOKUMENTATION (nur bei MLD/Lymph): P-Feld muss alle 4 Komponenten nennen: MLD + Kompressionsbandagierung + Entstauungsgymnastik + Hautpflege.
 9. VERLAUFSDOKUMENTATION: Falls der Therapeut eine Veraenderung zum Vortermin erwaehnt (z.B. "war letzte Woche besser", "VAS gestern 8", "letzte Sitzung noch 7/10"), schreibe den Verlauf direkt nach dem aktuellen VAS-Wert im S-Feld: "VAS 5/10 (Vorsitzung: 8/10, Δ: -3)". Dies ist §106b-Pflicht: Pruefer erwarten messbaren Therapiefortschritt je Sitzung.
 10. PROFIL-PARAMETER exakt im O-Feld (als Zahlenwerte, niemals als Prosa-Zusammenfassung): KGG/MTT → Geraet + Last (kg) + Wdh x Saetze; ELEKTRO → Stromform (TENS/IFC/Galvano) + Frequenz (Hz) + Intensitaet (mA) + Elektroden-Platzierung; THERMO/Fango → Modalitaet + Behandlungsregion + Temperatur (°C oder "angenehm warm"); BECKEN → Oxford-Skala (0-5) + Kontraktionsdauer (sek) + Serienzahl.
+11. O-FELD NUR BEFUNDERGEBNISSE: Das O-Feld enthaelt AUSSCHLIESSLICH dokumentierte Messwerte und Testresultate — NIEMALS Therapeutenanweisungen ("Heben Sie...", "Legen Sie sich..."), Patientenanfragen ("Mehr geht nicht?") oder Behandlungsschritte ("Ich fixiere jetzt..."). ROM immer im Neutral-Null-Format: z.B. "ROM Schulter (li) NZM: Flex/Ext: 80-0-0 | Abd/Add: 45-0-10 | IRO/ARO: n.d.-0-0". Tests die nicht durchfuehrbar waren: "[Testname]: nicht testbar (Schmerzinhibition)" — nicht weglassen.
+12. SMART-ZIEL ist ein FUTURE TARGET, NICHT der aktuelle Befund: "Ziel: Abduktion auf 60° steigern in 6 EH" — NIEMALS aktuelle Einschraenkungswerte als Ziel nennen (falsch: "Ziel: Abduktion bei 45°").
 
 PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 {checklist}
@@ -1685,36 +1687,70 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             "abduktion", "glenohumer",
         ])
         if is_schulter:
-            # Flexion (z.B. "80 Grad", "Flexion 80°")
-            s_flex = re.search(
+            # Determine affected side
+            seite_m = re.search(r"(linke[nm]?|rechte[nm]?)\s+(?:schulter|arm|seite)", transcript, re.I)
+            seite = seite_m.group(1)[:2].lower() if seite_m else "li"  # default left if unclear
+
+            # Extract individual ROM values from transcript
+            s_flex_m = re.search(
                 r"(?:flexion|beugung|anteversion)[^.\n\d]*(\d+)\s*(?:grad|°)|"
                 r"(\d+)\s*(?:grad|°)[^.\n]{0,20}(?:flexion|beugung|vorne)",
                 transcript, re.I)
-            if s_flex and "flexion" not in obj_text.lower():
-                val = s_flex.group(1) or s_flex.group(2)
-                obj_text += f" | ROM Schulter Flexion: {val}°"
-            # Abduktion
-            s_abd = re.search(
+            s_abd_m = re.search(
                 r"(?:abduktion|seitliches heben)[^.\n\d]*(\d+)\s*(?:grad|°)|"
                 r"(\d+)\s*(?:grad|°)[^.\n]{0,20}(?:abduktion|zur seite)",
                 transcript, re.I)
-            if s_abd and "abduktion" not in obj_text.lower():
-                val = s_abd.group(1) or s_abd.group(2)
-                obj_text += f" | ROM Schulter Abduktion: {val}°"
-            # Außenrotation — require explicit unit to avoid false matches
-            s_aro = re.search(
+            s_aro_m = re.search(
                 r"(?:außenrotation|aro)[^.\n\d]*(\d+)\s*(?:grad|°)", transcript, re.I)
-            if s_aro and "außenrotation" not in obj_text.lower():
-                obj_text += f" | ARO: {s_aro.group(1)}°"
-            elif "außenrotation" in t_low and "0 grad" in t_low and "außenrotation" not in obj_text.lower():
-                obj_text += " | ARO: 0° (kapsulares Muster)"
+            aro_is_zero = "außenrotation" in t_low and re.search(r"(?:fast\s+bei\s+)?0\s*(?:grad|°)", t_low)
+
+            flex_val = s_flex_m.group(1) or s_flex_m.group(2) if s_flex_m else None
+            abd_val  = s_abd_m.group(1) or s_abd_m.group(2) if s_abd_m else None
+            aro_val  = s_aro_m.group(1) if s_aro_m else ("0" if aro_is_zero else None)
+
+            # Build NZM block only if we have at least one value and it's not already in O
+            if (flex_val or abd_val or aro_val) and "nzm" not in obj_text.lower() and "flex/ext" not in obj_text.lower():
+                flex_str = f"{flex_val}-0-0" if flex_val else "n.d."
+                abd_str  = f"{abd_val}-0-10" if abd_val else "n.d."   # Add minimal add (typical 10°)
+                aro_str  = f"n.d.-0-{aro_val}" if aro_val else "n.d."
+                obj_text += (f" | ROM Schulter ({seite}) NZM: Flex/Ext: {flex_str}"
+                             f" | Abd/Add: {abd_str} | IRO/ARO: {aro_str}")
+
             # Kapsuläres Muster / Ausweichmechanismus
             if any(k in t_low for k in ["kapsuläres muster", "kapselmuster", "kapsuläre"]) \
                     and "muster" not in obj_text.lower():
-                obj_text += " | Kapsuläres Muster: Schulter (ARO > Abd > Flex eingeschränkt)"
-            if any(k in t_low for k in ["ausweichmechanismus", "trapezius zieht", "ohr", "schulter zum ohr"]) \
+                obj_text += " | Kapsuläres Muster: ARO > Abd > Flex eingeschränkt (kapsulär)"
+            if any(k in t_low for k in ["ausweichmechanismus", "trapezius", "ohr", "schulter zum ohr",
+                                         "hochzieht", "zieht hoch"]) \
                     and "ausweich" not in obj_text.lower():
                 obj_text += " | Ausweichmechanismus: Elevation M. trapezius bei Abduktion"
+
+            # Provokationstests: if Hawkins/Jobe not documented, mark as nicht testbar
+            has_test = any(k in obj_text.lower() for k in ["hawkins", "jobe", "empty can"])
+            if not has_test:
+                # Check whether pain level suggests tests were impossible
+                high_pain = re.search(r"vas\s*[7-9]|[7-9]/10|[7-9]\s*von\s*10|schmerz.*[7-9]", t_low)
+                reason = "Schmerzinhibition" if high_pain else "nicht durchgeführt"
+                obj_text += f" | Hawkins-Test: nicht testbar ({reason}) | Jobe-Test: nicht testbar ({reason})"
+
+            # Endgefühl — if kapsulär pattern, inject
+            if "endgefühl" not in obj_text.lower():
+                if any(k in t_low for k in ["kapsuläres muster", "kapselmuster", "kapsuläre", "fest", "blockiert"]):
+                    obj_text += " | Endgefühl: hart-elastisch (kapsulär)"
+                else:
+                    obj_text += " | Endgefühl: n.d."
+
+            # Painful Arc — if a blocking angle was mentioned
+            if "painful arc" not in obj_text.lower() and "schmerzbogen" not in obj_text.lower():
+                blockade = re.search(r"blockier\w*|mehr\s+geht\s+nicht|(?:bei\s+)?(\d+)\s*(?:grad|°)[^.\n]{0,30}blockier",
+                                     transcript, re.I)
+                if blockade and abd_val:
+                    obj_text += f" | Painful Arc / Blockade: bei {abd_val}°"
+                elif any(k in t_low for k in ["blockiert", "mehr geht nicht", "geht nicht weiter"]):
+                    obj_text += " | Painful Arc: Bewegungslimitierung durch Schmerzinhibition"
+                else:
+                    obj_text += " | Painful Arc: n.d."
+
             # Schultergelenk als behandeltes Segment (§125 Pflichtangabe)
             if "schultergelenk" not in obj_text.lower() and "glenohumer" not in obj_text.lower():
                 obj_text += " | Behandeltes Segment: Art. glenohumeralis (Schultergelenk)"

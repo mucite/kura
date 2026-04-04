@@ -621,7 +621,10 @@ _RED_FLAGS: dict[str, str] = {
 
 _DOC_CHECKERS: dict = {
     "ROM (Neutral-Null)":              lambda t: bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", t)),
-    "ROM Schulter (Abd/Flex/AR/IR)":   lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and "schulter" in t,
+    "ROM Schulter (Abd/Flex/AR/IR)":   lambda t: "schulter" in t and bool(re.search(
+        r"(?:flex|abd|aro|iro|nzm).*\d+|"
+        r"\d+\s*[-/]\s*0\s*[-/]\s*\d+|"
+        r"\d+ - \d+ - \d+", t, re.I)),
     "ROM Knie (Flex/Ext)":             lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and "knie" in t,
     "ROM Hüfte (Flex/Abd/AR)":         lambda t: "hüfte" in t and bool(re.search(
         r"(?:flexion|abd|aro|iro|ext|rom hüfte|nzm).*\d+|"   # any named value with a number
@@ -663,8 +666,8 @@ _DOC_CHECKERS: dict = {
     "Endgefühl":                       lambda t: "endgefühl" in t or "end feel" in t,
     "Neurolog. Screening":             lambda t: any(k in t for k in ["reflex", "sensibilität", "kraft", "mmt", "neurolog"]),
     "Neurolog. Befund":                lambda t: any(k in t for k in ["neurolog", "reflex", "sensibilität", "ashworth", "barthel"]),
-    "Krafttest (Jobe/Hawkins)":        lambda t: any(k in t for k in ["jobe", "hawkins"]),
-    "Painful Arc":                     lambda t: "painful arc" in t or "schmerzbogen" in t,
+    "Krafttest (Jobe/Hawkins)":        lambda t: any(k in t for k in ["jobe", "hawkins", "nicht testbar", "nicht wertbar", "schmerzinhibition"]),
+    "Painful Arc":                     lambda t: "painful arc" in t or "schmerzbogen" in t or "blockade" in t or "bewegungslimitierung" in t,
     "Cobb-Winkel":                     lambda t: "cobb" in t,
     "Rippenbuckel":                    lambda t: "rippenbuckel" in t or "rippe" in t,
     "Schroth-Klassifikation":          lambda t: "schroth" in t,

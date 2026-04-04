@@ -73,7 +73,7 @@ class KuraEngine:
         else:
             self.model_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "models")
 
-        self.llm_repo  = os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-4bit")
+        self.llm_repo  = os.path.join(self.model_dir, "Llama-3.1-8B-Instruct-4bit")
         self.stt_model = os.path.join(self.model_dir, "whisper-large-v3-turbo")
 
         # Fail fast — if models aren't found, raise immediately instead of letting

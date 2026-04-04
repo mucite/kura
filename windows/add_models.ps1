@@ -32,8 +32,8 @@ $modelsDest = Join-Path $distPath "models"
 Remove-Item $modelsDest -Recurse -Force -ErrorAction SilentlyContinue
 
 # Copy each model individually
-Write-Host "  Copying Llama-3.2 model..." -ForegroundColor Gray
-Copy-Item (Join-Path $modelsSource "Llama-3.2-3B-Instruct-4bit-GGUF") (Join-Path $modelsDest "Llama-3.2-3B-Instruct-4bit-GGUF") -Recurse -Force
+Write-Host "  Copying Llama-3.1 model..." -ForegroundColor Gray
+Copy-Item (Join-Path $modelsSource "Llama-3.1-8B-Instruct-4bit-GGUF") (Join-Path $modelsDest "Llama-3.1-8B-Instruct-4bit-GGUF") -Recurse -Force
 
 Write-Host "  Copying Whisper model..." -ForegroundColor Gray
 Copy-Item (Join-Path $modelsSource "whisper") (Join-Path $modelsDest "whisper") -Recurse -Force

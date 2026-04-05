@@ -2095,9 +2095,19 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 obj_text = obj_text[:_rot_m.start()] + obj_text[_rot_m.end():]
                 obj_text = obj_text.strip(', |') + f" | Rotation (NZM): 0-0-{_rv} bds."
 
-            # Spurling-Test: correct hallucinated "positiv" when no neuro symptoms in transcript
-            _neuro_kws = ["parästhes", "taubheit", "kribbeln", "taubes", "ausstrahlung", "ausstrahlend", "dermatom", "sensibilitätsstörung"]
-            _has_neuro = any(k in t_low for k in _neuro_kws)
+            # Spurling-Test: derive from symptom context, not raw keyword presence.
+            # "keine Ausstrahlung" / "Taubheit nicht" → negativ; confirmed symptoms → positiv.
+            _neuro_raw = bool(re.search(
+                r'ausstrahlung|parästhes|taubheit|kribbeln|dermatom|sensibilitätsstörung',
+                t_low
+            ))
+            _neuro_denied = bool(re.search(
+                r'keine?\s+\w{0,15}\s*(?:ausstrahlung|parästhes|taubheit|kribbeln)|'
+                r'(?:ausstrahlung|parästhes|taubheit|kribbeln)\s*(?:nicht|verneint|negativ|ausgeschlossen)|'
+                r'ohne\s+(?:ausstrahlung|parästhesien?|taubheit|kribbeln)',
+                t_low
+            ))
+            _has_neuro = _neuro_raw and not _neuro_denied
             if "spurling" in obj_text.lower():
                 if not _has_neuro and re.search(r'spurling[^.]{0,30}positiv', obj_text, re.I):
                     obj_text = re.sub(

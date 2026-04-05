@@ -580,13 +580,12 @@ class KuraEngine:
             "billing":  "21201",
             "priority": 51,   # unique; above MT(50) — ankle sessions using manual therapy → EX_FUSS
             "triggers": [
-                # Foot / ankle anatomy
-                "fuß", "fuss", "sprunggelenk",
+                # Foot / ankle anatomy - SPECIFIC to avoid matching neurological tests
+                "sprunggelenk", "fußgelenk", "knöchelgelenk",
                 "osg", "oberes sprunggelenk",
                 "usg", "unteres sprunggelenk",
                 "außenknöchel", "aussenknöchel", "innenknöchel",
                 "malleolus", "malleolus lateralis", "malleolus medialis",
-                "knöchel",
                 # Tendons / ligaments — specific to foot/ankle
                 "achillessehne", "achillessehnenentzündung", "achillessehnenriss",
                 "plantarfasziitis", "plantarfaszie", "fasziitis",
@@ -598,16 +597,17 @@ class KuraEngine:
                 "talus", "calcaneus", "fersenbein", "kahnbein fuß", "naviculare",
                 "metatarsal", "mittelfuß", "zehengelenk", "zehe",
                 "hallux", "hallux valgus", "großzehengrundgelenk",
-                # Symptoms / mechanisms
-                "fersenschmerz", "ferse",
+                # Symptoms / mechanisms - SPECIFIC to ankle injury
+                "fersenschmerz", "ferse schmerz",
                 "umknicken", "umgeknickt", "umgeknickte",
                 "supinationstrauma", "inversionstrauma", "inversionsdistorsion",
                 "distorsion sprunggelenk", "distorsion fuß",
-                # Tests specific to ankle
-                "schubladentest", "vordere schublade", "talarneigung",
+                # Tests specific to ankle - avoid generic "fuß" or "knöchel" alone
+                "schubladentest sprunggelenk", "vordere schublade fuß", "talarneigung",
                 "thompsons test", "wadenkompression",
                 # Treatment context
                 "lymphtape fuß", "aircast", "knöchelschiene",
+                "sprunggelenkschmerz", "knöchelschmerz",
             ],
             "icd_prefix": ["M79.3", "M72.2", "S93"],
             "checklist": [
@@ -853,6 +853,14 @@ class KuraEngine:
                 "doppelkinn",        # deep neck flexor rehab — exclusively HWS
                 "hinterkopfschmerz", "okzipitaler kopfschmerz",
                 "zervikogener kopfschmerz",
+            ],
+            "EX_LWS": [
+                "lws-syndrom", "lws syndrom", "lendenwirbelsäule",
+                "quadratus lumborum", "finger-boden-abstand", "finger-boden-distanz",
+                "lasègue", "lasegue-test", "lasek",
+                "schober-zeichen", "vorlaufphänomen", "vorlauf-test",
+                "lumbalgie", "lumboischialgie", "kreuzschmerz",
+                "bandscheibenvorfall lumbal", "bandscheibenprotrusion lws",
             ],
         }
         for def_pid, def_terms in _DEFINITIVE.items():
@@ -1642,7 +1650,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         return soap_dict
 
-    def apply_medical_corrections(self, soap_dict: dict) -> dict:
+    def apply_medical_corrections(self, soap_dict: dict, profile_id: str = "KG") -> dict:
         """
         Professional Grade Medical Text Refiner.
         Fixes Whisper hallucinations and standardizes terminology.
@@ -2864,7 +2872,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         icd, _ = self.suggest_billing(parsed["icd10"], parsed["soap"], transcript, profile_id=profile_id)
         parsed["icd10"] = icd
 
-        parsed["soap"] = self.apply_medical_corrections(parsed["soap"])
+        parsed["soap"] = self.apply_medical_corrections(parsed["soap"], profile_id=profile_id)
         parsed["soap"] = self.recover_hard_metrics(transcript, parsed["soap"], profile_id=profile_id)
         if profile_id == "LY":
             parsed["soap"] = self._inject_ly_staging(transcript, parsed["soap"])

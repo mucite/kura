@@ -1060,13 +1060,12 @@ class KuraEngine:
             "billing":  "21201",
             "priority": 51,   # unique; above MT(50) — ankle sessions using manual therapy → EX_FUSS
             "triggers": [
-                # Foot / ankle anatomy
-                "fuß", "fuss", "sprunggelenk",
+                # Foot / ankle anatomy - SPECIFIC to avoid matching neurological tests
+                "sprunggelenk", "fußgelenk", "knöchelgelenk",
                 "osg", "oberes sprunggelenk",
                 "usg", "unteres sprunggelenk",
                 "außenknöchel", "aussenknöchel", "innenknöchel",
                 "malleolus", "malleolus lateralis", "malleolus medialis",
-                "knöchel",
                 # Tendons / ligaments — specific to foot/ankle
                 "achillessehne", "achillessehnenentzündung", "achillessehnenriss",
                 "plantarfasziitis", "plantarfaszie", "fasziitis",
@@ -1078,16 +1077,17 @@ class KuraEngine:
                 "talus", "calcaneus", "fersenbein", "kahnbein fuß", "naviculare",
                 "metatarsal", "mittelfuß", "zehengelenk", "zehe",
                 "hallux", "hallux valgus", "großzehengrundgelenk",
-                # Symptoms / mechanisms
-                "fersenschmerz", "ferse",
+                # Symptoms / mechanisms - SPECIFIC to ankle injury
+                "fersenschmerz", "ferse schmerz",
                 "umknicken", "umgeknickt", "umgeknickte",
                 "supinationstrauma", "inversionstrauma", "inversionsdistorsion",
                 "distorsion sprunggelenk", "distorsion fuß",
-                # Tests specific to ankle
-                "schubladentest", "vordere schublade", "talarneigung",
+                # Tests specific to ankle - avoid generic "fuß" or "knöchel" alone
+                "schubladentest sprunggelenk", "vordere schublade fuß", "talarneigung",
                 "thompsons test", "wadenkompression",
                 # Treatment context
                 "lymphtape fuß", "aircast", "knöchelschiene",
+                "sprunggelenkschmerz", "knöchelschmerz",
             ],
             "icd_prefix": ["M79.3", "M72.2", "S93"],
             "checklist": [

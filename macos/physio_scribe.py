@@ -2838,6 +2838,24 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         # ORTHO REFINEMENT
         else:
+            # Spine path: if HWS/LWS keywords dominate, set ICD directly
+            _spine = any(k in full_text for k in [
+                "hws", "lws", "nacken", "atlasübergang", "zervikal", "c0/c1", "c1/c2",
+                "zervikalsyndrom", "bandscheibenvorfall", "radikulär", "ischiasschmerz",
+                "lumboischialgie", "wirbelsäule", "facettensyndrom",
+            ])
+            if _spine:
+                if any(k in full_text for k in ["hws", "nacken", "atlasübergang", "zervikal", "c0/c1", "c1/c2", "zervikalsyndrom"]):
+                    res_icd = "M54.2"
+                elif any(k in full_text for k in ["bandscheibenvorfall", "radikulär", "ausstrahlung"]):
+                    res_icd = "M51.1"
+                else:
+                    res_icd = "M54.5"
+                res_icd = self._lock_icd_domain(res_icd, soap, transcript)
+                if is_ortho_mt and not is_lymph:
+                    return res_icd, codes.get("MT", "21201")
+                return res_icd, codes.get("KG", "20501")
+
             hip_fracture_ctx = any(k in t_low for k in [
                 "schenkelhalsfraktur", "schenkelhals", "hüftfraktur", "femurhalsfraktur",
                 "pertrochantär", "pertrochantar", "subtrochantär",
@@ -3274,7 +3292,11 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         try:
             repaired = self._repair_json(text)
             data = json.loads(repaired)
-            icd10 = data.get("icd10", "M99.9")
+            raw_icd = data.get("icd10", "M99.9")
+            # Normalise spaced codes: "M54. 2. x" → "M54.2"
+            icd10 = re.sub(r'\b([A-Z]\d{2})\.\s+(\d{1,2})(?:\.\s*\w)?\b', r'\1.\2', str(raw_icd))
+            if not re.match(r'^[A-Z]\d{2}(\.\d{1,2})?$', icd10):
+                icd10 = "M99.9"
             soap_raw = data.get("soap", {})
             # Rescue ICD if LLM embedded it in A-field instead of top-level
             if icd10 == "M99.9":

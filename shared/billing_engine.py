@@ -644,7 +644,7 @@ _DOC_CHECKERS: dict = {
         r"\d+\s*[-/]\s*0\s*[-/]\s*\d+|"                       # NZM format: 90-0-0 or 90/0/0
         r"\d+ - \d+ - \d+",                                    # NZM with spaces
         t, re.I)),
-    "ROM HWS":                         lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and any(k in t for k in ["hws", "hals", "zervikal", "c0", "c1", "c2"]),
+    "ROM HWS":                         lambda t: bool(re.search(r"\d+\s*-\s*\d+\s*-\s*\d+", t)) and any(k in t for k in ["hws", "hals", "zervikal", "c0", "c1", "c2"]),
     "ROM Sprunggelenk (DF/PF)":        lambda t: (
         # Accept either: explicit NZM digits with ankle keyword, OR keyword-based presence
         # (acute injury may prevent measurement — n.d. with field present is acceptable)

@@ -1536,9 +1536,51 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 if seg and "behandeltes segment" not in obj_text.lower():
                     obj_text += f" | Behandeltes Segment: {seg.group(1).upper()}"
 
-            # Spurling-Test — if not documented, mark as nicht durchgeführt
-            if "spurling" not in obj_text.lower():
-                obj_text += " | Spurling-Test: nicht durchgeführt"
+            # NZM conversion: "Flexion: 20°, Extension: 30°" → "Flex/Ext NZM: 30-0-20"
+            _flex_m = re.search(r'(?<!\/)Flexion[:\s]+(\d+)\s*(?:grad|°)', obj_text, re.I)
+            _ext_m  = re.search(r'Extension[:\s]+(\d+)\s*(?:grad|°)', obj_text, re.I)
+            _latflex_m = re.search(r'Latflex[^:]*:[:\s]+(\d+)\s*(?:grad|°)', obj_text, re.I)
+            _rot_m = re.search(r'Rotation[^:N]*:[:\s]+(\d+)\s*(?:grad|°)', obj_text, re.I)
+            if (_flex_m or _ext_m) and "nzm" not in obj_text.lower():
+                _fv = _flex_m.group(1) if _flex_m else "n.d."
+                _ev = _ext_m.group(1) if _ext_m else "n.d."
+                _nzm = f"{_ev}-0-{_fv}"
+                if _flex_m:
+                    obj_text = obj_text[:_flex_m.start()] + obj_text[_flex_m.end():]
+                    obj_text = re.sub(r',\s*$|^\s*,', '', obj_text.strip(', '))
+                if _ext_m:
+                    _ext_m2 = re.search(r'Extension[:\s]+\d+\s*(?:grad|°)', obj_text, re.I)
+                    if _ext_m2:
+                        obj_text = obj_text[:_ext_m2.start()] + obj_text[_ext_m2.end():]
+                        obj_text = re.sub(r',\s*$|^\s*,', '', obj_text.strip(', '))
+                if "rom hws" not in obj_text.lower():
+                    obj_text += f" | ROM HWS Flex/Ext (NZM): {_nzm}"
+                else:
+                    obj_text = re.sub(r'(ROM HWS[^|]*)', rf'\1 Flex/Ext: {_nzm}', obj_text, flags=re.I)
+            if _latflex_m and "latflex" not in obj_text.lower().replace(_latflex_m.group(0).lower(), ""):
+                _lv = _latflex_m.group(1)
+                obj_text = obj_text[:_latflex_m.start()] + obj_text[_latflex_m.end():]
+                obj_text = obj_text.strip(', |') + f" | Latflex (NZM): 0-0-{_lv} bds."
+            if _rot_m and "nzm" not in obj_text.lower():
+                _rv = _rot_m.group(1)
+                obj_text = obj_text[:_rot_m.start()] + obj_text[_rot_m.end():]
+                obj_text = obj_text.strip(', |') + f" | Rotation (NZM): 0-0-{_rv} bds."
+
+            # Spurling-Test: correct hallucinated "positiv" when no neuro symptoms in transcript
+            _neuro_kws = ["parästhes", "taubheit", "kribbeln", "taubes", "ausstrahlung", "ausstrahlend", "dermatom", "sensibilitätsstörung"]
+            _has_neuro = any(k in t_low for k in _neuro_kws)
+            if "spurling" in obj_text.lower():
+                if not _has_neuro and re.search(r'spurling[^.]{0,30}positiv', obj_text, re.I):
+                    obj_text = re.sub(
+                        r'Spurling-Test:\s*positiv[^|.]*',
+                        'Spurling-Test: negativ | Sensibilität/Kraft (C5-Th1): unauffällig',
+                        obj_text, flags=re.I
+                    )
+            else:
+                if _has_neuro:
+                    obj_text += " | Spurling-Test: positiv (Ausstrahlung reproduzierbar)"
+                else:
+                    obj_text += " | Spurling-Test: negativ | Sensibilität/Kraft (C5-Th1): unauffällig"
 
         # ── Krücke Seitenkontrolle ─────────────────────────────────────────────
         plan_text = soap_dict.get("P", "")

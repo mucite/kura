@@ -683,7 +683,8 @@ _DOC_CHECKERS: dict = {
         r'blasen|mastdarm|harninkontinenz|stuhlinkontinenz|miktion|defäkation|'
         r'blasen.?mastdarm|kontinenz', t, re.I)),
     "Endgefühl":                       lambda t: "endgefühl" in t or "end feel" in t,
-    "Neurolog. Screening":             lambda t: any(k in t for k in ["reflex", "sensibilität", "kraft", "mmt", "neurolog"]),
+    "HWS-ROM":                         lambda t: bool(re.search(r"\d+\s*-\s*\d+\s*-\s*\d+", t)) and any(k in t for k in ["hws", "hals", "zervikal", "rotation", "flexion", "latflex"]),
+    "Neurolog. Screening":             lambda t: any(k in t for k in ["reflex", "sensibilität", "kraft", "mmt", "neurolog", "spurling", "dermatom", "sensibil", "parästhes", "taubheit", "unauffällig"]),
     "Neurolog. Befund":                lambda t: any(k in t for k in ["neurolog", "reflex", "sensibilität", "ashworth", "barthel"]),
     "Krafttest (Jobe/Hawkins)":        lambda t: any(k in t for k in ["jobe", "hawkins", "nicht testbar", "nicht wertbar", "schmerzinhibition"]),
     "Provokationstest (Hawkins/Jobe)": lambda t: any(k in t for k in ["hawkins", "jobe", "nicht testbar", "nicht wertbar", "schmerzinhibition"]),

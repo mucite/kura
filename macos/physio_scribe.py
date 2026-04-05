@@ -1500,76 +1500,20 @@ class KuraEngine:
         )
 
         return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-Du bist ein klinischer Dokumentationsexperte fuer deutsche Physiotherapie (Paragraph 106b SGB V).
-DIAGNOSE-PROFIL: {prof["label"]}  |  Abrechnung: {prof["billing"]}
+Du bist ein klinischer Dokumentationsexperte für deutsche Physiotherapie (§106b SGB V).
+Profil: {prof["label"]} | Abrechnung: {prof["billing"]}
 {style_injection}
-EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
-1. Extrahiere AUSSCHLIESSLICH Informationen aus dem Transkript.
-2. Fehlende Werte: schreibe "n.d." (nicht dokumentiert) — NIEMALS erfinden.
-3. Zahlen EXAKT: "VAS 7" nicht "starke Schmerzen", "+4cm" nicht "Schwellung".
-4. Neutral-Null-Methode: [Ext]-[0]-[Flex], Beispiel Knie: "0-0-90".
-5. Red Flags IMMER im A-Feld: "Red Flags klinisch ausgeschlossen." (oder benennen).
-6. DIAGNOSEN GEHOEREN IN A, NICHT IN S: ICD-10-Codes, Erkrankungsbezeichnungen (z.B. "Gonarthrose", "Bandscheibenvorfall", "Lymphödem"), Diagnose-Aussagen und Vordiagnosen NIEMALS in S schreiben. S enthaelt NUR subjektive Patientenaussagen: Schmerzschilderung, Funktionsziel, Vorgeschichte in eigenen Worten. Wenn der Therapeut eine Diagnose nennt, landet sie in A.
-7. THERAPIEZIEL im P-Feld: SMART formulieren — Spezifisch, Messbar, Erreichbar, Relevant, Terminiert. Beispiel: "Ziel: ROM Knieflexion 0-0-120 in 6 EH."
-8. KPE-DOKUMENTATION (nur bei MLD/Lymph): P-Feld muss alle 4 Komponenten nennen: MLD + Kompressionsbandagierung + Entstauungsgymnastik + Hautpflege.
-9. VERLAUFSDOKUMENTATION: Falls der Therapeut eine Veraenderung zum Vortermin erwaehnt (z.B. "war letzte Woche besser", "VAS gestern 8", "letzte Sitzung noch 7/10"), schreibe den Verlauf direkt nach dem aktuellen VAS-Wert im S-Feld: "VAS 5/10 (Vorsitzung: 8/10, Δ: -3)". Dies ist §106b-Pflicht: Pruefer erwarten messbaren Therapiefortschritt je Sitzung.
-10. PROFIL-PARAMETER exakt im O-Feld (als Zahlenwerte, niemals als Prosa-Zusammenfassung): KGG/MTT → Geraet + Last (kg) + Wdh x Saetze; ELEKTRO → Stromform (TENS/IFC/Galvano) + Frequenz (Hz) + Intensitaet (mA) + Elektroden-Platzierung; THERMO/Fango → Modalitaet + Behandlungsregion + Temperatur (°C oder "angenehm warm"); BECKEN → Oxford-Skala (0-5) + Kontraktionsdauer (sek) + Serienzahl.
-11. O-FELD NUR BEFUNDERGEBNISSE: Das O-Feld enthaelt AUSSCHLIESSLICH dokumentierte Messwerte und Testresultate — NIEMALS Therapeutenanweisungen ("Heben Sie...", "Legen Sie sich..."), Patientenanfragen ("Mehr geht nicht?") oder Behandlungsschritte ("Ich fixiere jetzt..."). ROM immer im Neutral-Null-Format: z.B. "ROM Schulter (li) NZM: Flex/Ext: 80-0-0 | Abd/Add: 45-0-10 | IRO/ARO: n.d.-0-0". Tests die nicht durchfuehrbar waren: "[Testname]: nicht testbar (Schmerzinhibition)" — nicht weglassen.
-12. SMART-ZIEL ist ein FUTURE TARGET, NICHT der aktuelle Befund: "Ziel: Abduktion auf 60° steigern in 6 EH" — NIEMALS aktuelle Einschraenkungswerte als Ziel nennen (falsch: "Ziel: Abduktion bei 45°").
-13. KÖRPERREGION-TREUE: S- und O-Feld dokumentieren AUSSCHLIESSLICH Beschwerden und Befunde des behandelten Körperbereichs ({prof["label"]}). Beschwerden aus anderen Körperregionen (z.B. Leiste/Knie/LWS bei Schulter-Profil; Schulter/HWS bei Hüft-Profil) werden NICHT in den Bericht aufgenommen — auch wenn sie im Transkript beiläufig erwähnt werden.
-14. POST-OP vs. IDIOPATHISCH: M75.0 (Adhäsive Kapsulitis / Frozen Shoulder) ist eine idiopathische Erkrankung ohne chirurgischen Auslöser. Falls das Transkript "postoperativ" erwähnt UND die Diagnose M75.0 ist: Verwende stattdessen die Diagnose M75.5 (Periarthritis humeroscapularis) oder Z96.6 (Z.n. Schulter-OP) — kombiniere NIEMALS M75.0 mit einem postoperativen Kontext.
-15. Jeden Befund und Test genau einmal im O-Feld dokumentieren.
-16. O-Feld-Tests: nur echte klinische Untersuchungen (Schubladentest, Lasègue, ROM, Stemmer). Behandlungsschritte und Heimuebungen gehoeren ins P-Feld.
-17. S-FELD ZUSAMMENFASSUNG — KEIN TRANSKRIPT-ABDRUCK: S-Feld ist eine STRUKTURIERTE ZUSAMMENFASSUNG (max. 3-4 Saetze) — NIEMALS das Transkript wortwoertlich kopieren oder zusammenhaengend wiederholen. ROM-Werte, Grad-Angaben und Messwerte gehoeren NICHT in S (auch wenn der Patient sie nennt) — sie gehoeren in O. S-Format: "[Hauptbeschwerde + Lokalisation + Qualitaet + VAS]. [Aggravation/Ausloeser]. [Funktionsziel falls genannt]. [Relevante Anamnese falls genannt]."
-
-PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
+REGELN:
+1. Nur aus dem Transkript. Fehlende Werte → "n.d.".
+2. Zahlen exakt. ROM: Neutral-Null [Ext]-[0]-[Flex] (Bsp. "0-0-90").
+3. S: 2-3 Sätze — Patientenperspektive, VAS, Auslöser, Ziel. Keine Diagnosen, keine Messwerte. Kein Transkript-Abdruck. Beispiel Schmerz: "{pain_ex}".
+4. O: Nur Messwerte und Tests — keine Behandlungsschritte. Beispiel Inspektion: "{inspection_ex}". Pflichtfelder (alle oder "n.d."):
 {checklist}
+5. A: ICD-10 + Diagnose + Red-Flag-Ausschluss ("{red_flag_ex}"). Diagnosen nicht in S.
+6. P: Heilmittel + Technik + SMART-Ziel ("{smart_goal_ex}") + Heimübung.{kruecken_line}
+   Bei Verlauf zur Vorsitzung: VAS im S-Feld als "VAS x/10 (Vorsitzung: y/10, Δ: ±z)".
 
-SOAP-STRUKTUR — VOLLSTAENDIG AUSSCHREIBEN (kein Kurzhalten, kein Zusammenfassen):
-
-S — Subjektiv (Patientenperspektive):
-  • Hauptbeschwerde KURZ zusammengefasst in eigenen Worten des Patienten — KEINE vollstaendige Transkript-Wiedergabe
-  • Schmerzlokalisation exakt (z.B. "{pain_ex}")
-  • Schmerzcharakter (ziehend / brennend / stechend / drückend) + VAS x/10
-  • Ausloeser / Aggravation / Verlauf zur Vorsitzung
-  • Funktionsziel des Patienten; relevanter Kontext (OP, Dauer, Hilfsmittel)
-  • ROM-Werte und Messergebnisse NICHT hier — die gehoeren in O
-
-O — Objektiv (Therapeutenbeobachtung — NUR Befunde, KEINE Interventionen):
-  • Inspektion / Gangbild / Haltung (z.B. "{inspection_ex}")
-  • Alle Messwerte numerisch: ROM in Grad (Neutral-Null), Kraft MRC 0-5, VAS bei Provokation
-  • Alle klinischen Tests mit Ergebnis (z.B. "Trendelenburg-Zeichen: positiv rechts")
-  • Palpationsbefund falls genannt (Druckschmerz, Spannung, Schwellung)
-  • Profil-Pflichtfelder aus der Checkliste oben (alle mit Zahlenwerten oder "n.d.")
-  • KEINE Behandlungsschritte, KEINE Wiederholungen/Saetze in O
-
-A — Assessment (Klinische Einschaetzung des Therapeuten):
-  • ICD-10-Code + Diagnosebezeichnung auf Deutsch
-  • Klinische Begruendung (warum dieser Code, welche Befunde stuetzen ihn)
-  • Differentialdiagnose falls klinisch relevant
-  • Funktionsstatus / Stadium (z.B. "6 Wochen postoperativ, Reha-Phase 2")
-  • Red-Flag-Ausschluss spezifisch fuer dieses Profil (z.B. "{red_flag_ex}")
-
-P — Plan (Therapieplan dieser Sitzung + Folgeziel):
-  • Heilmittel ({prof["label"]}) + konkrete Technik / Uebung heute durchgefuehrt
-  • Dosierung / Parameter (Dauer, Wiederholungen, Sets, Widerstand — NUR wenn bekannt)
-  • Heimuebungsprogramm falls besprochen
-  • SMART-Ziel: spezifisch + messbar + mit Zeitrahmen (z.B. "{smart_goal_ex}")
-  • Naechster Behandlungstermin / Frequenz
-{kruecken_line}
-  | Behandler: n.d.
-
-JSON-OUTPUT (alle Felder Pflicht, auch wenn "n.d." — VOLLSTAENDIGE Saetze, keine Stichwortlisten):
-{{
-  "icd10": "[spezifischer ICD-10-Code]",
-  "soap": {{
-    "S": "...",
-    "O": "...",
-    "A": "...",
-    "P": "..."
-  }},
-  "billing_suggestion": "{prof["billing"]}"
-}}
+{{"icd10": "...", "soap": {{"S": "...", "O": "...", "A": "...", "P": "..."}}, "billing_suggestion": "{prof["billing"]}"}}
 <|eot_id|><|start_header_id|>user<|end_header_id|>
 Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 {{"""

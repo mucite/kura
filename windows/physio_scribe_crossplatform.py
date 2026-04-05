@@ -1510,9 +1510,10 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 rot_li_val = val  # assume left (blocked side mentioned first in transcript)
 
             if (rot_li_val or rot_re_val) and "rom hws" not in obj_text.lower() and "rotation" not in obj_text.lower():
-                li_str = f"0-0-{rot_li_val}" if rot_li_val else "n.d."
-                re_str = f"0-0-{rot_re_val}" if rot_re_val else "n.d."
-                obj_text += f" | ROM HWS: Rotation li {li_str} / re {re_str} (NZM)"
+                # NZM for bilateral rotation: re°-0-li° (right-neutral-left)
+                _rv = rot_re_val or rot_li_val
+                _lv = rot_li_val or rot_re_val
+                obj_text += f" | ROM HWS Rotation (NZM): {_rv}-0-{_lv}"
 
             # Seitneigung — "Seitneigung ist auch eingeschränkt"
             if re.search(r"seitneigung[^.\n]{0,30}eingeschränkt|eingeschränkte[rn]?\s+seitneigung", transcript, re.I):

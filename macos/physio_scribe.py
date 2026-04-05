@@ -1520,6 +1520,7 @@ EXTRAKTIONSREGELN (ABSOLUT VERBINDLICH):
 14. POST-OP vs. IDIOPATHISCH: M75.0 (Adhäsive Kapsulitis / Frozen Shoulder) ist eine idiopathische Erkrankung ohne chirurgischen Auslöser. Falls das Transkript "postoperativ" erwähnt UND die Diagnose M75.0 ist: Verwende stattdessen die Diagnose M75.5 (Periarthritis humeroscapularis) oder Z96.6 (Z.n. Schulter-OP) — kombiniere NIEMALS M75.0 mit einem postoperativen Kontext.
 15. Jeden Befund und Test genau einmal im O-Feld dokumentieren.
 16. O-Feld-Tests: nur echte klinische Untersuchungen (Schubladentest, Lasègue, ROM, Stemmer). Behandlungsschritte und Heimuebungen gehoeren ins P-Feld.
+17. S-FELD ZUSAMMENFASSUNG — KEIN TRANSKRIPT-ABDRUCK: S-Feld ist eine STRUKTURIERTE ZUSAMMENFASSUNG (max. 3-4 Saetze) — NIEMALS das Transkript wortwoertlich kopieren oder zusammenhaengend wiederholen. ROM-Werte, Grad-Angaben und Messwerte gehoeren NICHT in S (auch wenn der Patient sie nennt) — sie gehoeren in O. S-Format: "[Hauptbeschwerde + Lokalisation + Qualitaet + VAS]. [Aggravation/Ausloeser]. [Funktionsziel falls genannt]. [Relevante Anamnese falls genannt]."
 
 PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 {checklist}
@@ -1527,14 +1528,12 @@ PROFIL-PFLICHTFELDER (diese Felder MUESSEN im O-Feld erscheinen):
 SOAP-STRUKTUR — VOLLSTAENDIG AUSSCHREIBEN (kein Kurzhalten, kein Zusammenfassen):
 
 S — Subjektiv (Patientenperspektive):
-  • Hauptbeschwerde in den EIGENEN WORTEN des Patienten (direkte Zitate bevorzugt)
+  • Hauptbeschwerde KURZ zusammengefasst in eigenen Worten des Patienten — KEINE vollstaendige Transkript-Wiedergabe
   • Schmerzlokalisation exakt (z.B. "{pain_ex}")
-  • Schmerzcharakter (ziehend / brennend / stechend / drückend — was der Patient sagt)
-  • VAS aktuell x/10; bei Aktivitaet / in Ruhe falls beides genannt
-  • Dauer und Verlauf (seit wann, schlechter/besser, Verlauf zur Vorsitzung)
-  • Ausloeser / Aggravation / Linderung (was hilft, was verschlimmert)
-  • Funktionsziel des Patienten (was moechte er wieder koennen?)
-  • Relevanter Kontext: OP-Datum / Wochen postoperativ / Hilfsmittel / Alltagssituation
+  • Schmerzcharakter (ziehend / brennend / stechend / drückend) + VAS x/10
+  • Ausloeser / Aggravation / Verlauf zur Vorsitzung
+  • Funktionsziel des Patienten; relevanter Kontext (OP, Dauer, Hilfsmittel)
+  • ROM-Werte und Messergebnisse NICHT hier — die gehoeren in O
 
 O — Objektiv (Therapeutenbeobachtung — NUR Befunde, KEINE Interventionen):
   • Inspektion / Gangbild / Haltung (z.B. "{inspection_ex}")
@@ -2920,7 +2919,17 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 "sprunggelenk", "außenknöchel", "aussenknöchel", "malleolus",
                 "osg", "usg", "talofibulare", "calcaneus",
             ])
-            _is_schulter = (profile_id == "EX_SCHULTER") or "schulter" in t_low or icd10.startswith("M75")
+            # Guard: "schulter" appearing in a neck-context transcript (e.g. "Schmerz im
+            # Nacken und Schultern") must not override the cervical spine diagnosis.
+            _neck_ctx = any(k in t_low for k in [
+                "nacken", "hws", "atlasübergang", "zervikal", "c0/c1", "c1/c2",
+                "kopfgelenk", "subokzipital",
+            ])
+            _is_schulter = (
+                (profile_id == "EX_SCHULTER") or
+                ("schulter" in t_low and not _neck_ctx) or
+                icd10.startswith("M75")
+            )
             _is_knie     = (profile_id == "EX_KNIE") or "knie" in t_low or icd10.startswith("M17")
 
             if _is_fuss and not icd10.startswith(("S93", "S92", "S86", "M77.5", "M79.6")):

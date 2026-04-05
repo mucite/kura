@@ -189,6 +189,10 @@ class AIEngineBase(ABC):
         Returns:
             ICD-10 code or None
         """
+        # Normalise LLM artefacts where the model inserts spaces inside codes:
+        # "M54. 2. x" → "M54.2",  "M75. 0" → "M75.0"
+        text = re.sub(r'\b([A-Z]\d{2})\.\s+(\d{1,2})(?:\.\s*\w)?\b', r'\1.\2', text)
+
         icd_pattern = re.compile(r'\b([A-Z]\d{2}(?:\.\d{1,2})?)\b')
 
         # Find the start of the differential-diagnosis section, if any

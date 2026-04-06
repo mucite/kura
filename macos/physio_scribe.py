@@ -2880,7 +2880,21 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         # --- 2. ICD-10 CROSS-CHECK (Multi-Domain) ---
         res_icd = icd10
-        # NEURO PRIORITY: If neuro keywords exist, it CANNOT be an orthopedic code (M)
+        
+        # SPINE PRIORITY: Profile or keywords indicate spine case - override wrong ICD
+        if is_spine_profile or _spine:
+            if any(k in full_text for k in ["hws", "nacken", "atlasübergang", "zervikal", "c0/c1", "c1/c2", "zervikalsyndrom"]):
+                res_icd = "M54.2"
+            elif any(k in full_text for k in ["bandscheibenvorfall", "radikulär", "ausstrahlung"]):
+                res_icd = "M51.1"
+            else:
+                res_icd = "M54.5"
+            res_icd = self._lock_icd_domain(res_icd, soap, transcript)
+            if is_ortho_mt and not is_lymph:
+                return res_icd, codes.get("MT", "21201")
+            return res_icd, codes.get("KG", "20501")
+        
+        # NEURO PRIORITY: If neuro keywords exist AND not spine, it CANNOT be an orthopedic code (M)
         if is_neuro:
             if not icd10.startswith(("G", "I69")):
                 res_icd = "I69.3"  # Default: Folgen eines Hirninfarkts
@@ -2892,24 +2906,6 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         # ORTHO REFINEMENT
         else:
-            # Spine path: if HWS/LWS keywords dominate, set ICD directly
-            _spine = any(k in full_text for k in [
-                "hws", "lws", "nacken", "atlasübergang", "zervikal", "c0/c1", "c1/c2",
-                "zervikalsyndrom", "bandscheibenvorfall", "radikulär", "ischiasschmerz",
-                "lumboischialgie", "wirbelsäule", "facettensyndrom",
-            ])
-            if _spine:
-                if any(k in full_text for k in ["hws", "nacken", "atlasübergang", "zervikal", "c0/c1", "c1/c2", "zervikalsyndrom"]):
-                    res_icd = "M54.2"
-                elif any(k in full_text for k in ["bandscheibenvorfall", "radikulär", "ausstrahlung"]):
-                    res_icd = "M51.1"
-                else:
-                    res_icd = "M54.5"
-                res_icd = self._lock_icd_domain(res_icd, soap, transcript)
-                if is_ortho_mt and not is_lymph:
-                    return res_icd, codes.get("MT", "21201")
-                return res_icd, codes.get("KG", "20501")
-
             hip_fracture_ctx = any(k in t_low for k in [
                 "schenkelhalsfraktur", "schenkelhals", "hüftfraktur", "femurhalsfraktur",
                 "pertrochantär", "pertrochantar", "subtrochantär",

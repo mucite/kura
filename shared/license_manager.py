@@ -71,6 +71,7 @@ class LicenseManager:
         self.license_file     = os.path.join(data_dir, "license.json")
         self.trial_file       = os.path.join(data_dir, "trial.dat")
         self.hardware_id_file = os.path.expanduser("~/.kura_hardware")
+        self.gist_cache_file  = os.path.join(data_dir, "gist_config_cache.json")
 
         self.max_trials  = 5
         self.mac_address = self._get_mac()
@@ -78,6 +79,14 @@ class LicenseManager:
         self._cache: dict | None = None
         self._block_reason: str = ""        # set whenever verify_locally() returns False
         self._grace_days_remaining: int = 0  # days left in offline grace (0 = not in grace)
+        self._is_revoked: bool = False      # set if hardware_id in Gist revocation list
+        
+        # Auto-log hardware_id for support/revocation purposes
+        logger.info(f"Kura Hardware ID: {self.hardware_id}")
+        print(f"[INFO] Hardware ID: {self.hardware_id}")
+
+        # Log Hardware ID to persistent support log
+        self._log_hardware_id_to_file()
 
     @property
     def block_reason(self) -> str:
@@ -96,6 +105,29 @@ class LicenseManager:
         return self._grace_days_remaining
 
     # ── Hardware fingerprinting ───────────────────────────────────────────────
+
+    def _log_hardware_id_to_file(self):
+        """Write Hardware ID to persistent log file for support purposes"""
+        try:
+            import platform
+            from datetime import datetime
+
+            # Use same data_dir as license files
+            if platform.system() == "Windows":
+                appdata = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+                log_dir = os.path.join(appdata, "Kura")
+            else:
+                log_dir = os.path.expanduser("~/Library/Application Support/Kura")
+
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, "kura_support.log")
+
+            # Append to log with timestamp
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"{timestamp} | Hardware ID: {self.hardware_id} | MAC: {self.mac_address}\n")
+        except Exception:
+            pass  # Silent fail - not critical
 
     def _get_mac(self) -> str:
         try:
@@ -202,6 +234,48 @@ class LicenseManager:
         headers = {"X-DS-API-KEY": api_key}
         return requests.get(url, params=params or {}, headers=headers, timeout=timeout)
 
+    def _check_payment_status(self, license_key: str) -> tuple[bool, str]:
+        """
+        Check if subscription is actually paid via Digistore24 API.
+        Returns: (is_paid, status_message)
+
+        Checks payment and subscription status to auto-revoke if:
+        - Subscription cancelled
+        - Payment refunded
+        - Chargeback filed
+        - Payment failed
+
+        This eliminates need to ask customer for Hardware ID for revocation.
+        """
+        resp = self._ds24_get(
+            "validateLicenseKey",
+            {"license_key": license_key},
+            timeout=8
+        )
+        data = resp.json()
+
+        if resp.status_code == 200 and data.get("result") == "success":
+            # DS24 returns success - license exists
+            # Check additional payment/subscription metadata
+            payment_status = data.get("payment_status", "paid")
+            subscription_status = data.get("is_active", True)  # DS24 field name may vary
+
+            # If DS24 says success and subscription exists, it's paid
+            # (DS24 validateLicenseKey only returns success for active licenses)
+            return True, "active"
+        else:
+            # DS24 rejected - subscription cancelled, payment failed, or license invalid
+            error_msg = data.get("message", "unknown")
+
+            if "cancelled" in error_msg.lower():
+                return False, "subscription_cancelled"
+            elif "refund" in error_msg.lower():
+                return False, "payment_refunded"
+            elif "chargeback" in error_msg.lower():
+                return False, "payment_chargeback"
+            else:
+                return False, "license_invalid"
+
     # ── Activate ──────────────────────────────────────────────────────────────
 
     def activate(self, license_key: str) -> tuple[bool, str]:
@@ -262,6 +336,11 @@ class LicenseManager:
             self._block_reason = "subscription_expired"
             return False
 
+        # Check remote revocation list (Gist-based)
+        if self._check_gist_revocation():
+            self._block_reason = "license_revoked"
+            return False
+
         last = cache.get("validated_at")
         if last:
             try:
@@ -284,24 +363,28 @@ class LicenseManager:
 
         key = cache.get("key", "")
         try:
-            resp = self._ds24_get(
-                "validateLicenseKey",
-                {"purchase_id": key, "license_key": key},
-                timeout=8,
-            )
-            data = resp.json()
-            if resp.status_code == 200 and data.get("result") == "success":
-                cache["status"]       = "active"
-                cache["validated_at"] = datetime.now(timezone.utc).isoformat()
+            # Check payment status with Digistore24
+            # This auto-detects: cancelled subscriptions, chargebacks, refunds
+            is_paid, payment_status = self._check_payment_status(key)
+            
+            if not is_paid:
+                # Payment failed/cancelled/refunded - auto-revoke
+                print(f"License: payment status = {payment_status}")
+                cache["status"] = "revoked"
+                cache["revoked_reason"] = payment_status
                 self._save(cache)
-                return True
-            # DS24 explicitly rejected — subscription cancelled/expired
-            cache["status"] = "invalid"
+                self._block_reason = "payment_failed"
+                return False
+            
+            # Payment OK - update validation timestamp
+            cache["status"] = "active"
+            cache["validated_at"] = datetime.now(timezone.utc).isoformat()
+            cache["last_payment_check"] = payment_status
             self._save(cache)
-            self._block_reason = "subscription_expired"
-            return False
+            return True
 
-        except Exception:
+        except RuntimeError:
+            # Offline or API unavailable — apply grace period
             # Offline — apply grace period
             if last:
                 try:

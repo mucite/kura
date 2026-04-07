@@ -299,7 +299,7 @@ _HMK: dict[str, dict] = {
         "heilmittel": "KPE", "position": "21110",
         "name": "Komplexe Physikalische Entstauungstherapie Phase I",
         "duration": 60, "regelfall": 6, "langfristig": True,
-        "icd": ["I89.0", "I89.01", "I89.02", "I97.2", "I97.21", "I97.22", "I97.89", "C77", "C78", "C79"],
+        "icd": ["I97.2", "I97.21", "I97.22", "I97.89", "C77", "C78", "C79"],
         "docs": ["Ödem-Stadium", "Umfangsmessung beidseitig", "Stemmer-Zeichen",
                  "Onkolog. Vordiagnose", "KPE-Komponenten", "Hautbefund (Rötung/Hyperkeratose)"],
     },
@@ -435,7 +435,7 @@ _HMK: dict[str, dict] = {
         # Gist: KG_BB_Einzel = 20902 (€33.87)
         "name": "Krankengymnastik im Bewegungsbad (Einzeln)",
         "duration": 30, "regelfall": 6, "langfristig": False,
-        "icd": ["M05", "G82", "M80"],  # M16/M17 removed — belong to EX4/EX3; BB1 selected via AQUA profile_id only
+        "icd": [],  # BB1 selected ONLY via AQUA profile_id, never via ICD lookup
         "docs": ["Wassertemperatur (°C)", "Auftriebshilfen (vorhanden / nicht notwendig)", "Belastungsstatus im Wasser", "ROM und Gangbild im Vergleich zu trocken"],
     },
 
@@ -625,7 +625,6 @@ _RED_FLAGS: dict[str, str] = {
     "Harninkontinenz":  "Blasen-/Mastdarmkontrolle",
     "Cauda":            "Cauda-equina-Syndrom V.a.",
     "Querschnitt":      "Querschnittslähmung V.a.",
-    "Fraktur":          "ungeklärte Fraktur",
     "Tumorverdacht":    "Tumorverdacht",
     "Meningismus":      "Meningismus",
 }
@@ -880,11 +879,19 @@ class _GKVEngine:
         if position == "21201":
             seg_checker = _DOC_CHECKERS["Behandeltes Segment"]
             has_seg = seg_checker(obj.lower() + " " + assess.lower())
+
+            # Smart Fill: Infer segment from clinical context if missing
+            suggested_segment = ""
+            if not has_seg:
+                suggested_segment = self._infer_segment_from_context(soap, icd10, profile_id)
+
             audit.append(AuditItem(
                 "MT_SEGMENT", "Behandeltes Segment (MT §125 SGB V Pflicht)",
                 "PASS" if has_seg else "FAIL",
                 "" if has_seg else
-                "Fehlendes Segment (z.B. L4/L5, C5/C6) — 21201 ohne Segmentangabe nicht abrechenbar."
+                (f"Fehlendes Segment (z.B. L4/L5, C5/C6) — 21201 ohne Segmentangabe nicht abrechenbar. "
+                 f"Vorschlag: {suggested_segment}" if suggested_segment else
+                 "Fehlendes Segment (z.B. L4/L5, C5/C6) — 21201 ohne Segmentangabe nicht abrechenbar.")
             ))
             if not has_seg:
                 risk = "WARN"
@@ -1051,7 +1058,8 @@ class _GKVEngine:
             return "EX6"
         if any(k in text for k in ["manuelle therapie", " mt ", "traktion", "gleitmobilisation"]):
             return "WS1b"
-        return "WS1b"
+        # Default: Generic KG session for musculoskeletal conditions
+        return "EX1b"
 
     def _mt_indicated(self, soap: dict, transcript: str) -> bool:
         text = (transcript + " " + soap.get("P", "")).lower()
@@ -1112,6 +1120,83 @@ class _GKVEngine:
                                            "BLOCK",
                                            f"{flag} ohne Ausschluss — ärztliche Abklärung vor Therapiefortsetzung!"))
         return items
+
+    def _infer_segment_from_context(self, soap: dict, icd10: str, profile_id: str = None) -> str:
+        """
+        Smart Fill: Infer likely spinal/joint segment from clinical context.
+        Eliminates need for therapist to manually type segment every time.
+
+        Returns suggested segment string (e.g., "L4/L5 und L5/S1") or empty string if can't infer.
+        """
+        text = (soap.get("S", "") + " " + soap.get("O", "") + " " + soap.get("A", "")).lower()
+
+        # LWS (Lumbar Spine) - most common
+        if any(k in text for k in ["lws", "lumbal", "lumbago", "ischias", "iliosakral", "kreuzbein"]):
+            # Pain location determines likely segments
+            if "gesäß" in text or "gluteal" in text or "kreuzbein" in text:
+                return "L5/S1 (geschätzt aus Schmerzlokalisation Gesäß/Kreuzbein)"
+            elif "leiste" in text or "hüfte" in text:
+                return "L3/L4 und L4/L5 (geschätzt aus Schmerzausstrahlung Leiste/Hüfte)"
+            elif "bein" in text or "oberschenkel" in text:
+                return "L4/L5 und L5/S1 (geschätzt aus Ausstrahlung ins Bein)"
+            else:
+                # Default LWS segments
+                return "L4/L5 und L5/S1 (geschätzt aus LWS-Diagnose)"
+
+        # HWS (Cervical Spine)
+        elif any(k in text for k in ["hws", "zervikal", "nacken", "halswirbel"]):
+            if "kopfschmerz" in text or "schwindel" in text:
+                return "C1/C2 und C2/C3 (geschätzt aus Kopfschmerz/Schwindel)"
+            elif "arm" in text or "schulter" in text:
+                return "C5/C6 und C6/C7 (geschätzt aus Armausstrahlung)"
+            else:
+                return "C5/C6 und C6/C7 (geschätzt aus HWS-Diagnose)"
+
+        # BWS (Thoracic Spine)
+        elif any(k in text for k in ["bws", "thorakal", "brustwirbel", "rippe"]):
+            return "Th6/Th7 und Th7/Th8 (geschätzt aus BWS-Diagnose)"
+
+        # ISG (Sacroiliac Joint)
+        elif any(k in text for k in ["isg", "iliosakral", "sakroiliak", "si-gelenk"]):
+            return "ISG bds. (geschätzt aus ISG-Problematik)"
+
+        # Shoulder
+        elif any(k in text for k in ["schulter", "glenohumeral", "akromioklavikular", "rotatorenmanschette"]):
+            return "Glenohumeralgelenk re/li (geschätzt aus Schulterdiagnose)"
+
+        # Knee
+        elif any(k in text for k in ["knie", "tibiofemoral", "patellofemoral", "menisk"]):
+            return "Kniegelenk re/li (geschätzt aus Kniediagnose)"
+
+        # Hip
+        elif any(k in text for k in ["hüfte", "hüft", "koxofemoral", "tep"]):
+            return "Hüftgelenk re/li (geschätzt aus Hüftdiagnose)"
+
+        # Ankle
+        elif any(k in text for k in ["sprunggelenk", "osg", "malleolus", "achilles"]):
+            return "Oberes Sprunggelenk re/li (geschätzt aus OSG-Diagnose)"
+
+        # Hand/Wrist
+        elif any(k in text for k in ["handgelenk", "radioulnar", "radiokarpal"]):
+            return "Radiokarpalgelenk re/li (geschätzt aus Handgelenk-Diagnose)"
+
+        # Elbow
+        elif any(k in text for k in ["ellbogen", "ellenbogen", "humeroradial", "humeroulnar"]):
+            return "Ellbogengelenk re/li (geschätzt aus Ellbogendiagnose)"
+
+        # ICD-based inference
+        if icd10:
+            if icd10.startswith("M54.5") or icd10.startswith("M54.4"):  # Lumbago/LWS
+                return "L4/L5 und L5/S1 (geschätzt aus ICD M54.5/M54.4)"
+            elif icd10.startswith("M54.2"):  # HWS
+                return "C5/C6 und C6/C7 (geschätzt aus ICD M54.2)"
+            elif icd10.startswith("M75"):  # Shoulder
+                return "Glenohumeralgelenk (geschätzt aus ICD M75)"
+            elif icd10.startswith("M17"):  # Knee
+                return "Kniegelenk (geschätzt aus ICD M17)"
+
+        # Can't infer - return empty (will trigger manual entry prompt)
+        return ""
 
 
 # ── PKV engine ────────────────────────────────────────────────────────────────

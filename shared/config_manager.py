@@ -57,7 +57,13 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 class ConfigManager:
-    def __init__(self, practice_name: str = None):
+    def __init__(self, practice_name: str = None, license_status=None):
+        """
+        license_status: Result from LicenseManager.verify_locally()
+            - True = licensed (sync Gist)
+            - "TRIAL" = trial mode (no Gist, use fallback)
+            - False = expired (no Gist, use fallback)
+        """
         try:
             os.makedirs(_DATA_DIR, exist_ok=True)
         except Exception as dir_err:
@@ -65,9 +71,17 @@ class ConfigManager:
 
         self.practice_config = PracticeConfig(practice_name=practice_name)
         self.data = copy.deepcopy(_FALLBACK)
+        self.license_status = license_status
 
-        # Layer 1: Gist (remote, cached locally)
-        self._sync_gist()
+        # Layer 1: Gist (remote, cached locally) — ONLY for licensed users
+        if license_status is True:
+            self._sync_gist()
+        else:
+            # Trial/expired users: use fallback only, but check for revocation list
+            self._load_gist_revocation_only()
+            
+            # Trial comparison will be shown in GUI by main_windows.py, not here
+
 
         # Layer 2: local customer override (wins over Gist, never pushed back)
         self._apply_local_override()
@@ -77,8 +91,35 @@ class ConfigManager:
 
     # ── Layer 1: Gist ─────────────────────────────────────────────────────────
 
+    def _load_gist_revocation_only(self):
+        """
+        For trial/expired users: Load Gist ONLY to check revocation list.
+        Don't apply config updates (they get fallback only).
+        This prevents trial users from getting premium features while still
+        allowing remote license revocation.
+        """
+        try:
+            import requests
+            r = requests.get(_GIST_URL, timeout=5)
+            if r.status_code == 200:
+                remote = r.json()
+                # Save to cache so LicenseManager can read revocation list
+                try:
+                    with open(_GIST_CACHE, "w", encoding="utf-8") as f:
+                        json.dump(remote, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
+                print("Gist revocation check: OK (trial mode, no config applied)")
+                return
+        except Exception:
+            pass
+        
+        # Offline: trial users just use fallback, no problem
+        print("Trial mode: using basic fallback config")
+
     def _sync_gist(self):
-        """Pull latest Gist; fall back to local cache; fall back to hardcoded."""
+        """Pull latest Gist; fall back to local cache; fall back to hardcoded.
+        Only called for licensed users."""
         try:
             import requests
             r = requests.get(_GIST_URL, timeout=5)
@@ -91,22 +132,22 @@ class ConfigManager:
                         json.dump(remote, f, indent=2, ensure_ascii=False)
                 except Exception as write_err:
                     print(f"Cache-Schreibfehler: {write_err}")
-                print(f"Gist-Sync OK: v{self.data.get('version')}")
+                print(f"✅ Premium Config: v{self.data.get('version')} (Licensed)")
                 return
         except Exception as e:
             print(f"Gist-Sync fehlgeschlagen: {e}")
 
-        # Offline: use last cached Gist
+        # Offline: use last cached Gist (licensed users can work offline with grace period)
         if os.path.exists(_GIST_CACHE):
             try:
                 with open(_GIST_CACHE, "r", encoding="utf-8") as f:
                     self.data = json.load(f)
-                print("Gist-Cache geladen (offline).")
+                print("Premium Config: offline cache (Licensed)")
                 return
             except Exception:
                 pass
 
-        print("Kein Gist-Cache — nutze hardcoded Fallback.")
+        print("Kein Gist-Cache — nutze hardcoded Fallback (Licensed, offline)")
 
     # ── Layer 2: local override ───────────────────────────────────────────────
 

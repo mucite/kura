@@ -177,8 +177,9 @@ class LearningManager:
         """
         Return the _INJECT_COUNT most similar past sessions for use in the prompt.
 
-        Similarity = keyword overlap, with a +10 bonus for matching profile_id
-        and a +5 bonus for sessions the therapist corrected (higher signal quality).
+        Similarity = keyword overlap, with strong preference for same profile_id.
+        Incompatible profiles (e.g., spine vs extremity) are excluded to prevent
+        context contamination.
 
         Returns:
             List of example dicts with keys: transcript, soap, icd10.
@@ -187,11 +188,44 @@ class LearningManager:
         if not self._examples:
             return []
 
+        # Define incompatible profile groups to prevent contamination
+        _profile_groups = {
+            "SPINE": {"EX_HWS", "EX_LWS", "EX_BWS"},
+            "EXTREMITY": {"EX_SCHULTER", "EX_KNIE", "EX_HUefte", "EX_HUFTE", "EX_FUSS", "EX_ELLBOGEN"},
+            "SPECIAL": {"LY", "AT", "GEB", "PAED", "NEURO", "GER"},
+        }
+
+        # Determine current profile group
+        current_group = None
+        for group, profiles in _profile_groups.items():
+            if profile_id in profiles:
+                current_group = group
+                break
+
         scored = []
         for ex in self._examples:
+            ex_profile = ex.get("profile_id", "")
+
+            # STRICT FILTER: Exclude examples from incompatible profile groups
+            if current_group:
+                ex_group = None
+                for group, profiles in _profile_groups.items():
+                    if ex_profile in profiles:
+                        ex_group = group
+                        break
+                # Skip if from different group (prevents spine tests in extremity sessions)
+                if ex_group and ex_group != current_group:
+                    continue
+
             score = _keyword_overlap(transcript, ex.get("transcript", ""))
-            if profile_id and ex.get("profile_id") == profile_id:
-                score += 10
+
+            # STRONG preference for exact profile match (increased from +10 to +50)
+            if profile_id and ex_profile == profile_id:
+                score += 50
+            # MEDIUM preference for same group but different profile
+            elif current_group and ex_group == current_group:
+                score += 20
+
             if ex.get("was_corrected"):
                 score += 5
             scored.append((score, ex))
@@ -205,22 +239,27 @@ class LearningManager:
         Return a formatted few-shot block ready to inject into the system prompt.
 
         Returns empty string if no relevant examples exist yet.
+
+        CRITICAL: Only shows O/A/P fields from past sessions to prevent
+        context contamination. The S-field MUST come from the current transcript only.
         """
         examples = self.get_few_shot_examples(transcript, profile_id)
         if not examples:
             return ""
 
         lines = ["BEISPIEL AUS VERGANGENEN SITZUNGEN (Stil dieses Therapeuten):"]
+        lines.append("⚠️ ACHTUNG: Das S-Feld (Subjektiv) MUSS aus dem AKTUELLEN Transkript kommen!")
+        lines.append("⚠️ Die folgenden Beispiele zeigen nur O/A/P zur Stil-Orientierung.\n")
         for i, ex in enumerate(examples, 1):
             soap = ex.get("soap", {})
-            lines.append(f"\n--- Beispiel {i} ---")
-            lines.append(f"Transkript-Auszug: {ex.get('transcript', '')[:300]}...")
-            lines.append(f"S: {soap.get('S', '')}")
+            lines.append(f"--- Beispiel {i} (Profil: {ex.get('profile_id', 'n.d.')}) ---")
+            # REMOVED: S-field to prevent contamination
             lines.append(f"O: {soap.get('O', '')}")
             lines.append(f"A: {soap.get('A', '')}  |  ICD-10: {ex.get('icd10', '')}")
             lines.append(f"P: {soap.get('P', '')}")
         lines.append("--- Ende Beispiel ---")
         lines.append("Übernehme den Detailgrad, die Terminologie und den Stil des obigen Beispiels.")
+        lines.append("⚠️ WICHTIG: Erstelle das S-Feld NUR aus dem AKTUELLEN Transkript, NICHT aus dem Beispiel!")
 
         return "\n".join(lines)
 

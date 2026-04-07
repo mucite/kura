@@ -2,9 +2,14 @@
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
 import os
 
+# ── Models are NOT bundled - they download on first launch ──────────────────
+# This keeps the installer small (~50 MB instead of ~6 GB)
+# Models download automatically from HuggingFace on first app launch
+
 datas = [
-    ('../models', 'models'),
+    ('../core', 'core'),  # Include core (with model_downloader.py)
     ('../shared', 'shared'),
+    ('../data', 'data'),  # GKV prices
     ('../.env.example', '.'),
     ('physio_scribe_crossplatform.py', '.'),
 ]
@@ -28,6 +33,8 @@ hiddenimports = [
     'shared.license_manager',
     'shared.practice_config',
     'shared.learning_manager',
+    'huggingface_hub',  # For model downloads on first launch
+    'core.model_downloader',  # Model download logic
 ]
 
 # Collect llama_cpp with its dynamic libraries

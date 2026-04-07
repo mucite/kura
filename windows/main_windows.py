@@ -192,7 +192,11 @@ class KuraApp:
             _boot_status = self.license_mgr.verify_locally()
             if _boot_status == "TRIAL":
                 _rem = self.license_mgr.max_trials - self.license_mgr.get_trial_count()
-                if _rem <= 2:
+
+                # Show trial comparison on first launch or when running low
+                if _rem == 5 or _rem <= 2:
+                    self._show_trial_comparison_dialog(_rem)
+                elif _rem <= 2:
                     messagebox.showinfo(
                         "Kura Testphase",
                         f"Noch {_rem} Testbericht{'e' if _rem != 1 else ''} verbleibend.\n\n"
@@ -228,6 +232,174 @@ class KuraApp:
 
     def _is_pro(self):
         return self.license_mgr.verify_locally() is True
+
+    def _create_feature_card(self, parent, feature: dict):
+        """Create a clean feature card with icon, title, and description"""
+        card_frame = ctk.CTkFrame(parent, fg_color="#2b2b2b", corner_radius=8)
+        card_frame.pack(fill="x", pady=5)
+        
+        content_frame = ctk.CTkFrame(card_frame, fg_color="transparent")
+        content_frame.pack(fill="x", padx=15, pady=12)
+        
+        # Icon and title in same row
+        header_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
+        header_frame.pack(fill="x", anchor="w")
+        
+        icon_label = ctk.CTkLabel(
+            header_frame,
+            text=feature["icon"],
+            font=ctk.CTkFont(size=20),
+            width=30
+        )
+        icon_label.pack(side="left", padx=(0, 10))
+        
+        title_label = ctk.CTkLabel(
+            header_frame,
+            text=feature["title"],
+            font=ctk.CTkFont(size=14, weight="bold"),
+            anchor="w"
+        )
+        title_label.pack(side="left", fill="x", expand=True)
+        
+        # Description
+        desc_label = ctk.CTkLabel(
+            content_frame,
+            text=feature["description"],
+            font=ctk.CTkFont(size=12),
+            text_color="gray",
+            anchor="w"
+        )
+        desc_label.pack(anchor="w", padx=(40, 0), pady=(5, 0))
+
+    def _show_trial_comparison_dialog(self, remaining_trials):
+        """Show clean, modern trial upgrade dialog"""
+        try:
+            from shared.trial_status import TrialStatus
+
+            # Create dialog window
+            dialog = ctk.CTkToplevel(self.root)
+            dialog.title("Kura Testphase")
+            dialog.geometry("700x650")
+            dialog.resizable(False, False)
+            
+            # Make it modal
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            # Main container with padding
+            main_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+            main_frame.pack(fill="both", expand=True, padx=30, pady=30)
+
+            # Header with icon and trial status
+            header_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+            header_frame.pack(fill="x", pady=(0, 20))
+
+            status_icon = "🟢" if remaining_trials > 2 else ("🟡" if remaining_trials > 0 else "🔴")
+            header_label = ctk.CTkLabel(
+                header_frame,
+                text=f"{status_icon} Testphase",
+                font=ctk.CTkFont(size=24, weight="bold")
+            )
+            header_label.pack()
+
+            remaining_label = ctk.CTkLabel(
+                header_frame,
+                text=f"Noch {remaining_trials} von {self.license_mgr.max_trials} Testberichten verfügbar",
+                font=ctk.CTkFont(size=14),
+                text_color="gray"
+            )
+            remaining_label.pack(pady=(5, 0))
+
+            # Scrollable content area
+            scroll_frame = ctk.CTkScrollableFrame(main_frame, height=350)
+            scroll_frame.pack(fill="both", expand=True, pady=(0, 20))
+
+            # Info message
+            info_label = ctk.CTkLabel(
+                scroll_frame,
+                text="Mit Kura Pro erhalten Sie:",
+                font=ctk.CTkFont(size=16, weight="bold"),
+                anchor="w"
+            )
+            info_label.pack(anchor="w", pady=(0, 15))
+
+            # Feature cards
+            features = TrialStatus.get_pro_features()
+            for feature in features:
+                self._create_feature_card(scroll_frame, feature)
+
+            # Upgrade CTA section
+            cta_frame = ctk.CTkFrame(main_frame, fg_color="#1a472a", corner_radius=10)
+            cta_frame.pack(fill="x", pady=(0, 20))
+
+            cta_content = ctk.CTkFrame(cta_frame, fg_color="transparent")
+            cta_content.pack(padx=20, pady=20)
+
+            price_label = ctk.CTkLabel(
+                cta_content,
+                text="€49/Monat · Jederzeit kündbar",
+                font=ctk.CTkFont(size=16, weight="bold"),
+                text_color="white"
+            )
+            price_label.pack()
+
+            benefit_label = ctk.CTkLabel(
+                cta_content,
+                text="Unbegrenzte Berichte · Alle Features · Premium Support",
+                font=ctk.CTkFont(size=12),
+                text_color="#b8e6cc"
+            )
+            benefit_label.pack(pady=(5, 0))
+
+            # Buttons
+            button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+            button_frame.pack(fill="x")
+
+            def open_upgrade():
+                webbrowser.open("https://kura-medical.de/#preis")
+                dialog.destroy()
+            
+            upgrade_btn = ctk.CTkButton(
+                button_frame,
+                text="🚀 Jetzt upgraden",
+                command=open_upgrade,
+                fg_color="#28a745",
+                hover_color="#218838",
+                font=ctk.CTkFont(size=15, weight="bold"),
+                height=45
+            )
+            upgrade_btn.pack(side="left", padx=(0, 10), fill="x", expand=True)
+            
+            continue_btn = ctk.CTkButton(
+                button_frame,
+                text="Testphase fortsetzen",
+                command=dialog.destroy,
+                fg_color="transparent",
+                hover_color="#2b2b2b",
+                border_width=2,
+                border_color="#3f3f3f",
+                font=ctk.CTkFont(size=15),
+                height=45
+            )
+            continue_btn.pack(side="right", fill="x", expand=True)
+            
+            # Center the dialog
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+            y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+            dialog.geometry(f"+{x}+{y}")
+            
+        except Exception as e:
+            # Fallback to simple messagebox if dialog fails
+            messagebox.showinfo(
+                "Kura Testphase",
+                f"Noch {remaining_trials} Testberichte verbleibend.\n\n"
+                "Upgrade zu Kura Pro:\n"
+                "• 79 Abrechnungsziffern\n"
+                "• ICD-spezifische Regeln\n"
+                "• Automatische Updates\n\n"
+                "https://kura-medical.de/#preis"
+            )
 
     # ── Recording ─────────────────────────────────────────────────────────────
 

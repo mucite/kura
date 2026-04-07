@@ -1502,11 +1502,18 @@ class KuraEngine:
         return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 Du bist ein klinischer Dokumentationsexperte für deutsche Physiotherapie (§106b SGB V).
 Profil: {prof["label"]} | Abrechnung: {prof["billing"]}
+
+⚠️⚠️⚠️ KRITISCHE WARNUNG - CONTEXT ISOLATION ⚠️⚠️⚠️
+JEDE SITZUNG IST EIN NEUER PATIENT. Verwende NIEMALS Informationen aus vorherigen Sitzungen!
+Das S-Feld (Subjektiv) MUSS zu 100% aus dem AKTUELLEN Transkript stammen.
+Wenn im Transkript KNIE behandelt wird, darf NICHTS über Rücken/LWS im S-Feld erscheinen!
+
 {style_injection}
 REGELN:
-1. Nur aus dem Transkript. Fehlende Werte → "n.d.".
+1. Nur aus dem AKTUELLEN Transkript. Fehlende Werte → "n.d.".
 2. Zahlen exakt. ROM: Neutral-Null [Ext]-[0]-[Flex] (Bsp. "0-0-90").
-3. S: 2-3 Sätze — Patientenperspektive, VAS, Auslöser, Ziel. Keine Diagnosen, keine Messwerte. Kein Transkript-Abdruck. Beispiel Schmerz: "{pain_ex}".
+3. S: 2-3 Sätze — Patientenperspektive aus dem AKTUELLEN Transkript, VAS, Auslöser, Ziel. Keine Diagnosen, keine Messwerte. Kein Transkript-Abdruck. Beispiel Schmerz: "{pain_ex}".
+   ⚠️ VERWENDE NUR INFORMATIONEN AUS DEM UNTEN STEHENDEN TRANSKRIPT!
 4. O: Nur Messwerte und Tests — keine Behandlungsschritte. Beispiel Inspektion: "{inspection_ex}". Pflichtfelder (alle oder "n.d."):
 {checklist}
 5. A: ICD-10 + Diagnose + Red-Flag-Ausschluss ("{red_flag_ex}"). Diagnosen nicht in S.
@@ -2085,7 +2092,8 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 if "rom hws" not in obj_text.lower():
                     obj_text += f" | ROM HWS Flex/Ext (NZM): {_nzm}"
                 else:
-                    obj_text = re.sub(r'(ROM HWS[^|]*)', rf'\1 Flex/Ext: {_nzm}', obj_text, flags=re.I)
+                    replacement = f'\\1 Flex/Ext: {_nzm}'
+                    obj_text = re.sub(r'(ROM HWS[^|]*)', replacement, obj_text, flags=re.I)
             if _latflex_m and "latflex" not in obj_text.lower().replace(_latflex_m.group(0).lower(), ""):
                 _lv = _latflex_m.group(1)
                 obj_text = obj_text[:_latflex_m.start()] + obj_text[_latflex_m.end():]
@@ -2216,6 +2224,59 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                     'Ziel: n.d. — bitte korrektes Funktionsziel ergaenzen',
                     p_field, flags=re.I
                 )
+
+        # ═══════════════════════════════════════════════════════════════
+        # CRITICAL: S-FIELD CONTAMINATION DETECTION AND REMOVAL
+        # ═══════════════════════════════════════════════════════════════
+        # Extract S-field and check for cross-session contamination
+        s_val = soap_dict.get("S", "")
+        s_text = s_val if isinstance(s_val, str) else ""
+        profile_upper = profile_id.upper()
+
+        # Define contamination patterns by body region
+        lws_contamination = [
+            r"\bLWS-Schmerzen?\b", r"\blumbal\w*\b", r"\blumbago\b",
+            r"\bRückenschmerz\w*\b", r"\bKreuzschmerz\w*\b",
+            r"\bnach\s+Heben\b", r"\bHeben\s+schwerer\b",
+        ]
+        hws_contamination = [
+            r"\bHWS-Beschwerden?\b", r"\bHWS-Schmerzen?\b", r"\bzervikal\w*\b",
+            r"\bNackenschmerz\w*\b", r"\bHinterkopfschmerz\w*\b", r"\bKopfschmerz\w*\b",
+        ]
+        all_spine = lws_contamination + hws_contamination
+
+        # Normalize profile ID to handle variants
+        profile_normalized = profile_upper.replace("Ü", "U").replace("UE", "U")
+
+        # ── Rule 1: EXTREMITY profiles ONLY remove SPINE contamination ──
+        if any(ex in profile_normalized for ex in ["KNIE", "KNEE", "SCHULTER", "SHOULDER",
+                                                     "FUSS", "FOOT", "HUFT", "HIP",
+                                                     "HAND", "ELLBOGEN", "ELBOW"]):
+            for pattern in all_spine:
+                if re.search(pattern, s_text, re.IGNORECASE):
+                    print(f"⚠️ CONTAMINATION: Removing SPINE mention from {profile_id} session")
+                    s_text = re.sub(r'[^.!?]*' + pattern + r'[^.!?]*[.!?]', '', s_text, flags=re.IGNORECASE)
+
+        # ── Rule 2: SPINE profiles ONLY remove EXTREMITY contamination ──
+        elif any(sp in profile_normalized for sp in ["LWS", "HWS", "BWS"]):
+            extremity_patterns = [
+                r"\bKnie\w*\b", r"\bSchulter\w*\b", r"\bEllbogen\w*\b",
+                r"\bHandgelenk\w*\b", r"\bSprunggelenk\w*\b", r"\bHüft\w*\b",
+                r"\bFuß\w*\b", r"\bFuss\w*\b",
+            ]
+            for pattern in extremity_patterns:
+                if re.search(pattern, s_text, re.IGNORECASE):
+                    print(f"⚠️ CONTAMINATION: Removing EXTREMITY mention from {profile_id} session")
+                    s_text = re.sub(r'[^.!?]*' + pattern + r'[^.!?]*[.!?]', '', s_text, flags=re.IGNORECASE)
+
+        # Clean up S-field formatting
+        s_text = re.sub(r'\s{2,}', ' ', s_text)
+        s_text = re.sub(r'^\s*[.!?]\s*', '', s_text)  # Remove leading punctuation
+        s_text = s_text.strip()
+
+        # Update soap_dict with cleaned fields
+        soap_dict["S"] = s_text
+        soap_dict["O"] = obj_text
 
         return soap_dict
 

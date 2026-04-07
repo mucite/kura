@@ -62,8 +62,8 @@ cp .env.template .env              # fill in HF_TOKEN and DS24_API_KEY
 | | Minimum | Recommended |
 |---|---|---|
 | OS | macOS 11+ / Windows 10+ | macOS 13+ / Windows 11 |
-| RAM | 8 GB | 16 GB |
-| Disk | 10 GB free | 20 GB free |
+| RAM | 16 GB | 16 GB |
+| Disk | 8 GB free | 20 GB free |
 | GPU | CPU fallback supported | Apple M1+ / NVIDIA 4 GB VRAM |
 | Python | 3.10+ (macOS) / 3.12+ (Windows) | 3.12 |
 

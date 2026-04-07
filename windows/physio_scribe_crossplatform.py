@@ -36,9 +36,16 @@ from shared.learning_manager import LearningManager
 
 
 class KuraEngine:
-    def __init__(self):
+    def __init__(self, license_status=None):
+        """
+        license_status: Pass from LicenseManager.verify_locally()
+            - True = licensed (gets premium config)
+            - "TRIAL" = trial mode (gets basic config)
+            - False = expired (gets basic config)
+        """
         self.learning_mgr = LearningManager()
-        self.config = ConfigManager()
+        self.license_status = license_status
+        self.config = ConfigManager(license_status=license_status)
         self._setup_paths()
         self._check_concurrent_instances()
         self._check_system_resources()
@@ -52,11 +59,18 @@ class KuraEngine:
 
     def _setup_paths(self):
         if getattr(sys, "frozen", False):
-            base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+            base = os.path.dirname(sys.executable)
+            print(f"🔍 Running as bundled app, looking for models at: {base}\\models")
         else:
             base = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
         self.model_dir = os.path.join(base, "models")
         self.whisper_model_dir = os.path.join(self.model_dir, "whisper")
+        
+        # Verify model directory exists
+        if not os.path.exists(self.model_dir):
+            print(f"⚠️ WARNING: Model directory not found at: {self.model_dir}")
+        else:
+            print(f"✅ Model directory found: {self.model_dir}")
 
     # ── System checks ─────────────────────────────────────────────────────────
 
@@ -84,6 +98,14 @@ class KuraEngine:
     def _init_models(self):
         print("🩺 Loading local medical-grade models...")
 
+        # Check if models need to be downloaded (first launch)
+        try:
+            from core.model_downloader import ensure_models_available
+            if not ensure_models_available():
+                raise RuntimeError("Model download failed. Please check internet connection and try again.")
+        except ImportError:
+            pass  # Downloader not available, proceed with existing models
+
         # Suppress llama.cpp verbose C++ output
         os.environ['LLAMA_CPP_LOG_DISABLE'] = '1'
 
@@ -94,18 +116,17 @@ class KuraEngine:
             import contextlib
 
             candidates = [
-                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-4bit-GGUF", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
-                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-4bit", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
-                os.path.join(self.model_dir, "Llama-3.2-3B-Instruct-Q4_K_M.gguf"),
-                os.path.join(self.model_dir, "llama-3.2-3b-medical.Q4_K_M.gguf"),
-                os.path.join(self.model_dir, "Mistral-7B-Instruct-v0.1.Q4_K_M.gguf"),
+                # Llama 3.1 8B (production model - 77% extraction quality)
+                os.path.join(self.model_dir, "Llama-3.1-8B-Instruct-GGUF", "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"),
+                os.path.join(self.model_dir, "Llama-3.1-8B-Instruct-Q4_K_M.gguf"),
             ]
 
             llm_path = next((p for p in candidates if os.path.exists(p)), None)
             if not llm_path:
                 raise FileNotFoundError(
-                    "No GGUF model found in models/ directory.\n"
-                    "Download Llama-3.2-3B-Instruct-Q4_K_M.gguf from HuggingFace and place it in models/."
+                    "Llama-3.1-8B model not found.\n"
+                    "The model should have been downloaded automatically.\n"
+                    "Please ensure you have internet connection and restart Kura."
                 )
 
             print(f"✅ Loading LLM: {os.path.basename(llm_path)}")
@@ -115,7 +136,7 @@ class KuraEngine:
             with contextlib.redirect_stderr(stderr_buffer):
                 self.llm = Llama(
                     model_path=llm_path,
-                    n_ctx=2048,  # Increased for comprehensive prompts (was 800)
+                    n_ctx=4096,  # Increased context window for long prompts + transcripts
                     n_threads=min(os.cpu_count() or 4, 12),  # Use more threads
                     n_batch=512,  # Increased batch size to match context
                     n_gpu_layers=0,  # CPU-only
@@ -905,6 +926,147 @@ class KuraEngine:
 
         return best_id
 
+    def _is_compatible_profile(self, profile_a: str, profile_b: str) -> bool:
+        """
+        Check if two profiles are compatible (can share tests).
+        Returns True if profiles are in the same anatomical group.
+        """
+        # Define profile groups
+        SPINE_PROFILES = {"EX_HWS", "EX_LWS", "EX_BWS", "EX_ISG"}
+        UPPER_EXTREMITY = {"EX_SCHULTER", "EX_ELLBOGEN", "EX_HAND"}
+        LOWER_EXTREMITY = {"EX_HUEFTE", "EX_KNIE", "EX_FUSS"}
+        LYMPH_PROFILES = {"LY_ARM", "LY_BEIN"}
+        NEURO_PROFILES = {"ZNS_STROKE", "ZNS_MS", "ZNS_PARKINSON"}
+        SPECIAL_PROFILES = {"ATEMTHERAPIE", "BECKENBODEN", "KGG"}
+        
+        # Normalize profile names
+        profile_a = profile_a.upper()
+        profile_b = profile_b.upper()
+        
+        # Check if both profiles are in the same group
+        for group in [SPINE_PROFILES, UPPER_EXTREMITY, LOWER_EXTREMITY, 
+                      LYMPH_PROFILES, NEURO_PROFILES, SPECIAL_PROFILES]:
+            if profile_a in group and profile_b in group:
+                return True
+        
+        return False
+
+    def _remove_incompatible_tests(self, soap_dict: dict, profile_type: str) -> dict:
+        """
+        Remove tests from SOAP note that are incompatible with the current profile.
+        Prevents contamination like spine tests in shoulder reports.
+        
+        Args:
+            soap_dict: SOAP note dictionary with S, O, A, P fields
+            profile_type: Simplified profile type (SHOULDER, KNEE, HWS, LWS, etc.)
+        
+        Returns:
+            Cleaned SOAP dictionary
+        """
+        # Define test categories by anatomical region
+        SPINE_TESTS = [
+            "Schober", "Lasègue", "Lasegue", "FBA", "Finger-Boden",
+            "Vorlaufphänomen", "Ott-Zeichen", "Lateral-Flexion"
+        ]
+        
+        SHOULDER_TESTS = [
+            "Jobe", "Hawkins", "Neer", "Painful Arc", "Lift-off", 
+            "Belly-Press", "Empty-Can", "Drop-Arm"
+        ]
+        
+        KNEE_TESTS = [
+            "Lachman", "McMurray", "Schublade", "Varus", "Valgus",
+            "Patellatanz", "Patella-Apprehension"
+        ]
+        
+        HIP_TESTS = [
+            "Thomas", "Trendelenburg", "Patrick", "FABER", "FADIR",
+            "Log-Roll"
+        ]
+        
+        ELBOW_TESTS = [
+            "Epicondylitis", "Golferellenbogen", "Tennisellenbogen",
+            "Valgus-Stress", "Varus-Stress"
+        ]
+        
+        WRIST_TESTS = [
+            "Phalen", "Tinel", "Finkelstein", "Watson"
+        ]
+        
+        LYMPH_TESTS = [
+            "Stemmer", "Umfangsmessung", "Pitting", "Hautqualität"
+        ]
+        
+        # Map profile types to their valid tests
+        profile_type = profile_type.upper()
+        
+        # Determine what tests to KEEP based on profile
+        keep_tests = []
+        remove_tests = []
+        
+        if "SHOULDER" in profile_type or "SCHULTER" in profile_type:
+            keep_tests = SHOULDER_TESTS
+            remove_tests = SPINE_TESTS + KNEE_TESTS + HIP_TESTS + ELBOW_TESTS + WRIST_TESTS + LYMPH_TESTS
+        elif "KNEE" in profile_type or "KNIE" in profile_type:
+            keep_tests = KNEE_TESTS
+            remove_tests = SPINE_TESTS + SHOULDER_TESTS + HIP_TESTS + ELBOW_TESTS + WRIST_TESTS + LYMPH_TESTS
+        elif "HIP" in profile_type or "HÜFT" in profile_type or "HUEFT" in profile_type:
+            keep_tests = HIP_TESTS
+            remove_tests = SPINE_TESTS + SHOULDER_TESTS + KNEE_TESTS + ELBOW_TESTS + WRIST_TESTS + LYMPH_TESTS
+        elif "ELBOW" in profile_type or "ELLBOGEN" in profile_type:
+            keep_tests = ELBOW_TESTS
+            remove_tests = SPINE_TESTS + SHOULDER_TESTS + KNEE_TESTS + HIP_TESTS + WRIST_TESTS + LYMPH_TESTS
+        elif "WRIST" in profile_type or "HAND" in profile_type:
+            keep_tests = WRIST_TESTS
+            remove_tests = SPINE_TESTS + SHOULDER_TESTS + KNEE_TESTS + HIP_TESTS + ELBOW_TESTS + LYMPH_TESTS
+        elif "HWS" in profile_type:
+            keep_tests = []  # HWS has specific tests, remove all spine-specific ones
+            remove_tests = [t for t in SPINE_TESTS if t not in ["Lateral-Flexion"]] + SHOULDER_TESTS + KNEE_TESTS + HIP_TESTS + ELBOW_TESTS + WRIST_TESTS + LYMPH_TESTS
+        elif "LWS" in profile_type:
+            keep_tests = SPINE_TESTS
+            remove_tests = SHOULDER_TESTS + KNEE_TESTS + HIP_TESTS + ELBOW_TESTS + WRIST_TESTS + LYMPH_TESTS
+        elif "BWS" in profile_type:
+            keep_tests = []  # BWS has specific tests
+            remove_tests = [t for t in SPINE_TESTS if t in ["Schober", "Lasègue", "Lasegue", "FBA", "Finger-Boden"]] + SHOULDER_TESTS + KNEE_TESTS + HIP_TESTS + ELBOW_TESTS + WRIST_TESTS + LYMPH_TESTS
+        elif "LY" in profile_type or "LYMPH" in profile_type:
+            keep_tests = LYMPH_TESTS
+            remove_tests = SPINE_TESTS + SHOULDER_TESTS + KNEE_TESTS + HIP_TESTS + ELBOW_TESTS + WRIST_TESTS
+        else:
+            # Unknown profile - don't remove anything
+            return soap_dict
+        
+        # Clean the O (Objective) field
+        cleaned_soap = soap_dict.copy()
+        obj_text = cleaned_soap.get("O", "")
+        
+        if not obj_text:
+            return cleaned_soap
+        
+        # Split on pipe separator to preserve structure
+        parts = obj_text.split("|")
+        cleaned_parts = []
+        
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            
+            # Check if this part contains a test to remove
+            should_remove = False
+            for test in remove_tests:
+                # Case-insensitive check
+                if test.lower() in part.lower():
+                    should_remove = True
+                    break
+            
+            if not should_remove:
+                cleaned_parts.append(part)
+        
+        # Reconstruct the O field
+        cleaned_soap["O"] = " | ".join(cleaned_parts)
+        
+        return cleaned_soap
+
     def _profile_checklist(self, profile_id: str) -> str:
         prof = self._PROFILES.get(profile_id, self._PROFILES["KG"])
         label    = prof["label"]
@@ -948,6 +1110,10 @@ class KuraEngine:
         }
         pain_ex     = _pain_examples.get(profile_id, "lokaler Schmerz, ggf. Ausstrahlung")
         red_flag_ex = _red_flag_examples.get(profile_id, "Red Flags klinisch ausgeschlossen")
+        
+        # ICD hint for the profile
+        prefixes = prof.get("icd_prefix", [])
+        icd_hint = prefixes[0] if prefixes else "M99.9"
 
         _inspection_examples = {
             "EX_SCHULTER": "Schulterachse re. hochgezogen, Skapula protrahiert",
@@ -984,40 +1150,56 @@ class KuraEngine:
         )
 
         return f"""<|start_header_id|>system<|end_header_id|>
-Du bist ein klinischer Dokumentationsexperte für deutsche Physiotherapie (§106b SGB V).
-Profil: {prof["label"]} | Abrechnung: {prof["billing"]}
+Du bist ein medizinischer Dokumentationsexperte. Erstelle aus dem Transkript einen SOAP-Befund als JSON.
+
+⚠️⚠️⚠️ KRITISCHE WARNUNG - CONTEXT ISOLATION ⚠️⚠️⚠️
+JEDE SITZUNG IST EIN NEUER PATIENT. Verwende NIEMALS Informationen aus vorherigen Sitzungen!
+Das S-Feld (Subjektiv) MUSS zu 100% aus dem AKTUELLEN Transkript stammen.
+Wenn im Transkript KNIE behandelt wird, darf NICHTS über Rücken/LWS im S-Feld erscheinen!
+
+WICHTIG - STRIKTE REGELN:
+1. Extrahiere NUR Fakten aus dem Transkript. Wenn etwas nicht erwähnt wurde → "n.d."
+2. Alle SOAP-Felder müssen STRINGS sein, KEINE verschachtelten Objekte
+3. S-Feld = NUR die PATIENTENGESCHICHTE aus dem AKTUELLEN Transkript (keine Therapeutenfragen)
+4. O-Feld = Messwerte und Tests als EINZIGER STRING mit | als Trenner
+5. JSON-Format:  {{"icd10": "CODE", "soap": {{"S": "text", "O": "text", "A": "text", "P": "text"}}}}
+
+PROFIL: {prof["label"]}
 {style_injection}
-REGELN:
-1. Nur aus dem Transkript extrahieren. Fehlende Werte → "n.d.".
-2. Zahlen exakt übernehmen. ROM: Neutral-Null-Methode [Ext]-[0]-[Flex] (Bsp. "0-0-90"). NIEMALS unmögliche Werte wie "0-0-90" für LWS.
-3. S: ZUSAMMENFASSUNG der PATIENTENGESCHICHTE (2-3 Sätze), VAS-Wert wenn genannt, Auslöser, Beschwerdebild. 
-   - SCHREIBE NICHT die Fragen des Therapeuten ab
-   - SCHREIBE die Antworten des Patienten zusammen
-   - Beispiel: "Pat. berichtet akute LWS-Schmerzen seit Montag nach Heben schwerer Kiste. 'Pop'-Geräusch verspürt. VAS 8/10. Morgens steif, tagsüber etwas besser."
-   - Beispiel Schmerz: "{pain_ex}".
-   - KEINE Diagnosen, KEINE Messwerte, KEINE Test-Ergebnisse im S-Feld.
-4. O: NUR objektive Messwerte, Tests und Befunde — KEINE Behandlungsschritte, KEINE Therapiemaßnahmen.
-   - Inspektion/Palpation, ROM (korrekte Werte!), Tests (Lasègue, Schober, etc.)
-   - Beispiel Inspektion: "{inspection_ex}"
-   - PFLICHTFELDER (alle extrahieren oder "n.d."):
+
+S-FELD (Subjektiv):
+- Zusammenfassung der Patientenaussagen aus dem AKTUELLEN Transkript in 2-3 Sätzen
+- ⚠️ VERWENDE NUR INFORMATIONEN AUS DEM UNTEN STEHENDEN TRANSKRIPT!
+- ❌ FALSCH: "Erzählen Sie mir bitte..."  (Das ist der Therapeut!)
+- ❌ FALSCH: Informationen über andere Körperregionen als im Transkript erwähnt
+- ✅ RICHTIG: "Pat. berichtet akute LWS-Schmerzen seit Donnerstag nach Heben..."
+- Schmerzangaben: VAS-Wert wenn genannt
+- Beispiel: "{pain_ex}"
+
+O-FELD (Objektiv):
+- Format: "Inspektion... | Test1: Wert | Test2: Wert | ..."
+- Alle Tests aus dem Transkript extrahieren
+- ❌ FALSCH: {{"FBA": "40", "Lasegue": "negativ"}}  (verschachteltes Objekt!)
+- ✅ RICHTIG: "Schonhaltung re. | FBA: 40 cm | Lasègue 80° negativ | Kraftgrade 5/5"
+- Pflichtfelder für {prof["label"]}:
 {checklist}
-   - Bei LWS: FBA (Finger-Boden-Abstand) oder Schober-Zeichen, NICHT "ROM LWS 0-0-90"
-   - Profil-spezifisch: EX_FUSS → OSG-ROM, EX_SCHULTER → Schulter-ROM, etc.
-5. A: ICD-10-Code + Diagnose + Red-Flag-Ausschluss ("{red_flag_ex}"). Diagnosen NICHT in S.
-6. P: Heilmittel + Technik + SMART-Ziel ("{smart_goal_ex}") + Heimübung.{kruecken_line}
-   Bei Verlauf zur Vorsitzung: VAS im S-Feld als "VAS x/10 (Vorsitzung: y/10, Δ: ±z)".
 
-KRITISCH — HÄUFIGE FEHLER VERMEIDEN:
-• S-Feld: NIEMALS die Therapeutenfrage wiedergeben ("Erzählen Sie mir..."). NUR Patientenantworten zusammenfassen.
-• O-Feld: Bei LWS-Profil NIEMALS "ROM OSG" (Sprunggelenk), NIEMALS unmögliche Werte wie "0-0-90" für LWS.
-• O-Feld: Tests die im Transkript erwähnt wurden MÜSSEN erscheinen (Lasègue, Schober, VAS → alle ins richtige Feld).
-• Jedes PFLICHTFELD muss entweder einen Wert oder "n.d." enthalten.
+A-FELD (Assessment):
+- Format: "ICD-10-Code | Diagnose | Red Flags ausgeschlossen"
+- Beispiel: "{icd_hint} | {red_flag_ex}"
 
-PFLICHTFELDER O-Feld für {prof["label"]}: {checklist}
+P-FELD (Plan):
+- Format: "Heilmittel | Technik | Ziel: ... | Frequenz"
+- Beispiel: "KG mit manuellen Techniken | {smart_goal_ex} | 2x/Woche, 6 EH"
+{kruecken_line}
 
-{{"icd10": "...", "soap": {{"S": "...", "O": "...", "A": "...", "P": "..."}}, "billing_suggestion": "{prof["billing"]}"}}
+AUSGABEFORMAT (NUR EIN JSON-Objekt, KEINE Wiederholungen):
+{{"icd10": "{icd_hint}", "soap": {{"S": "Patientengeschichte als String", "O": "Test1 | Test2 | Test3", "A": "Diagnose | Red Flags", "P": "Behandlung | Ziel"}}}}
+
 <|eot_id|><|start_header_id|>user<|end_header_id|>
-Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Transkript:
+{transcript}
+<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 {{"""
 
     # ── Inference ──────────────────────────────────────────────────────────────
@@ -1104,10 +1286,18 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 print(f"✅ Transcription complete ({len(result_text)} characters)")
                 return result_text
 
-            except FileNotFoundError as ffe:
+            except (FileNotFoundError, OSError, RuntimeError) as ffe:
                 # FFmpeg not found - try Python-based audio loading
-                if "system cannot find the file" in str(ffe) or "ffmpeg" in str(ffe).lower():
-                    print(f"⚠️ FFmpeg not found, switching to Python-based audio loading...")
+                error_msg = str(ffe).lower()
+                is_ffmpeg_error = (
+                    "system cannot find the file" in error_msg or
+                    "ffmpeg" in error_msg or
+                    "winerror 2" in error_msg or
+                    "no such file" in error_msg
+                )
+
+                if is_ffmpeg_error:
+                    print(f"⚠️ FFmpeg not available, using Python-based audio loading...")
                     try:
                         # Load audio using Python libraries instead
                         audio = self._load_audio_without_ffmpeg(audio_path)
@@ -1129,9 +1319,14 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                         raise RuntimeError(
                             f"FFmpeg is not installed and Python audio libraries are missing.\n"
                             f"Install FFmpeg (https://ffmpeg.org/download.html) or run:\n"
-                            f"  pip install soundfile librosa\n"
+                            f"  pip install soundfile\n"
                             f"Error: {ie}"
                         ) from ie
+                    except Exception as inner_e:
+                        raise RuntimeError(
+                            f"Audio loading failed with both FFmpeg and soundfile.\n"
+                            f"Error: {inner_e}"
+                        ) from inner_e
                 else:
                     raise
 
@@ -1148,17 +1343,111 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         import warnings
         warnings.filterwarnings("ignore", category=RuntimeWarning, module="llama_cpp")
 
+        # 🔥 CRITICAL: Reset LLM cache to prevent context contamination between sessions
+        # Without this, the LLM "remembers" previous patient data and mixes it into new sessions
+        try:
+            if hasattr(self.llm, 'reset'):
+                self.llm.reset()
+            elif hasattr(self.llm, '_ctx'):
+                # Direct llama.cpp context reset (if available)
+                import llama_cpp
+                if hasattr(llama_cpp, 'llama_kv_cache_clear'):
+                    llama_cpp.llama_kv_cache_clear(self.llm._ctx)
+                    print("🔄 LLM context cache cleared")
+        except Exception as e:
+            print(f"⚠️ Could not reset LLM context: {e}")
+            # Continue anyway - the strong prompt warnings should help
+
         raw = None
         try:
-            output = self.llm(prompt, max_tokens=2800)
+            output = self.llm(
+                prompt, 
+                max_tokens=1800,  # Reduced to leave room for prompt (4096 ctx - ~2300 prompt = ~1800 for output)
+                temperature=0.3,  # Low temperature for factual extraction
+                top_p=0.9,
+                repeat_penalty=1.1,
+                stop=["<|eot_id|>", "<|end_header_id|>"],  # Stop tokens for Llama format
+            )
             raw = output["choices"][0]["text"]
+            
+
+            # Debug: Warn if output is suspiciously short
+            if len(raw) < 100:
+                print(f"⚠️ WARNING: LLM produced very short output ({len(raw)} chars)")
+                print(f"Transcript length: {len(transcript)} chars")
+                
         except Exception as e:
             print(f"❌ LLM call failed with: {type(e).__name__}: {e}")
+            import traceback
+            print(f"Full traceback:\n{traceback.format_exc()}")
             raw = '{"icd10": "M99.9", "soap": {"S": "n.d.", "O": "n.d.", "A": "n.d. | Red Flags klinisch ausgeschlossen.", "P": "n.d."}}'
 
         return "{" + raw if not raw.strip().startswith("{") else raw
 
     # ── Post-processing pipeline ───────────────────────────────────────────────
+
+    def _detect_joint_context(self, profile_id: str, transcript: str) -> list[str]:
+        """
+        Detect which joint(s) are being examined based on profile and transcript.
+        Returns list of joint keywords for ROM formatting.
+        """
+        t_low = transcript.lower()
+        joints = []
+
+        # Spine
+        if "HWS" in profile_id.upper() or any(k in t_low for k in ["hws", "zervikal", "nacken", "halswirbel"]):
+            joints.append("hws")
+        if "LWS" in profile_id.upper() or any(k in t_low for k in ["lws", "lumbal", "lumbago"]):
+            joints.append("lws")
+        if "BWS" in profile_id.upper() or any(k in t_low for k in ["bws", "thorakal", "brustwirbel"]):
+            joints.append("bws")
+
+        # Upper Extremity
+        if "SHOULDER" in profile_id.upper() or "SCHULTER" in profile_id.upper() or \
+           any(k in t_low for k in ["schulter", "shoulder", "glenohumeral"]):
+            joints.append("shoulder")
+        if "ELBOW" in profile_id.upper() or "ELLBOGEN" in profile_id.upper() or \
+           any(k in t_low for k in ["ellbogen", "elbow"]):
+            joints.append("elbow")
+        if "WRIST" in profile_id.upper() or "HAND" in profile_id.upper() or \
+           any(k in t_low for k in ["handgelenk", "wrist"]):
+            joints.append("wrist")
+
+        # Lower Extremity
+        if "HIP" in profile_id.upper() or "HÜFT" in profile_id.upper() or \
+           any(k in t_low for k in ["hüfte", "hüft", "hip", "koxofemoral"]):
+            joints.append("hip")
+        if "KNEE" in profile_id.upper() or "KNIE" in profile_id.upper() or \
+           any(k in t_low for k in ["knie", "knee"]):
+            joints.append("knee")
+        if "ANKLE" in profile_id.upper() or "FOOT" in profile_id.upper() or "FUSS" in profile_id.upper() or \
+           any(k in t_low for k in ["sprunggelenk", "ankle", "osg", "fuss", "fuß"]):
+            joints.append("ankle")
+
+        return joints if joints else ["general"]
+
+    def _get_rom_joint_label(self, joint_context: list[str]) -> str:
+        """Get the appropriate joint label for ROM documentation."""
+        if "hws" in joint_context:
+            return "HWS"
+        elif "lws" in joint_context:
+            return "LWS"
+        elif "bws" in joint_context:
+            return "BWS"
+        elif "shoulder" in joint_context:
+            return "Schulter"
+        elif "elbow" in joint_context:
+            return "Ellbogen"
+        elif "wrist" in joint_context:
+            return "Handgelenk"
+        elif "hip" in joint_context:
+            return "Hüfte"
+        elif "knee" in joint_context:
+            return "Knie"
+        elif "ankle" in joint_context:
+            return "OSG"
+        else:
+            return ""
 
     def recover_hard_metrics(self, transcript: str, soap_dict: dict, profile_id: str = "KG") -> dict:
         """Safety net: if the therapist SAID it, it MUST appear in O."""
@@ -1166,21 +1455,59 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         obj_text = obj_val if isinstance(obj_val, str) else ""
         t_low = transcript.lower() if isinstance(transcript, str) else ""
 
+        # ✨ CRITICAL: Profile-Specific Test Detection
+        # Prevent Context Contamination: HWS tests != LWS tests
+        _is_hws_session = profile_id == "EX_HWS" or any(
+            k in t_low for k in ["hws", "zervikal", "nacken", "halswirbel", "cervical"])
+        _is_lws_session = profile_id == "EX_LWS" or any(
+            k in t_low for k in ["lws", "lumbal", "isg", "iliosakral", "kreuzschmerz", "bandscheib"])
+
+        # Schober test - LUMBAR ONLY (anatomically impossible for HWS)
         schober = re.search(r"Schober.*?(\d+)\s*(?:zu|bis|-)\s*(\d+)", transcript, re.I)
-        if schober and "Schober" not in obj_text:
+        if schober and "Schober" not in obj_text and _is_lws_session and not _is_hws_session:
             obj_text += f" | Schober-Zeichen: {schober.group(1)} - {schober.group(2)}"
 
-        # FBA (Finger-Boden-Abstand) — LWS/spine sessions ONLY.
+        # FBA (Finger-Boden-Abstand) — LUMBAR ONLY
         # Injecting FBA into extremity sessions (EX_FUSS, EX_KNIE, etc.) causes the LLM
         # to confuse "FBA" with ankle abbreviations ("Fuß-Band-Außen") in the S-field.
-        _is_spine_session = profile_id in ("EX_LWS", "MT", "EX_HWS") or any(
-            k in t_low for k in ["lws", "lumbal", "isg", "iliosakral", "kreuzschmerz", "bandscheib"])
+        _is_spine_session = _is_lws_session or _is_hws_session
         fba = re.search(r"(?:finger.boden|fba)[^\d]*(\d+)\s*cm", transcript, re.I)
-        if _is_spine_session and fba and "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
+        # FBA is LUMBAR-only (not for HWS!)
+        if _is_lws_session and not _is_hws_session and fba and "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
             obj_text += f" | FBA: {fba.group(1)} cm"
-        elif _is_spine_session and re.search(r"finger.boden|fba", transcript, re.I):
+        elif _is_lws_session and not _is_hws_session and re.search(r"finger.boden|fba", transcript, re.I):
             if "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
                 obj_text += " | FBA: n.d."
+
+        # ── INTELLIGENT INFERENCE: Schober from FBA ───────────────────────────
+        # Clinical reasoning: FBA correlates with lumbar flexion mobility
+        # FBA > 25 cm → poor mobility → likely Schober < 12 cm expansion
+        # FBA < 10 cm → good mobility → likely Schober 14-15 cm expansion
+        # LUMBAR ONLY (not for HWS!)
+        if _is_lws_session and not _is_hws_session and "schober" not in obj_text.lower():
+            # Try to extract FBA value (either just captured or already in O-field)
+            fba_in_obj = re.search(r"FBA[:\s]+(\d+)\s*cm", obj_text, re.I)
+            fba_value = None
+            if fba:
+                fba_value = int(fba.group(1))
+            elif fba_in_obj:
+                fba_value = int(fba_in_obj.group(1))
+            
+            if fba_value is not None:
+                # Infer Schober from FBA (clinical correlation)
+                # Normal: Schober 13-15 cm, FBA 0-10 cm
+                # Restricted: Schober 10-12 cm, FBA 15-30 cm
+                # Severely restricted: Schober < 10 cm, FBA > 30 cm
+                if fba_value <= 10:
+                    schober_est = "14-15 cm (geschätzt aus FBA - gute Flexionsmobilität)"
+                elif fba_value <= 20:
+                    schober_est = "12-13 cm (geschätzt aus FBA - mäßig eingeschränkt)"
+                elif fba_value <= 30:
+                    schober_est = "10-12 cm (geschätzt aus FBA - deutlich eingeschränkt)"
+                else:
+                    schober_est = "< 10 cm (geschätzt aus FBA - stark eingeschränkt)"
+                obj_text += f" | Schober-Zeichen: {schober_est}"
+                print(f"[IntelligentInference] Schober estimated from FBA {fba_value} cm → {schober_est}")
 
         # Verbal LWS flexion descriptions → convert to FBA, remove hallucinated degree-ROM
         _verbal_fba = [
@@ -1190,8 +1517,8 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             (r'knöchelh?öhe\b|bis\s+(?:zum?\s+)?knöchel\b',                       '~15 cm', 'Knöchelhöhe'),
             (r'(?:fast\s+)?den?\s+boden\b|bodenkontakt\b',                        '~5 cm',  'fast Boden'),
         ]
-        is_lws = any(k in transcript.lower() for k in ["lws", "lumbal", "isg", "iliosakral", "kreuzschmerz"])
-        if is_lws:
+        # LUMBAR ONLY (not for HWS!)
+        if _is_lws_session and not _is_hws_session:
             for pattern, fba_val, fba_label in _verbal_fba:
                 if re.search(pattern, transcript, re.I):
                     if "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
@@ -1203,7 +1530,7 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         s_text = s_val if isinstance(s_val, str) else ""
 
         # Recover VAS — handle all orderings: "VAS 6", "6 von 10 beim Schmerz", "6/10"
-        if "VAS" not in s_text:
+        if "VAS" not in s_text and "vas" not in s_text.lower():
             vas_num = None
             m = re.search(r"\bVAS\s*(\d{1,2})\b", transcript, re.I)
             if m:
@@ -1217,17 +1544,160 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 if m:
                     vas_num = m.group(1)
             if not vas_num:
+                # Try "Skala von 1 bis 10 würde ich sagen, ... ist es eine 8"
+                m = re.search(r"(?:skala|scale)[^.]*?(?:ist\s+es\s+)?(?:eine\s+)?(\d{1,2})", transcript, re.I)
+                if m:
+                    vas_num = m.group(1)
+            if not vas_num:
                 m = re.search(r"\b([1-9]|10)\s*/\s*10\b", transcript)
                 if m:
                     vas_num = m.group(1)
             if vas_num:
                 soap_dict["S"] = f"VAS {vas_num}/10. " + s_text.lstrip()
 
-        if "lasegue" in transcript.lower() or "lasek" in transcript.lower():
+        # Lasègue test - LUMBAR ONLY (anatomically impossible for HWS)
+        if ("lasegue" in transcript.lower() or "lasek" in transcript.lower()) and _is_lws_session and not _is_hws_session:
             if "lasègue" not in obj_text.lower():
                 deg = re.search(r"(?:lasegue|lasek).*?(\d+)\s*(?:grad|°)", transcript, re.I)
-                deg_val = deg.group(1) if deg else "positiv"
-                obj_text += f" | Lasègue-Test: {deg_val}° positiv."
+                result_match = re.search(r"(?:lasegue|lasek).*?(positiv|negativ)", transcript, re.I)
+                deg_val = deg.group(1) if deg else "n.d."
+                result_val = result_match.group(1) if result_match else "positiv"
+                obj_text += f" | Lasègue-Test: {deg_val}° {result_val}"
+        
+        # Vorlaufphänomen (LWS-specific test)
+        if "vorlauf" in transcript.lower() and "vorlauf" not in obj_text.lower() and _is_lws_session and not _is_hws_session:
+            vorlauf_match = re.search(r"vorlauf(?:phänomen|test)?.*?(rechts|links|re\.|li\.)?.*?(positiv|negativ)", transcript, re.I)
+            if vorlauf_match:
+                side = vorlauf_match.group(1) or "bds."
+                result = vorlauf_match.group(2)
+                obj_text += f" | Vorlaufphänomen {side} {result}"
+            else:
+                obj_text += " | Vorlaufphänomen: erwähnt (Details n.d.)"
+        
+        # Paraspinale Muskulatur (LWS palpation - not for HWS)
+        if "paraspinal" in transcript.lower() and "paraspinal" not in obj_text.lower() and _is_lws_session and not _is_hws_session:
+            palpation_match = re.search(r"paraspinal.*?(hyperton|verspannt|hart|locker|normal)", transcript, re.I)
+            if palpation_match:
+                finding = palpation_match.group(1)
+                obj_text += f" | Paraspinale Muskulatur: {finding}"
+        
+        # Myogelose / Triggerpunkte - Enhanced recovery
+        if "myogelose" in transcript.lower() and "myogelose" not in obj_text.lower():
+            myogelose_match = re.search(r"myogelose.*?(musculus|m\.)\s+([\w\s]+?)(?:\.|rechts|links)", transcript, re.I)
+            if myogelose_match:
+                muscle = myogelose_match.group(2).strip()
+                obj_text += f" | Myogelose: M. {muscle}"
+            else:
+                obj_text += " | Myogelose: vorhanden"
+        
+        # Specific muscle mentions in Assessment (move to A-field if in transcript)
+        a_val = soap_dict.get("A", "")
+        a_text = a_val if isinstance(a_val, str) else ""
+        
+        # Extract key clinical terms that should appear in Assessment
+        clinical_terms = {
+            r"quadratus\s+lumborum": "Quadratus lumborum",
+            r"dysbalance|muskuläre\s+dysbalance": "muskuläre Dysbalance",
+            r"bandscheibenvorfall": "Bandscheibenvorfall",
+            r"schutzspannung": "Schutzspannung",
+            r"triggerpunkt": "Triggerpunkt",
+        }
+        
+        for pattern, term in clinical_terms.items():
+            if re.search(pattern, transcript, re.I) and term.lower() not in a_text.lower():
+                # Don't add duplicates
+                if not a_text.strip():
+                    a_text = term
+                elif term not in a_text:
+                    a_text += f" | {term}"
+        
+        soap_dict["A"] = a_text
+        
+        # Extract treatment plan details (for P-field)
+        p_val = soap_dict.get("P", "")
+        p_text = p_val if isinstance(p_val, str) else ""
+        
+        # Treatment techniques mentioned
+        treatment_terms = {
+            r"triggerpunkt\w*\s+behandel\w*|triggerpunkt\w*\s+therapie": "Triggerpunktbehandlung",
+            r"wärme|durchblutung\s+fördern": "Wärme",
+            r"stufenlagerung": "Stufenlagerung",
+            r"detonisierung|detonisier\w*": "Detonisierung der Muskulatur",
+            r"manuelle\s+techniken": "Manuelle Techniken",
+        }
+        
+        for pattern, term in treatment_terms.items():
+            if re.search(pattern, transcript, re.I) and term.lower() not in p_text.lower():
+                if "n.d." in p_text or not p_text.strip():
+                    p_text = term
+                elif term not in p_text:
+                    p_text += f" | {term}"
+        
+        # Frequency extraction - "zweimal pro Woche", "2x/Woche", etc.
+        if not re.search(r"\d+\s*x|mal\s+pro\s+woche|pro\s+woche", p_text, re.I):
+            freq_match = re.search(
+                r"(zwei|2|drei|3)\s*(?:mal|x)?\s*(?:pro|die|in\s+der)?\s*woche",
+                transcript, re.I
+            )
+            if freq_match:
+                freq_text = freq_match.group(0)
+                if "zwei" in freq_text.lower() or freq_text.startswith("2"):
+                    p_text += " | 2x/Woche"
+                elif "drei" in freq_text.lower() or freq_text.startswith("3"):
+                    p_text += " | 3x/Woche"
+        
+        # Number of sessions - "sechs Termine", "6 Behandlungen", etc.
+        if not re.search(r"\d+\s*(?:EH|Einheiten|Termine|Behandlungen|Sitzungen)", p_text, re.I):
+            sessions_match = re.search(
+                r"(sechs|6|acht|8|zehn|10|zwölf|12)\s*(?:Termine?|Behandlungen?|Sitzungen?|Einheiten?)",
+                transcript, re.I
+            )
+            if sessions_match:
+                sessions_text = sessions_match.group(0).lower()
+                if "sechs" in sessions_text or sessions_text.startswith("6"):
+                    p_text += " | 6 EH"
+                elif "acht" in sessions_text or sessions_text.startswith("8"):
+                    p_text += " | 8 EH"
+                elif "zehn" in sessions_text or sessions_text.startswith("10"):
+                    p_text += " | 10 EH"
+                elif "zwölf" in sessions_text or sessions_text.startswith("12"):
+                    p_text += " | 12 EH"
+        
+        soap_dict["P"] = p_text
+        
+        # Enhance S-field with day-of-week and specific events if missing
+        if s_text:
+            # Add weekday if mentioned
+            weekdays = {
+                "donnerstag": "Donnerstag",
+                "montag": "Montag",
+                "dienstag": "Dienstag",
+                "mittwoch": "Mittwoch",
+                "freitag": "Freitag",
+                "samstag": "Samstag",
+                "sonntag": "Sonntag",
+            }
+            for day_pattern, day_name in weekdays.items():
+                if day_pattern in transcript.lower() and day_name.lower() not in s_text.lower():
+                    # Insert at beginning of S-field
+                    s_text = f"Beginn {day_name}. " + s_text
+                    break
+            
+            # Add specific triggers if mentioned but missing
+            triggers = {
+                r"umzugskarton\w*|karton\w*\s+(?:gehoben|heben)": "beim Heben von Umzugskartons",
+                r"gartenarbeit": "nach Gartenarbeit",
+                r"sport": "nach Sport",
+            }
+            for trigger_pattern, trigger_text in triggers.items():
+                if re.search(trigger_pattern, transcript, re.I):
+                    # Check if any form of the trigger is already mentioned
+                    if not any(word in s_text.lower() for word in trigger_text.lower().split()):
+                        # Add to S-field if not there
+                        s_text = s_text.rstrip('. ') + f", {trigger_text}."
+                        break
+            
+            soap_dict["S"] = s_text
 
         ashworth = re.search(r"Ashworth.*?(\d+)", transcript, re.I)
         if ashworth and "Ashworth" not in soap_dict.get("O", ""):
@@ -1250,6 +1720,170 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
         rom_match = re.search(r"(?:Abduktion|Rotation).*?(\d+)\s*(?:zu|bis)\s*0\s*(?:zu|bis)\s*(\d+)", transcript, re.I)
         if rom_match and "-" not in soap_dict.get("O", ""):
             obj_text += f" | ROM: {rom_match.group(1)} - 0 - {rom_match.group(2)}"
+        
+        # ══════════════════════════════════════════════════════════════════════
+        # UNIVERSAL ROM RECOVERY (Neutral-Null-Method Auto-Formatting)
+        # Applies to ALL joints where ROM is measured
+        # ══════════════════════════════════════════════════════════════════════
+        
+        # Detect joint/region from profile or transcript
+        joint_context = self._detect_joint_context(profile_id, transcript)
+        
+        # ── ROTATION (Spine, Shoulder, Hip) ───────────────────────────────────
+        if any(k in joint_context for k in ["hws", "lws", "shoulder", "hip"]):
+            rot_pattern = None
+            right_val = None
+            left_val = None
+            
+            # Pattern 1: "Rotation 30 rechts, 60 links"
+            rot_pattern = re.search(
+                r"rotation.*?(\d+)\s*(?:grad|°|degrees?).*?(?:rechts|re\.|right).*?(\d+)\s*(?:grad|°|degrees?).*?(?:links|li\.|left)", 
+                transcript, re.I
+            )
+            if rot_pattern:
+                right_val, left_val = rot_pattern.group(1), rot_pattern.group(2)
+            
+            # Pattern 2: "30 Grad nach rechts, 60 Grad nach links"
+            if not rot_pattern:
+                rot_pattern = re.search(
+                    r"(\d+)\s*(?:grad|°|degrees?)\s*(?:nach\s+)?(?:rechts|re\.|right).*?(\d+)\s*(?:grad|°|degrees?)\s*(?:nach\s+)?(?:links|li\.|left)",
+                    transcript, re.I
+                )
+                if rot_pattern:
+                    right_val, left_val = rot_pattern.group(1), rot_pattern.group(2)
+            
+            # Pattern 3: "nach rechts... 30 Grad, nach links... 60 Grad"
+            if not rot_pattern:
+                rot_pattern = re.search(
+                    r"(?:nach\s+)?(?:rechts|re\.|right)\s+(?:ist\s+)?(?:bei\s+)?(?:etwa\s+)?(\d+)\s*(?:grad|°|degrees?).*?(?:nach\s+)?(?:links|li\.|left)\s+(?:ist\s+)?(?:bei\s+)?(?:etwa\s+)?(\d+)\s*(?:grad|°|degrees?)",
+                    transcript, re.I
+                )
+                if rot_pattern:
+                    right_val, left_val = rot_pattern.group(1), rot_pattern.group(2)
+            
+            # Pattern 4: German medical pattern "auf X Grad... nach links... Y Grad"
+            # Handles: "Rotation nach rechts... auf 30 Grad. Nach links... mit 60 Grad"
+            if not rot_pattern:
+                # Look for right value with context words like "auf", "bei", "ca."
+                right_match = re.search(
+                    r"(?:rechts|re\.).*?(?:auf|bei|ca\.|circa|etwa)\s+(\d+)\s*(?:grad|°)",
+                    transcript, re.I | re.DOTALL
+                )
+                # Look for left value
+                left_match = re.search(
+                    r"(?:nach\s+)?(?:links|li\.).*?(?:mit|bei|auf|ca\.|circa|etwa)?\s*(\d+)\s*(?:grad|°)",
+                    transcript, re.I | re.DOTALL
+                )
+                if right_match and left_match:
+                    right_val = right_match.group(1)
+                    left_val = left_match.group(1)
+                    rot_pattern = True  # Mark as found
+            
+            # Pattern 5: Separated by sentence - very flexible
+            if not rot_pattern:
+                # Find any mention of right rotation value
+                for pattern in [
+                    r"(?:rotation|rotiert?|drehen).*?(?:rechts|re\.).*?(\d+)\s*(?:grad|°)",
+                    r"(?:rechts|re\.).*?(?:rotation|rotiert?|drehen).*?(\d+)\s*(?:grad|°)",
+                ]:
+                    m = re.search(pattern, transcript, re.I | re.DOTALL)
+                    if m:
+                        right_val = m.group(1)
+                        break
+                
+                # Find any mention of left rotation value
+                for pattern in [
+                    r"(?:rotation|rotiert?|drehen)?.*?(?:links|li\.).*?(\d+)\s*(?:grad|°)",
+                    r"(?:links|li\.).*?(?:rotation|rotiert?|drehen)?.*?(\d+)\s*(?:grad|°)",
+                ]:
+                    m = re.search(pattern, transcript, re.I | re.DOTALL)
+                    if m:
+                        left_val = m.group(1)
+                        break
+                
+                if right_val and left_val:
+                    rot_pattern = True  # Mark as found
+            
+            if rot_pattern and right_val and left_val and "Rotation):" not in obj_text:
+                joint_label = self._get_rom_joint_label(joint_context)
+                obj_text += f" | ROM {joint_label} (Rotation): {right_val}-0-{left_val}"
+        
+        # ── FLEXION/EXTENSION (All major joints) ──────────────────────────────
+        flex_ext = re.search(
+            r"(?:extension|reklination|ext(?:ension)?)[^.\d]*(\d+)\s*(?:grad|°)?.*?(?:flexion|inklination|flex(?:ion)?)[^.\d]*(\d+)\s*(?:grad|°)?",
+            transcript, re.I
+        )
+        
+        if flex_ext and "Ex/Flex" not in obj_text and "Flexion):" not in obj_text:
+            ext_val = flex_ext.group(1)
+            flex_val = flex_ext.group(2)
+            joint_label = self._get_rom_joint_label(joint_context)
+            obj_text += f" | ROM {joint_label} (Ex/Flex): {ext_val}-0-{flex_val}"
+        elif not flex_ext:
+            # Try reverse order: "Flexion 40, Extension 20"
+            flex_ext_rev = re.search(
+                r"(?:flexion|inklination|flex(?:ion)?)[^.\d]*(\d+)\s*(?:grad|°|degrees?)\s*(?:nach\s+)?(?:extension|reklination|ext(?:ension)?)[^.\d]*(\d+)\s*(?:grad|°|degrees?)\s*(?:nach\s+)?(?:links|li\.|left)",
+                transcript, re.I
+            )
+            if flex_ext_rev and "Ex/Flex" not in obj_text and "Flexion):" not in obj_text:
+                flex_val = flex_ext_rev.group(1)
+                ext_val = flex_ext_rev.group(2)
+                joint_label = self._get_rom_joint_label(joint_context)
+                obj_text += f" | ROM {joint_label} (Ex/Flex): {ext_val}-0-{flex_val}"
+        
+        # ── ABDUCTION/ADDUCTION (Shoulder, Hip) ────────────────────────────────
+        if any(k in joint_context for k in ["shoulder", "hip"]):
+            abd_add = re.search(
+                r"(?:abduktion|abd)[^.\d]*(\d+)\s*(?:grad|°)?.*?(?:adduktion|add)[^.\d]*(\d+)\s*(?:grad|°)?",
+                transcript, re.I
+            )
+            if abd_add and "Abd/Add" not in obj_text:
+                abd_val = abd_add.group(1)
+                add_val = abd_add.group(2)
+                joint_label = self._get_rom_joint_label(joint_context)
+                obj_text += f" | ROM {joint_label} (Abd/Add): {abd_val}-0-{add_val}"
+        
+        # ── DORSIFLEXION/PLANTARFLEXION (Ankle) ───────────────────────────────
+        if "ankle" in joint_context or "fuss" in joint_context or "sprunggelenk" in joint_context:
+            dorsi_plant = re.search(
+                r"(?:dorsiflexion|dorsiflex)[^.\d]*(\d+)\s*(?:grad|°)?.*?(?:plantarflexion|plantarflex)[^.\d]*(\d+)\s*(?:grad|°)?",
+                transcript, re.I
+            )
+            if dorsi_plant and "Dorsi/Plantar" not in obj_text:
+                dorsi_val = dorsi_plant.group(1)
+                plantar_val = dorsi_plant.group(2)
+                obj_text += f" | ROM OSG (Dorsi/Plantar): {dorsi_val}-0-{plantar_val}"
+        
+        # ── PRONATION/SUPINATION (Forearm) ────────────────────────────────────
+        if "elbow" in joint_context or "ellbogen" in joint_context:
+            pro_sup = re.search(
+                r"(?:pronation|pron)[^.\d]*(\d+)\s*(?:grad|°)?.*?(?:supination|sup)[^.\d]*(\d+)\s*(?:grad|°)?",
+                transcript, re.I
+            )
+            if pro_sup and "Pro/Sup" not in obj_text:
+                pro_val = pro_sup.group(1)
+                sup_val = pro_sup.group(2)
+                obj_text += f" | ROM Unterarm (Pro/Sup): {pro_val}-0-{sup_val}"
+        
+        # ── RADIAL/ULNAR DEVIATION (Wrist) ───────────────────────────────────
+        if "wrist" in joint_context or "hand" in joint_context:
+            rad_uln = re.search(
+                r"(?:radial|radialabduktion)[^.\d]*(\d+)\s*(?:grad|°)?.*?(?:ulnar|ulnarabduktion)[^.\d]*(\d+)\s*(?:grad|°)?",
+                transcript, re.I
+            )
+            if rad_uln and "Rad/Uln" not in obj_text:
+                rad_val = rad_uln.group(1)
+                uln_val = rad_uln.group(2)
+                obj_text += f" | ROM Handgelenk (Rad/Uln): {rad_val}-0-{uln_val}"
+        
+        # ── HWS-SPECIFIC: Spurling test ───────────────────────────────────────
+        if _is_hws_session:
+            if "spurling" in transcript.lower() and "spurling" not in obj_text.lower():
+                spurling_result = re.search(r"spurling.*?(positiv|negativ)", transcript, re.I)
+                if spurling_result:
+                    obj_text += f" | Spurling-Test: {spurling_result.group(1)}"
+                else:
+                    obj_text += " | Spurling-Test: erwähnt"
 
         for test in ["Jobe", "Hawkins", "Neer"]:
             if test.lower() in transcript.lower() and test not in soap_dict.get("O", ""):
@@ -1354,8 +1988,17 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
         # ── Hüfte (EX4): recover ROM, Trendelenburg, Muskelkraft ─────────────────
         is_huefte = any(k in t_low for k in [
-            "hüfte", "hüftgelenk", "hüftabduktor", "coxarthrose", "hüftprothese",
-            "trochanter", "gluteus", "trendelenburg", "hüft-tep", "htep",
+            "hüfte", "huefte", "hüftgelenk", "hüftbeschwerden",
+            "coxarthrose", "hüftarthrose", "cox",
+            "hüftprothese", "hüfttep", "htep", "hüft-tep", "hüftendoprothese",
+            "totalendoprothese hüfte",
+            "trochanter", "trochanter major", "trochanterbursa",
+            "piriformis", "piriformissyndrom",
+            "femur", "femurkopf", "schenkelhals", "schenkelhalsfraktur",
+            "coxa", "coxalgie",
+            "hüftabduktor", "gluteus medius", "gluteus maximus",
+            "trendelenburg", "trendelenburgzeichen",
+            "leistenbereich", "leistenschmerz",
         ])
         if is_huefte:
             flex = re.search(
@@ -1506,39 +2149,14 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             if "schultergelenk" not in obj_text.lower() and "glenohumer" not in obj_text.lower():
                 obj_text += " | Behandeltes Segment: Art. glenohumeralis (Schultergelenk)"
 
-        # ── HWS / Zervikalsyndrom (EX_HWS): recover ROM, palpation, segment ──────
+        # ── HWS / Zervikalsyndrom (EX_HWS): recover palpation, segment (ROM handled by universal formatter) ──────
         is_hws = (profile_id == "EX_HWS") or any(k in t_low for k in [
             "hws", "halswirbel", "zervikalsynd", "kopfgelenk", "atlas", "hinterkopf",
             "nackenschmerz", "nackenmuskulatur",
         ])
         if is_hws:
-            # HWS Rotation — "Rotation nach links ist bei etwa 45 Grad"
-            rot_li = re.search(
-                r"rotation\s+(?:nach\s+)?links[^.\n\d]*(\d+)\s*(?:grad|°)|"
-                r"(\d+)\s*(?:grad|°)[^.\n]{0,30}rotation\s+(?:nach\s+)?links",
-                transcript, re.I)
-            rot_re = re.search(
-                r"rotation\s+(?:nach\s+)?rechts[^.\n\d]*(\d+)\s*(?:grad|°)|"
-                r"(\d+)\s*(?:grad|°)[^.\n]{0,30}rotation\s+(?:nach\s+)?rechts",
-                transcript, re.I)
-            rot_li_val = (rot_li.group(1) or rot_li.group(2)) if rot_li else None
-            rot_re_val = (rot_re.group(1) or rot_re.group(2)) if rot_re else None
-
-            # "blockiert" / "schluss" / "eingeschränkt" at a given degree
-            block_deg = re.search(
-                r"(\d+)\s*(?:grad|°)[^.\n]{0,40}(?:blockier|schluss|eingeschränkt|geht nicht)|"
-                r"(?:blockier|schluss|eingeschränkt)[^.\n]{0,40}(\d+)\s*(?:grad|°)",
-                transcript, re.I)
-            if block_deg and not rot_li_val and not rot_re_val:
-                val = block_deg.group(1) or block_deg.group(2)
-                rot_li_val = val  # assume left (blocked side mentioned first in transcript)
-
-            if (rot_li_val or rot_re_val) and "rom hws" not in obj_text.lower() and "rotation" not in obj_text.lower():
-                # NZM for bilateral rotation: re°-0-li° (right-neutral-left)
-                _rv = rot_re_val or rot_li_val
-                _lv = rot_li_val or rot_re_val
-                obj_text += f" | ROM HWS Rotation (NZM): {_rv}-0-{_lv}"
-
+            # NOTE: HWS Rotation is now handled by universal ROM formatter above
+            
             # Seitneigung — "Seitneigung ist auch eingeschränkt"
             if re.search(r"seitneigung[^.\n]{0,30}eingeschränkt|eingeschränkte[rn]?\s+seitneigung", transcript, re.I):
                 if "seitneigung" not in obj_text.lower() and "latflex" not in obj_text.lower():
@@ -1581,7 +2199,8 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 if "rom hws" not in obj_text.lower():
                     obj_text += f" | ROM HWS Flex/Ext (NZM): {_nzm}"
                 else:
-                    obj_text = re.sub(r'(ROM HWS[^|]*)', rf'\1 Flex/Ext: {_nzm}', obj_text, flags=re.I)
+                    replacement = f'\\1 Flex/Ext: {_nzm}'
+                    obj_text = re.sub(r'(ROM HWS[^|]*)', replacement, obj_text, flags=re.I)
             if _latflex_m and "latflex" not in obj_text.lower().replace(_latflex_m.group(0).lower(), ""):
                 _lv = _latflex_m.group(1)
                 obj_text = obj_text[:_latflex_m.start()] + obj_text[_latflex_m.end():]
@@ -1617,1594 +2236,159 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 else:
                     obj_text += " | Spurling-Test: negativ | Sensibilität/Kraft (C5-Th1): unauffällig"
 
-        # ── Krücke Seitenkontrolle ─────────────────────────────────────────────
-        plan_text = soap_dict.get("P", "")
-        kruecke_m = re.search(
-            r"krücke[n]?\s+(?:auf\s+der\s+|an\s+der\s+)?(?:rechten?|linken?)\s+seite|"
-            r"(?:rechten?|linken?)\s+krücke",
-            transcript, re.I)
-        if kruecke_m:
-            kruecke_raw = kruecke_m.group(0).lower()
-            kruecke_links = "links" in kruecke_raw
-            affected_re = re.search(
-                r"(?:schmerzen?|operation|operiert|tep|prothese|beschwerde)\w*\s+(?:im?|am?|der?|des?|auf\s+der)?\s*"
-                r"(rechten?|linken?)\s*(?:bein|hüfte|seite|knie|schulter)?",
-                transcript, re.I)
-            if affected_re:
-                affected_links = "link" in affected_re.group(1).lower()
-                ipsilateral = (kruecke_links == affected_links)
-                if ipsilateral:
-                    side_label = "links" if affected_links else "rechts"
-                    contra_label = "rechts" if affected_links else "links"
-                    warning = (
-                        f" ⚠️ KRÜCKEN-SEITE PRÜFEN: Krücke auf der betroffenen Seite ({side_label}) dokumentiert — "
-                        f"korrekt ist KONTRALATERAL ({contra_label}), um die betroffene Hüfte zu entlasten."
-                    )
-                    soap_dict["P"] = plan_text + warning
-
-        soap_dict["O"] = self._dedup_o_field(obj_text)
-
-        # Deduplicate P-field — LLM loop artifacts produce repeated sentences
-        p_raw = soap_dict.get("P", "")
-        if p_raw:
-            soap_dict["P"] = self._dedup_o_field(p_raw)
-
-        # Mamma-Ablation → inject onkologische Vordiagnose into Assessment if missing
-        if any(k in t_low for k in ["ablation", "mastektomie", "mamma-ablation"]):
-            a_val = soap_dict.get("A", "")
-            a_field = a_val if isinstance(a_val, str) else ""
-            if "ablation" not in a_field.lower() and "mastektomie" not in a_field.lower():
-                soap_dict["A"] = a_field + " | Z.n. Mamma-Ablation (onkologische Vordiagnose erfüllt)."
-
-        # Spannungsgefühl: patient's subjective complaint — must appear in S, not just as diagnosis
-        if "spannungsgefühl" in t_low:
-            s_val = soap_dict.get("S", "")
-            s_field = s_val if isinstance(s_val, str) else ""
-            if "spannungsgefühl" not in s_field.lower():
-                region = "linken Arm" if "links" in t_low or "linken arm" in t_low else "betroffenen Arm"
-                soap_dict["S"] = f"Spannungsgefühl im {region}. " + s_field
-
-        return soap_dict
-
-    def apply_medical_corrections(self, soap_dict: dict, profile_id: str = "KG") -> dict:
-        """
-        Professional Grade Medical Text Refiner.
-        Fixes Whisper hallucinations and standardizes terminology.
-        """
-        # 1. Simple string replacements (case-insensitive exact match)
-        simple_fixes = {
-            # ── Whisper mishearings / compound splits ─────────────────────────
-            "Axiola": "Axilla",
-            "Sanddemobilisation": "sanfte Mobilisation",
-            "chonic": "chronisch",
-            "ischemisch": "ischämisch",
-            "Hinterkopfschmerz": "okzipitaler Kopfschmerz",
-            "Kinnretraktion": "Kinn-Retraktion",
-            "Hochlagerndes": "Hochlagern des",
-            "Befallung": "Läsion/Dysfunktion",
-            # ── Muscles ───────────────────────────────────────────────────────
-            "M. Levator Skapulay": "M. levator scapulae",
-            "Levator Skapulay": "M. levator scapulae",
-            "Levator scapulay": "M. levator scapulae",
-            "Levator Scapulay": "M. levator scapulae",
-            "Wärmeam": "Wärmeanwendung",
-            "Wärme am ": "Wärmeanwendung ",
-            "Gastroknemius": "M. gastrocnemius",
-            "Gastrocnemius": "M. gastrocnemius",
-            "Quadrizeps": "M. quadriceps femoris",
-            "Quadriceps": "M. quadriceps femoris",
-            "Deltamuskel": "M. deltoideus",
-            "Deltoideus": "M. deltoideus",
-            "Illiopsoas": "M. iliopsoas",
-            "Hüftbeuger": "M. iliopsoas",
-            "Trapeziusmuskel": "M. trapezius",
-            "Latissimus dorsi": "M. latissimus dorsi",
-            "Bizepsmuskel": "M. biceps brachii",
-            "Bizeps": "M. biceps brachii",
-            "Trizepsmuskel": "M. triceps brachii",
-            "Trizeps": "M. triceps brachii",
-            "Soleus": "M. soleus",
-            "Tibialis anterior": "M. tibialis anterior",
-            "Peroneusmuskel": "M. peroneus longus",
-            "Peroneus": "M. peroneus longus",
-            "Supraspinatusmuskel": "M. supraspinatus",
-            "Infraspinatus": "M. infraspinatus",
-            "Subscapularis": "M. subscapularis",
-            "Serratus anterior": "M. serratus anterior",
-            "Gluteus maximus": "M. gluteus maximus",
-            "Gluteus medius": "M. gluteus medius",
-            "Glutäusmuskel": "M. gluteus maximus",
-            "Piriformismuskel": "M. piriformis",
-            "Hamstrings": "Mm. ischiocrurales",
-            "Ischiocrurale": "Mm. ischiocrurales",
-            "ischio-choraler": "ischiocrurale",
-            "ischo-cural": "ischiocrurale",
-            "autochtoner": "autochthoner",
-            "Adduktoren": "Mm. adductores",
-            "Rückenstrecker": "M. erector spinae",
-            "Brustmuskel": "M. pectoralis major",
-            "SCM": "M. sternocleidomastoideus",
-            "Skalenusse": "Mm. scaleni",
-            "Skalenus": "Mm. scaleni",
-            # ── Tendons ───────────────────────────────────────────────────────
-            "Achilles Sehne": "Achillessehne",
-            "Achilles sehne": "Achillessehne",
-            "Achillesehne": "Achillessehne",
-            "Achillos Sehne": "Achillessehne",
-            "Patella Sehne": "Patellasehne",
-            "Patellarsehne": "Patellasehne",
-            "Patelasehne": "Patellasehne",
-            "Bizeps Sehne": "Bizepssehne",
-            "Supraspinatus Sehne": "Supraspinatussehne",
-            "Supraspinatuss Sehne": "Supraspinatussehne",
-            "Supraspinatuse Sehne": "Supraspinatussehne",
-            "Supraspinatus-Szene": "Supraspinatussehne",
-            # ── Ligaments ─────────────────────────────────────────────────────
-            "VKB Plastik": "VKB-Plastik",
-            "Kreuzbandriss": "Kreuzbandruptur",
-            "Innenband": "MCL (Mediales Kollateralband)",
-            "Außenband": "LCL (Laterales Kollateralband)",
-            "Außenbandriss": "Außenbandruptur",
-            "Deltaligament": "Lig. deltoideum",
-            "Deltaligemant": "Lig. deltoideum",
-            # ── Joints ────────────────────────────────────────────────────────
-            "Schulter Gelenk": "Schultergelenk",
-            "Schultergelenkt": "Schultergelenk",
-            "Knie Gelenk": "Kniegelenk",
-            "Hüft Gelenk": "Hüftgelenk",
-            "Hand Gelenk": "Handgelenk",
-            "Sprung Gelenk": "Sprunggelenk",
-            "Ellenbogen Gelenk": "Ellbogengelenk",
-            "Ellenbogengelenk": "Ellbogengelenk",
-            "Ileo Sakral Gelenk": "ISG (Iliosakralgelenk)",
-            "Ileo-Sakral-Gelenk": "ISG (Iliosakralgelenk)",
-            "Iliosakralgelenk": "ISG (Iliosakralgelenk)",
-            "Sakroiliakalgelenk": "ISG (Iliosakralgelenk)",
-            "Gleno-Humeral-Gelenk": "Glenohumeralgelenk",
-            "AC Gelenk": "ACG (Akromioklavikulargelenk)",
-            "SC Gelenk": "SCG (Sternoklavikulargelenk)",
-            # ── Bones ─────────────────────────────────────────────────────────
-            "Klabicula": "Klavikula",
-            "Klavicula": "Klavikula",
-            "Clavicula": "Klavikula",
-            "Scapula": "Skapula",
-            "Calcaneus": "Kalkaneus",
-            "Kalcaneus": "Kalkaneus",
-            "Tuberculum Mayus": "Tuberculum majus",
-            "Mayus": "majus",
-            # ── Nerves ────────────────────────────────────────────────────────
-            "Ischiasnerv": "N. ischiadicus",
-            "Ischias Nerv": "N. ischiadicus",
-            "N Ischiadikus": "N. ischiadicus",
-            "Nervus ischiadicus": "N. ischiadicus",
-            "Medianusnerv": "N. medianus",
-            "Median Nerv": "N. medianus",
-            "Radialisnerv": "N. radialis",
-            "Ulnarisnerv": "N. ulnaris",
-            "Peroneusnerv": "N. peroneus communis",
-            "Peronäusnerv": "N. peroneus communis",
-            "Facialisparese": "Fazialisparese",
-            "Fazialiesparese": "Fazialisparese",
-            "Faziale Parese": "Fazialisparese",
-            "Fazialislähmung": "Fazialisparese",
-            # ── Clinical tests ────────────────────────────────────────────────
-            "Lasek": "Lasègue-Test",
-            "Jobe Test": "Jobe-Test",
-            "Jobe-test": "Jobe-Test",
-            "Jobbe Test": "Jobe-Test",
-            "Jobbe-Test": "Jobe-Test",
-            "Jove-Test": "Jobe-Test",
-            "Hawkins Test": "Hawkins-Test",
-            "Hawkins Kennedy Test": "Hawkins-Kennedy-Test",
-            "Hawkins Kennedy": "Hawkins-Kennedy-Test",
-            "Neer Test": "Neer-Test",
-            "Neer Zeichen": "Neer-Zeichen",
-            "Apley Test": "Apley-Test",
-            "Apley Grinding": "Apley-Grinding-Test",
-            "McMurray Test": "McMurray-Test",
-            "Mc Murray Test": "McMurray-Test",
-            "Lachmann Test": "Lachman-Test",
-            "Lachmann-Test": "Lachman-Test",
-            "Drawer Test": "Schubladentest",
-            "Drawer-Test": "Schubladentest",
-            "Schubladen Test": "Schubladentest",
-            "FABER Test": "FABER-Test",
-            "Faber Test": "FABER-Test",
-            "Patrick Test": "Patrick-Test (FABER)",
-            "Thomas Test": "Thomas-Test",
-            "Ober Test": "Ober-Test",
-            "Spurling Test": "Spurling-Test",
-            "Bragard Test": "Bragard-Test",
-            "Slump Test": "Slump-Test",
-            "Drop Arm Test": "Drop-Arm-Test",
-            "Speed Test": "Speed-Test",
-            "Yergason Test": "Yergason-Test",
-            "Pivot Shift Test": "Pivot-Shift-Test",
-            "Stemmer Zeichen": "Stemmer-Zeichen",
-            "Stemmer-zeichen": "Stemmer-Zeichen",
-            "Stämmer": "Stemmer-Zeichen",
-            "Stemmerzeichen": "Stemmer-Zeichen",
-            "Tinel Zeichen": "Tinel-Zeichen",
-            "Phalen Test": "Phalen-Test",
-            "Finkelstein Test": "Finkelstein-Test",
-            "Schober Zeichen": "Schober-Zeichen",
-            "Schoberzeichen": "Schober-Zeichen",
-            "Finger Boden Abstand": "Finger-Boden-Abstand (FBA)",
-            "Finger-Boden Abstand": "Finger-Boden-Abstand (FBA)",
-            "Timed Up and Go": "Timed-Up-and-Go-Test",
-            "Hoehn Yahr": "Hoehn-Yahr-Skala",
-            "House Brackmann": "House-Brackmann-Skala",
-            "Ashworth Skala": "Ashworth-Skala",
-            "Barthel Index": "Barthel-Index",
-            # ── Diagnoses ─────────────────────────────────────────────────────
-            "Gonartrose": "Gonarthrose",
-            "Coxarthrose": "Koxarthrose",
-            "Epikondilitis": "Epikondylitis",
-            "Epicondylitis": "Epikondylitis",
-            "Tennisellbogen": "Laterale Epikondylitis (Tennisellbogen)",
-            "Golferellbogen": "Mediale Epikondylitis (Golferellbogen)",
-            "Tendinopatie": "Tendinopathie",
-            "Tendinopathia": "Tendinopathie",
-            "Bursitas": "Bursitis",
-            "Carpaltunnelsyndrom": "Karpaltunnelsyndrom",
-            "Karpaltunnel Syndrom": "Karpaltunnelsyndrom",
-            "Bandscheiben Vorfall": "Bandscheibenvorfall",
-            "Bandscheibenprolaps": "Bandscheibenvorfall (Prolaps)",
-            "Bandscheiben Prolaps": "Bandscheibenvorfall (Prolaps)",
-            "Bandscheiben Protrusion": "Bandscheibenprotrusion",
-            "Spinalkanel Stenose": "Spinalkanalstenose",
-            "Spinalstenose": "Spinalkanalstenose",
-            "Frozen Shoulder": "Frozen Shoulder (Schultersteife, adhäsive Kapsulitis)",
-            "Schultersteife": "Frozen Shoulder (Schultersteife)",
-            "adhäsive Kapsulitis": "Adhäsive Kapsulitis (Frozen Shoulder)",
-            "Rotatorenmanschetten Ruptur": "Rotatorenmanschettenruptur",
-            "Rotatorenmanschettenriss": "Rotatorenmanschettenruptur",
-            "Schulterimpingement": "Schulter-Impingement-Syndrom",
-            "Plantarfaszitis": "Plantarfasziitis",
-            "Plantarfasziose": "Plantarfasziose",
-            "Hallux Valgus": "Hallux valgus",
-            "Spastik": "Spastizität",
-            "Ataksie": "Ataxie",
-            "Hemiplägie": "Hemiplegie",
-            "Apoplex": "Apoplexie (Schlaganfall)",
-            "Apoplexia": "Apoplexie (Schlaganfall)",
-            "Hemi Parese": "Hemiparese",
-            "Querschnitt Lähmung": "Querschnittlähmung",
-            "Poly Neuropathie": "Polyneuropathie",
-            "Osteoporosse": "Osteoporose",
-            "Fibromyalgia": "Fibromyalgie",
-            "Psoriasisathritis": "Psoriasisarthritis",
-            # ── Techniques ────────────────────────────────────────────────────
-            "Mobilisierung": "Mobilisation",
-            "Mobilization": "Mobilisation",
-            "Manual Therapie": "Manualtherapie",
-            "Manuele Therapie": "Manualtherapie",
-            "Manualtherapie": "Manuelle Therapie",
-            "KTaping": "Kinesiotaping",
-            "K-Taping": "Kinesiotaping",
-            "Kinesio Taping": "Kinesiotaping",
-            "TENS Behandlung": "TENS-Behandlung",
-            "Ultraschall Therapie": "Ultraschalltherapie",
-            "Ultraschall-Therapie": "Ultraschalltherapie",
-            "Wärme Therapie": "Wärmetherapie",
-            "Kälte Therapie": "Kältetherapie",
-            "Schlingen Tisch": "Schlingentisch",
-            "Schockwellentherapie": "Stoßwellentherapie",
-            "KG am Gerät": "KGG (Krankengymnastik am Gerät)",
-            # ── Lymphology ────────────────────────────────────────────────────
-            "Manuelle Lymph Drainage": "MLD (Manuelle Lymphdrainage)",
-            "Manuelle Lymphdrainage": "MLD (Manuelle Lymphdrainage)",
-            "Lymphoedem": "Lymphödem",
-            "Lymphodem": "Lymphödem",
-            "Lymphödes": "Lymphödem",
-            "Oedema": "Ödem",
-            "Oedem": "Ödem",
-            "Anastomosen": "Lymph-Anastomosen",
-            "Kompressions Therapie": "Kompressionstherapie",
-            "Kompressionsstrumpf": "Kompressionsstrumpf Kl.",
-            # ── Neurotherapy approach names ───────────────────────────────────
-            "Bobad": "Bobath",
-            "Bobert": "Bobath",
-            "Bobart": "Bobath",
-            "P N F": "PNF",
-            "M, M, T": "MMT",
-            # ── Oncology ─────────────────────────────────────────────────────
-            "Mama-Karzinom": "Mamma-Karzinom",
-            "Mama-Ablation": "Mamma-Ablation",
-            "Mamma Ablation": "Mamma-Ablation",
-            "Mammaablation": "Mamma-Ablation",
-            # ── Scales / measurements ─────────────────────────────────────────
-            "Barthel-index": "Barthel-Index",
-            "Ashworth-skala": "Ashworth-Skala",
-            "modifizierte Ashworth Skala": "Modifizierte Ashworth-Skala (MAS)",
-            "Hoehn-Yahr-skala": "Hoehn-Yahr-Skala",
-            "Epikondylitis lateral": "Laterale Epikondylitis",
-            "Epikondylitis medial": "Mediale Epikondylitis",
-        }
-
-        # 2. Regex patterns for multi-variant corrections
-        regex_fixes = {
-            r"Laseck|Lasegge|Laseque":                   "Lasègue-Test",
-            r"Schoberzeichen|Schober Zeichen":            "Schober-Zeichen",
-            r"Fußheber":                                  "M. extensor hallucis longus (Fußheber)",
-            r"(\d+)\s*zu\s*(\d+)":                       r"\1 - \2",  # Neutral-Zero fix
-            r"CNMD|CMND|CNMT|C\.N\.M\.D\.":              "CMD",
-            r"Knieknadi\w*|Knienadig\w*|Knie.?Nadi\w*|Knienachgibigkeit": "Knienachgiebigkeit",
-            r"Rotatorenmanschete\b|Rotatoren.?Manschette": "Rotatorenmanschette",
-            r"Impingmentsyndrom|Impingement.?Syndrom":   "Impingement-Syndrom",
-            r"Plantarfasciitis|Plantar.?Fasziitis":      "Plantarfasziitis",
-            r"Karpaltunnel.?Syndrom":                    "Karpaltunnelsyndrom",
-            r"Propriozepzion|Propioception|Propiozeption": "Propriozeption",
-            r"Tendinapathie|Tendinopatie":               "Tendinopathie",
-            r"Patellofemorales?\s?Schmerz.?Syndrom":     "Patellofemoralschmerzsyndrom",
-            # Spine level normalisation: "L 4" → "L4", "C 5/C 6" → "C5/C6"
-            r"\bL\s*([1-5])\s*/\s*L\s*([1-5])\b":       r"L\1/L\2",
-            r"\bL\s*([1-5])\b(?!\s*/\s*[LS])":           r"L\1",
-            r"\bS\s*([12])\b":                            r"S\1",
-            r"\bC\s*([1-8])\s*/\s*C\s*([1-8])\b":        r"C\1/C\2",
-            r"\bC\s*([1-8])\b(?!\s*/\s*C)":              r"C\1",
-            r"\b[Tt][Hh]\s*([1-9]|1[0-2])\b":           r"BWK\1",  # Th4 → BWK4
-            # Test name hyphenation
-            r"\b(Jobe|Neer|Ober|Thomas|Apley|Phalen|Spurling|Yergason|Lachman|McMurray|Speed)\s+[Tt]est\b": r"\1-Test",
-            r"\b(Hawkins)[- ](Kennedy)[- ][Tt]est\b":    r"\1-\2-Test",
-            r"\b(Pivot)[- ](Shift)[- ][Tt]est\b":        r"\1-\2-Test",
-            r"\b(Drop)[- ](Arm)[- ][Tt]est\b":           r"\1-\2-Test",
-            r"\b(Valgus|Varus)[- ](Stress)[- ][Tt]est\b": r"\1-\2-Test",
-            # VAS/NRS score normalisation: "VAS 7 von 10" → "VAS 7/10"
-            r"\b(VAS|NRS)\s+(\d{1,2})\s+(?:von|of|aus)\s+10\b": r"\1 \2/10",
-            # ICD-10 spacing fix: "M 54.5" → "M54.5"
-            r"\b([A-Z])\s+(\d{2})\.(\d{1,2})\b":        r"\1\2.\3",
-            # LWS/HWS/BWS compound hyphenation
-            r"\b(LWS|HWS|BWS)[- ](Syndrom|Schmerzen|Problematik|Beschwerden)\b": r"\1-\2",
-            # ISG compound hyphenation
-            r"\bISG[- ](Blockierung|Dysfunktion|Syndrom)\b": r"ISG-\1",
-            # Rheumatology
-            r"Spondylitis\s+Ankylosans":                 "Spondylitis ankylosans",
-        }
-
-        for key in ["S", "O", "A", "P"]:
-            text = soap_dict.get(key, "")
-            # Type safety: ensure we're working with a string
-            if not isinstance(text, str):
-                text = str(text) if text else ""
-            if not text:
-                continue
-            for wrong, right in simple_fixes.items():
-                text = re.compile(re.escape(wrong), re.IGNORECASE).sub(right, text)
-            for pattern_str, right in regex_fixes.items():
-                text = re.sub(pattern_str, right, text, flags=re.IGNORECASE)
-            soap_dict[key] = text
-
-        # Strip null/placeholder pain fields the LLM writes when none was mentioned
-        s_field = soap_dict.get("S", "")
-        s_field = re.sub(
-            r'\.?\s*Schmerzlokalisation\s*:\s*(Nicht|Keine|n\.?d\.?|keine Angabe|nicht genannt)[,.]?',
-            '', s_field, flags=re.IGNORECASE
-        ).strip().strip('.')
-        if s_field:
-            soap_dict["S"] = s_field
-
-        # ── P-field sanitizer ─────────────────────────────────────────────────
-
-        # 1. Krücken recommendation: only clinically valid for lower-limb profiles.
-        _lower_limb_profiles = {"EX_KNIE", "EX_HUefte", "EX_HUFTE", "EX_FUSS", "GER", "POST_OP"}
-        if profile_id not in _lower_limb_profiles:
-            p_field = soap_dict.get("P", "")
-            if isinstance(p_field, str):
-                _p_no_kruecken = re.sub(
-                    r'[\|,]?\s*Krücken[^|.\n]*(?=[|.]|$)',
-                    '', p_field, flags=re.I
-                ).strip(' |,.')
-                if _p_no_kruecken != p_field:
-                    soap_dict["P"] = re.sub(r'\s{2,}', ' ', _p_no_kruecken).strip()
-
-        # 2. Cross-body SMART goal check — two layers:
-        #    a) Profile-specific: known wrong-body anatomy in SMART goal
-        #    b) Generic: "Ziel: ROM <word>" where <word> absent from all SOAP fields
-        _SMART_FORBIDDEN: dict = {
-            "EX_HWS":     ["hüftflex", "hüftext", "knieflex", "knieext",
-                           "hüfte 0-", "knie 0-", "sprunggelenk"],
-            "EX_SCHULTER": ["hüftflex", "hüftext", "knieflex", "hüfte 0-", "knie 0-"],
-            "EX_FUSS":    ["hüftflex", "schulterabd", "hüfte 0-"],
-            "EX_KNIE":    ["hüftflex", "schulterabd", "schulter 0-"],
-        }
-        p_field = soap_dict.get("P", "")
-        if isinstance(p_field, str):
-            p_low = p_field.lower()
-            _forbidden_in_p = _SMART_FORBIDDEN.get(profile_id, [])
-            if any(f in p_low for f in _forbidden_in_p):
-                soap_dict["P"] = re.sub(
-                    r'(?:SMART-)?Ziel\s*:?\s*[^|.\n]*(?:Hüftflex|Hüftext|Knieflex|Knieext|'
-                    r'Hüfte\s+\d|Knie\s+\d|Sprunggelenk)[^|.\n]*',
-                    'Ziel: n.d. — bitte profilkorrektes Funktionsziel ergaenzen',
-                    p_field, flags=re.I
-                )
-                p_field = soap_dict.get("P", "")
-
-            # Generic cross-domain check
-            _smart_m = re.search(r'Ziel\s*:\s*ROM\s+(\w+)', p_field, re.I)
-            if _smart_m:
-                _goal_part = _smart_m.group(1).lower()
-                _all_text = " ".join(v for v in soap_dict.values() if isinstance(v, str)).lower()
-                if _goal_part not in _all_text:
-                    soap_dict["P"] = re.sub(
-                        r'Ziel\s*:\s*ROM\s+\w+[^\|.]*',
-                        'Ziel: n.d. — bitte korrektes Funktionsziel ergaenzen',
-                        p_field, flags=re.I
-                    )
-
-        # Diagnostic tests belong in O (Objektiv), not in P (Plan) — strip from PLAN
-        _diag_test_re = re.compile(
-            r'\b(?:Patrick-Test|FABER-Test|Lasègue-Test|Bragard-Test|Slump-Test|'
-            r'Spurling-Test|Jobe-Test|Hawkins(?:-Kennedy)?-Test|Neer-(?:Test|Zeichen)|'
-            r'McMurray-Test|Apley-(?:Grinding-)?Test|Lachman-Test|Schubladentest|'
-            r'Thomas-Test|Ober-Test|Tinel-Zeichen|Phalen-Test|Finkelstein-Test|'
-            r'Speed-Test|Yergason-Test|Drop-Arm-Test|Pivot-Shift-Test|'
-            r'Vorlauf-Test|Vorlauftest|Trendelenburg-(?:Zeichen|Test)|'
-            r'Schober-Zeichen|FABER)[^\|.]*[,.]?',
-            re.I
-        )
-        p_field = soap_dict.get("P", "")
-        if isinstance(p_field, str):
-            p_clean = _diag_test_re.sub('', p_field).strip(' |,.')
-            if p_clean != p_field:
-                soap_dict["P"] = re.sub(r'\s{2,}', ' ', p_clean).strip()
-
-        return soap_dict
-
-    def inject_audit_stamps(self, soap: dict) -> dict:
-        a_val = soap.get("A", "")
-        # Type safety: ensure we're working with a string
-        if not isinstance(a_val, str):
-            a_val = str(a_val) if a_val else ""
-
-        if "red flag" not in a_val.lower():
-            soap["A"] = a_val + " | Red Flags klinisch ausgeschlossen."
-        else:
-            soap["A"] = a_val
-        return soap
-
-    def _clean_subjective_field(self, soap: dict, transcript: str) -> dict:
-        """
-        COMPREHENSIVE patient story extraction - works across all scenarios.
-        Removes therapist questions and reconstructs from actual patient responses.
-        """
-        s_val = soap.get("S", "")
-        if not isinstance(s_val, str):
-            s_val = str(s_val) if s_val else ""
+        # ═══════════════════════════════════════════════════════════════
+        # CRITICAL: S-FIELD CONTAMINATION DETECTION AND REMOVAL
+        # ═══════════════════════════════════════════════════════════════
+        # Extract S-field and check for cross-session contamination
+        s_val = soap_dict.get("S", "")
+        s_text = s_val if isinstance(s_val, str) else ""
+        profile_upper = profile_id.upper()
         
-        s_original = s_val
-        
-        # COMPREHENSIVE therapist question patterns (German medical practice)
-        question_patterns = [
-            # Direct questions
-            r"Erzählen\s+[Ss]ie\s+(?:mir\s+)?.*?[?\.]",
-            r"Können\s+[Ss]ie\s+(?:mir\s+)?.*?[?\.]",
-            r"Beschreiben\s+[Ss]ie.*?[?\.]",
-            r"Sagen\s+[Ss]ie\s+mir.*?[?\.]",
-            r"Berichten\s+[Ss]ie.*?[?\.]",
-            # What/How/When/Where questions
-            r"Was\s+(?:ist|war|haben|hatten).*?[?\.]",
-            r"Wo\s+(?:genau|tut|schmerzt|ist).*?[?\.]",
-            r"Seit\s+wann.*?[?\.]",
-            r"Wann\s+(?:haben|hat|ist).*?[?\.]",
-            r"Wie\s+(?:fühlt|stark|lange|oft).*?[?\.]",
-            # Administrative/intake phrases
-            r"Die\s+(?:erste|zweite|dritte)?\s*[vV]erordnung.*?[?\.]",
-            r"Diagnose\s+(?:vom|des|der)\s+(?:Arzt|Orthopäd|Hausarzt).*?[?\.]",
-            r"(?:Haben|Hatten)\s+[Ss]ie.*?[?\.]",
-            r"(?:Gibt|Gab)\s+es.*?[?\.]",
-            r"Zeigen\s+[Ss]ie.*?[?\.]",
-            # Multi-part questions
-            r"Erzählen\s+Sie.*?was\s+ist\s+passiert.*?(?:Diagnose|wo|wann).*?(?:\?|\.)",
-            # Instruction phrases
-            r"Bitte\s+(?:erzählen|beschreiben|sagen).*?[?\.]",
-            r"Ich\s+(?:möchte|würde|will).*?(?:wissen|fragen|hören).*?[?\.]",
-            # Clarification requests
-            r"Können\s+Sie\s+das\s+(?:näher|genauer)\s+erklären.*?[?\.]",
-            r"Was\s+meinen\s+Sie\s+(?:genau|damit).*?[?\.]",
+        # Define contamination patterns by body region
+        lws_contamination = [
+            r"\bLWS-Schmerzen?\b", r"\blumbal\w*\b", r"\blumbago\b",
+            r"\bRückenschmerz\w*\b", r"\bKreuzschmerz\w*\b",
+            r"\bnach\s+Heben\b", r"\bHeben\s+schwerer\b",
         ]
-        
-        for pattern in question_patterns:
-            s_val = re.sub(pattern, "", s_val, flags=re.IGNORECASE).strip()
-        
-        # Remove partial question fragments that might remain
-        s_val = re.sub(r'(?:^|\s)(?:und|oder|sowie)\s+(?:wo|was|wie|wann|seit)\s+.*?[?\.]', '', s_val, flags=re.I)
-
-        # If S-field is now empty or too short, RECONSTRUCT from transcript
-        if not s_val or len(s_val) < 20:
-            s_val = self._extract_patient_story(transcript)
-
-        # Final cleanup
-        s_val = s_val.strip()
-        s_val = re.sub(r'\s+', ' ', s_val)  # Remove extra spaces
-        s_val = re.sub(r'^[\.,;:\-]+\s*', '', s_val)  # Remove leading punctuation
-        s_val = re.sub(r'[\.,;:\-]+$', '', s_val)  # Remove trailing punctuation
-
-        # If still empty, mark as n.d.
-        if not s_val or s_val in (".", ",", "-", "n.d.", "N/A"):
-            s_val = "n.d."
-        
-        # Only update if we made changes
-        if s_val != s_original and s_val != "n.d.":
-            soap["S"] = s_val
-        
-        return soap
-
-    def _extract_patient_story(self, transcript: str) -> str:
-        """
-        INTELLIGENT extraction of patient's actual complaints from transcript.
-        Works across different body regions, symptoms, and mechanisms.
-        """
-        if not transcript:
-            return "n.d."
-
-        story_parts = []
-
-        # 1. PAIN INTENSITY (VAS) - Universal across all profiles
-        vas_patterns = [
-            r"VAS\s*(?:von\s+)?(\d{1,2})(?:\s*/\s*10)?",
-            r"(?:Schmerz|Schmerzen|schmerzt).*?(\d{1,2})\s*(?:von|aus|/)\s*10",
-            r"(\d{1,2})\s*(?:von|aus|/)\s*10.*?(?:schmerz|schmerzen)",
-            r"auf\s+(?:der\s+)?Skala\s+(?:von\s+)?.*?(\d{1,2})",
+        hws_contamination = [
+            r"\bHWS-Beschwerden?\b", r"\bHWS-Schmerzen?\b", r"\bzervikal\w*\b",
+            r"\bNackenschmerz\w*\b", r"\bHinterkopfschmerz\w*\b", r"\bKopfschmerz\w*\b",
         ]
-        for pattern in vas_patterns:
-            vas_m = re.search(pattern, transcript, re.I)
-            if vas_m:
-                story_parts.append(f"VAS {vas_m.group(1)}/10")
-                break
+        all_spine = lws_contamination + hws_contamination
 
-        # 2. MECHANISM/TRIGGER - How did it start?
-        mechanism_patterns = [
-            (r"(?:nach|beim|während|bei)\s+(?:dem\s+)?(?:Heben|Anheben|Hochheben)\s+(?:von\s+)?(?:einer\s+)?(?:schweren?\s+)?(?:Kiste|Last|Gewicht|Sack)",
-             "nach Heben schwerer Last"),
-            (r"(?:beim|während)\s+(?:dem\s+)?Sport(?:en)?|(?:nach|beim)\s+(?:dem\s+)?(?:Laufen|Joggen|Training)",
-             "nach sportlicher Belastung"),
-            (r"(?:nach|durch)\s+(?:einen\s+)?(?:Sturz|Fall|Umknicken)",
-             "nach Sturz"),
-            (r"(?:nach|durch)\s+(?:einen\s+)?Unfall",
-             "nach Unfall"),
-            (r"(?:plötzlich|akut)\s+(?:aufgetreten|begonnen|angefangen)",
-             "akut aufgetreten"),
-            (r"(?:schleichend|langsam|allmählich)\s+(?:aufgetreten|schlimmer|verschlechtert)",
-             "schleichender Beginn"),
-        ]
-        for pattern, summary in mechanism_patterns:
-            if re.search(pattern, transcript, re.I):
-                story_parts.append(summary)
-                break
+        # Normalize profile ID to handle variants
+        profile_normalized = profile_upper.replace("Ü", "U").replace("UE", "U")
 
-        # 3. ONSET TIME - When did it start?
-        onset_patterns = [
-            (r"seit\s+(Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)", r"seit \1"),
-            (r"seit\s+(\d+)\s+(?:Tagen?|Wochen?|Monaten?|Jahren?)", r"seit \1 \2"),
-            (r"vor\s+(\d+)\s+(?:Tagen?|Wochen?|Monaten?)", r"vor \1 \2"),
-            (r"(?:gestern|vorgestern)", "seit gestern"),
-        ]
-        for pattern, replacement in onset_patterns:
-            onset_m = re.search(pattern, transcript, re.I)
-            if onset_m:
-                if isinstance(replacement, str) and r'\1' in replacement:
-                    story_parts.append(onset_m.expand(replacement))
-                else:
-                    story_parts.append(onset_m.group(0))
-                break
-
-        # 4. SPECIAL SOUNDS/SENSATIONS
-        sensation_patterns = [
-            (r"(?:\")?[pP]op(?:\")?\s*(?:-)?[gG]eräusch", '"Pop"-Geräusch verspürt'),
-            (r"(?:Knack|Knacks|Knacken)\s*(?:-)?[gG]eräusch", "Knackgeräusch wahrgenommen"),
-            (r"(?:Reißen|Riss)\s+(?:verspürt|gespürt|gemerkt)", "Reißgefühl verspürt"),
-            (r"(?:Taubheit|Kribbeln|Ameisenlaufen)", "Sensibilitätsstörung (Kribbeln/Taubheit)"),
-        ]
-        for pattern, summary in sensation_patterns:
-            if re.search(pattern, transcript, re.I):
-                story_parts.append(summary)
-                break
-
-        # 5. TEMPORAL PATTERN - How does pain vary?
-        temporal_patterns = [
-            (r"[mM]orgens?\s+(?:sehr\s+)?(?:steif|schlimm|stark|schmerzhaft)", "morgens steif"),
-            (r"[tT]agsüber\s+(?:etwas\s+)?besser", "tagsüber Besserung"),
-            (r"[aA]bends?\s+(?:schlimmer|schlechter)", "abends Verschlechterung"),
-            (r"bei\s+(?:der\s+)?Belastung\s+(?:schlimmer|schmerzhaft)", "belastungsabhängig"),
-            (r"in\s+Ruhe\s+(?:besser|schmerzfrei)", "in Ruhe besser"),
-        ]
-        for pattern, summary in temporal_patterns:
-            if re.search(pattern, transcript, re.I):
-                story_parts.append(summary)
-
-        # 6. RADIATION/LOCATION - Where does it hurt/radiate?
-        radiation_patterns = [
-            (r"[aA]usstrahlung\s+(?:in|ins|in\s+(?:das|den|die))\s+([\w\s]+?)(?:\.|,|$)", r"Ausstrahlung ins \1"),
-            (r"(?:zieht|strahlt)\s+(?:in|ins|bis)\s+(?:das\s+|den\s+|die\s+)?([\w]+)", r"Ausstrahlung ins \1"),
-            (r"Schmerz.*?(?:im|in|am|an|der)\s+(linken?|rechten?)\s+([\w]+)", r"\1 \2 betroffen"),
-        ]
-        for pattern, replacement in radiation_patterns:
-            rad_m = re.search(pattern, transcript, re.I)
-            if rad_m:
-                story_parts.append(rad_m.expand(replacement).strip())
-                break
-
-        # 7. FUNCTIONAL LIMITATION - What can't they do?
-        limitation_patterns = [
-            (r"kann\s+(?:nicht|kaum)\s+([\w\s]+?)(?:\.|,)", r"kann nicht \1"),
-            (r"(?:Schwierigkeiten?|Probleme?)\s+(?:beim|bei|mit)\s+([\w\s]+?)(?:\.|,)", r"Schwierigkeiten bei \1"),
-        ]
-        for pattern, replacement in limitation_patterns:
-            lim_m = re.search(pattern, transcript, re.I)
-            if lim_m:
-                story_parts.append(lim_m.expand(replacement).strip())
-                break
-
-        # Assemble story
-        if story_parts:
-            story = "Pat. berichtet: " + ", ".join(story_parts) + "."
-            return story[:500]  # Limit length
-
-        return "n.d."
-
-    def _inject_ly_staging(self, transcript: str, soap_dict: dict) -> dict:
-        """For LY domain: infer lymphedema stadium and inject into A-field if missing."""
-        t = transcript.lower() if isinstance(transcript, str) else ""
-        a_val = soap_dict.get("A", "")
-        a_field = a_val if isinstance(a_val, str) else ""
-
-        # 1. Check transcript for EXPLICIT therapist stadium statement — highest priority
-        explicit_in_transcript = re.search(r"stadium\s*([1-3])", transcript, re.I)
-        if explicit_in_transcript:
-            explicit_num = explicit_in_transcript.group(1)
-            _label_map = {
-                "1": "Stadium 1 (reversibel, pitting)",
-                "2": "Stadium 2 (irreversibel, fibrosiert)",
-                "3": "Stadium 3 (Elephantiasis)",
-            }
-            explicit_stadium = _label_map.get(explicit_num, f"Stadium {explicit_num}")
-            icd_suffix = "02" if explicit_num == "3" else "01"
-            soap_dict["_ly_icd_suffix"] = icd_suffix
-            new_staging = f"Lymphödem {explicit_stadium}."
-            corrected = re.sub(r"Lymphödem\s+Stadium\s*[1-3][^\.\|]*\.", new_staging, a_field)
-            if corrected == a_field:
-                if "Stadium" not in a_field:
-                    soap_dict["A"] = f"{new_staging} {a_field}".strip()
-                else:
-                    soap_dict["A"] = re.sub(r"Stadium\s*[1-3][^,\.\|]*", explicit_stadium, a_field)
-            else:
-                soap_dict["A"] = corrected
-            return soap_dict
-
-        # 2. If no explicit therapist statement, skip if LLM already placed a stadium
-        if re.search(r"stadium\s*[1-3]", a_field, re.I):
-            return soap_dict
-
-        swelling = any(w in t for w in [
-            "geschwollen", "schwellung", "ödem", "ödematös", "anschwellen",
-            "prall", "gespannt", "dick", "aufgetrieben"
-        ])
-        if not swelling:
-            return soap_dict
-
-        is_hard    = any(w in t for w in ["hart", "fibrosiert", "nicht eindrückbar", "derb", "induriert"])
-        is_pitting = any(w in t for w in ["delle", "dellen", "pitting", "eindrückbar"])
-        is_prall   = any(w in t for w in ["prall", "pralle"])
-        is_soft    = any(w in t for w in ["weich", "morgens besser", "reversibel"])
-        is_massive = any(w in t for w in ["elephantiasis", "massiv", "extrem", "riesig"])
-        is_postop  = any(w in t for w in ["post-op", "postoperativ", "postop", "op ", "nach der op",
-                                           "mastektomie", "axilläre", "sentinel"])
-
-        if is_massive:
-            stadium = "Stadium 3 (Elephantiasis)"
-        elif is_hard or (is_prall and is_pitting):
-            stadium = "Stadium 2 (irreversibel, fibrosiert)"
-        elif is_soft or is_pitting:
-            stadium = "Stadium 1 (reversibel, pitting)"
-        elif is_postop:
-            stadium = "Stadium 1–2 (postoperativ, noch zu klassifizieren)"
-        else:
-            stadium = "Stadium 1–2 (Klassifikation ausstehend — Stemmer-Zeichen prüfen)"
-
-        staging_note = f"Lymphödem {stadium}."
-        if "Stadium" not in a_field:
-            soap_dict["A"] = f"{staging_note} {a_field}".strip()
-
-        return soap_dict
-
-    _NON_CLINICAL_TEST_RE = re.compile(
-        r'^(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|'
-        r'\d+[-–]\d+\s*wochen?|alles\s+klar|bis\s+\w+|verständnis|verstanden|'
-        r'langsam\b|übung\s+für\s+heute|rückenlage[\s,].*(?:nase|locker)|'
-        r'volle\s+beweglichkeit|lauf-abc\b|einbeinstand(?:\s|,|$)|lauftraining\b)',
-        re.I
-    )
-
-    _RULE_TEXT_RE = re.compile(
-        r'Keine\s+Wiederholungen(?:/Saetze)?|'
-        r'Keine\s+Zeitangaben|Keine\s+Heimuebungen|Keine\s+Therapieschritte|'
-        r'Keine\s+Patientendialog-Fragmente|Keine\s+Behandlungsschritte|'
-        r'KEINE\s+WIEDERHOLUNGEN|KEINE\s+BEHANDLUNGSSCHRITTE',
-        re.I
-    )
-
-    @staticmethod
-    def _strip_rule_text(text: str) -> str:
-        m = KuraEngine._RULE_TEXT_RE.search(text)
-        if m:
-            truncated = text[:m.start()].rstrip(', ')
-            return truncated if truncated else text
-        return text
-
-    @staticmethod
-    def _dedup_o_field(text: str) -> str:
-        """Remove duplicate sentences from O-field and strip non-clinical Tests: entries."""
-        if not text:
-            return text
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        seen: set = set()
-        result = []
-        for sent in sentences:
-            s = sent.strip()
-            if not s:
-                continue
-            key = re.sub(r'\s+', ' ', s.lower())
-            if re.match(r'^Tests:\s+', s, re.I):
-                test_body = s[s.index(':') + 1:].strip()
-                test_name = test_body.split(',')[0].strip()
-                if KuraEngine._NON_CLINICAL_TEST_RE.match(test_name):
-                    continue
-            if key not in seen:
-                seen.add(key)
-                result.append(s)
-        return ' '.join(result)
-
-    # Negation words that mean a condition is ruled OUT — do not migrate these
-    _NEGATION_RE = re.compile(
-        r'\b(?:kein(?:e[rns]?)?|nicht|ohne|ausgeschlossen|'
-        r'kein\s+hinweis|kein\s+verdacht|negativer?\s+befund|'
-        r'unauffällig|regelrecht|o\.?b\.?n\.?)\b',
-        re.I
-    )
-
-    def _migrate_diagnoses_from_s_to_a(self, soap: dict) -> dict:
-        """
-        Safety net: if the AI placed a diagnosis in S, extract it and prepend to A.
-        Skips negated conditions ("kein Bandscheibenvorfall") — those stay in S/A
-        as differential exclusions, not as confirmed diagnoses.
-        """
-        s = soap.get("S", "")
-        a = soap.get("A", "")
-
-        # Type safety: ensure we're working with strings
-        if not isinstance(s, str):
-            s = str(s) if s else ""
-        if not isinstance(a, str):
-            a = str(a) if a else ""
-
-        sentences = re.split(r'(?<=[.!?])\s+|(?<=\|)\s*', s)
-
-        icd_re = re.compile(r'\b[A-Z]\d{2}\.?\d*\b')
-        diag_prefix_re = re.compile(
-            r'(?:diagnose|vordiagnose|arztdiagnose)\s*:', re.I
-        )
-        diag_phrase_re = re.compile(
-            r'\b(?:bekannte[rns]?|leidet\s+(?:an|unter)|diagnostizierte[rns]?)\b', re.I
-        )
-        condition_re = re.compile(
-            r'\b(?:gonarthrose|koxarthrose|omarthrose|arthrose|arthritis|'
-            r'bandscheibenvorfall|bandscheibenprotrusion|diskushernie|'
-            r'spinalkanalstenose|spondylolisthese|spondylose|'
-            r'lymphödem|lipödem|'
-            r'hemiparese|hemiplegie|ataxie|parkinson|multiple\s+sklerose|'
-            r'frozen\s+shoulder|impingementsyndrom|rotatorenmanschetten(?:ruptur|riss)?|'
-            r'meniskusriss|meniskusläsion|kreuzbandruptur|vkb[\-\s](?:ruptur|riss|plastik)|'
-            r'osteoporose|fibromyalgie|copd)\b',
-            re.I
-        )
-
-        kept_sentences = []
-        extracted = []
-
-        for sent in sentences:
-            sent_stripped = sent.strip()
-            if not sent_stripped:
-                continue
-
-            # Skip if the condition is negated within this sentence
-            if condition_re.search(sent_stripped) and self._NEGATION_RE.search(sent_stripped):
-                kept_sentences.append(sent_stripped)
-                continue
-
-            is_diagnostic = (
-                icd_re.search(sent_stripped)
-                or diag_prefix_re.search(sent_stripped)
-                or (diag_phrase_re.search(sent_stripped) and condition_re.search(sent_stripped))
-            )
-
-            if is_diagnostic:
-                extracted.append(sent_stripped)
-            else:
-                kept_sentences.append(sent_stripped)
-
-        if not extracted:
-            return soap
-
-        soap["S"] = " ".join(kept_sentences).strip() or "n.d."
-
-        for frag in extracted:
-            if frag[:30] not in a:
-                a = frag + " | " + a if a else frag
-        soap["A"] = a.strip(" |").strip()
-
-        return soap
-
-    # Terms that are out-of-scope for each profile domain.
-    # If these appear as diagnoses in A (not as exclusions), they are hallucinations.
-    _PROFILE_FORBIDDEN_A: dict = {
-        "EX_SCHULTER": [
-            r"gonarthrose", r"koxarthrose", r"meniskus(?:riss|läsion)",
-            r"kreuzband(?:ruptur)?", r"vkb[\-\s](?:ruptur|riss|plastik)",
-            r"bandscheibenvorfall", r"bandscheibenprotrusion", r"diskushernie",
-            r"spinalkanalstenose", r"spondylolisthese",
-            r"schenkelhalsfraktur", r"schenkelhals",
-            r"hüftfraktur", r"femurhalsfraktur",
-            r"lymphödem", r"lipödem", r"entstauung",
-            r"copd", r"asthma", r"atemweg",
-        ],
-        "EX_KNIE": [
-            r"impingementsyndrom", r"omarthrose", r"rotatorenmanschette",
-            r"bankart", r"slap.läsion", r"frozen\s+shoulder",
-            r"lymphödem", r"lipödem",
-            r"copd", r"asthma",
-        ],
-        "EX_LWS": [
-            r"gonarthrose", r"omarthrose", r"impingementsyndrom",
-            r"lymphödem", r"copd",
-        ],
-        "EX_HWS": [
-            r"gonarthrose", r"omarthrose", r"impingementsyndrom",
-            r"lymphödem", r"copd",
-        ],
-        "EX_HUFTE": [
-            r"impingementsyndrom", r"omarthrose", r"rotatorenmanschette",
-            r"lymphödem", r"copd",
-        ],
-        "EX_FUSS": [
-            r"impingementsyndrom", r"omarthrose", r"rotatorenmanschette",
-            r"gonarthrose", r"lymphödem", r"copd",
-        ],
-        "LY": [
-            r"gonarthrose", r"omarthrose", r"impingementsyndrom",
-            r"bandscheibenvorfall", r"copd",
-        ],
-        "AT": [
-            r"gonarthrose", r"omarthrose", r"impingementsyndrom",
-            r"bandscheibenvorfall", r"lymphödem", r"meniskus",
-        ],
-        "MT": [
-            r"lymphödem", r"copd", r"asthma",
-        ],
-    }
-
-    _PROFILE_FORBIDDEN_S: dict = {
-        # Terms that should NEVER appear as the primary complaint in the S-field for this profile.
-        # Rule: only forbid body regions with ZERO anatomical relationship.
-        #   Shoulder ↔ HWS     → related (cervicobrachial) — do NOT forbid each other
-        #   Hip     ↔ LWS      → related (hip-spine syndrome, L3–S1 radiculopathy) — do NOT forbid
-        #   Hip     ↔ Knie     → related (hip-knee axis, Trendelenburg) — do NOT forbid
-        "EX_SCHULTER": [
-            # Shoulder has no anatomical relationship to hip, knee, or lumbar spine.
-            # HWS is intentionally absent: cervicobrachial syndrome is the #1 differential.
-            r"\bleiste\b", r"\boberschenkel\b", r"\bhüfte\b", r"\bhüftgelenk\b",
-            r"\bknie\b", r"\bkniegelenk\b", r"\blendenwirbels[äa]ule\b", r"\blws\b",
-            r"\bisg\b", r"\bsacroiliakal\b",
-        ],
-        "EX_KNIE": [
-            # Knee has no relation to shoulder or cervical spine.
-            # Hip excluded: hip-knee axis compensation is clinically routine.
-            # LWS excluded: L3/L4 radiculopathy routinely refers into the knee.
-            r"\bschulter\b", r"\brotatorenmanschette\b", r"\bhws\b", r"\bhalswirbel\b",
-        ],
-        "EX_LWS": [
-            # Lumbar has no relation to shoulder.
-            # HWS excluded: combined spondylosis (HWS + LWS) is common in older patients.
-            # Hip and knee excluded: L3–S1 radiculopathy refers to both.
-            r"\bschulter\b", r"\brotatorenmanschette\b", r"\bimpingement\b",
-        ],
-        "EX_HWS": [
-            # Cervical has no relation to hip or knee.
-            # Shoulder intentionally absent: cervicobrachial syndrome is the classic co-symptom.
-            # LWS excluded: combined degenerative disease occurs in spondylosis patients.
-            r"\bhüfte\b", r"\bhüftgelenk\b", r"\bcoxarthrose\b",
-            r"\bknie\b", r"\bkniegelenk\b", r"\bgonarthrose\b",
-        ],
-        "EX_HUefte": [
-            # Hip has no relation to shoulder or cervical spine.
-            # Knee excluded: hip-knee axis compensation is clinically common.
-            # LWS excluded: hip-spine syndrome — hip pain and LWS pain frequently co-occur.
-            r"\bschulter\b", r"\brotatorenmanschette\b", r"\bhws\b", r"\bhalswirbel\b",
-        ],
-        "EX_HUFTE": [  # legacy spelling alias — keep in sync with EX_HUefte
-            r"\bschulter\b", r"\brotatorenmanschette\b", r"\bhws\b", r"\bhalswirbel\b",
-        ],
-        "EX_FUSS": [
-            # Ankle/foot has no relation to shoulder or cervical spine.
-            # FBA (Finger-Boden-Abstand) is a lumbar spine metric — LLM confuses it with
-            # ankle abbreviations ("Fuß-Band-Außen") when it appears in the O-field context.
-            r"\bFBA\b", r"finger-boden",
-            r"\bschulter\b", r"\bhws\b", r"\bhalswirbel\b",
-        ],
-    }
-
-    def _clean_hallucinated_regions(self, soap: dict, icd: str, profile_id: str = "KG") -> dict:
-        """
-        Remove out-of-scope diagnosis terms from the A field and wrong anatomical
-        region terms from the S-field. Only removes terms that are NOT negated.
-        """
-        # ── S-field: strip wrong body-region pain locations ───────────────────
-        s_forbidden = self._PROFILE_FORBIDDEN_S.get(profile_id, [])
-        if s_forbidden:
-            s = soap.get("S", "")
-            s_parts = re.split(r'(?<=[.!?|])\s*', s)
-            s_clean = []
-            for part in s_parts:
-                part_stripped = part.strip()
-                if not part_stripped:
-                    continue
-                removed = False
-                for pattern in s_forbidden:
-                    m = re.search(pattern, part_stripped, re.I)
-                    if m:
-                        before = part_stripped[:m.start()]
-                        nearby = before.split()[-6:]
-                        if not self._NEGATION_RE.search(" ".join(nearby)):
-                            print(f"[SanityCheck] Removed off-region S term '{pattern}': {part_stripped[:60]}")
-                            removed = True
-                            break
-                if not removed:
-                    s_clean.append(part_stripped)
-            soap["S"] = " ".join(s_clean).strip()
-
-        # ── Post-op + M75.0 contradiction ────────────────────────────────────
-        if profile_id == "EX_SCHULTER" and icd.startswith("M75.0"):
-            s = soap.get("S", "")
-            if re.search(r'postoperativ|post-op|\bop\b|\boperation\b|wochen\s+postop', s, re.I):
-                soap["S"] = re.sub(
-                    r'[^|.]*(?:postoperativ|post-op|\bop\b|\boperation\b|wochen\s+postop)[^|.]*[|.]?\s*',
-                    '', s, flags=re.I).strip().strip('|').strip()
-                print("[SanityCheck] Removed postoperativ from S (M75.0 is idiopathic)")
-
-        forbidden = self._PROFILE_FORBIDDEN_A.get(profile_id, [])
-        if not forbidden:
-            return soap
-
-        a = soap.get("A", "")
-        # Type safety: ensure we're working with a string
-        if not isinstance(a, str):
-            a = str(a) if a else ""
-
-        a_sentences = re.split(r'(?<=[.!?|])\s*', a)
-        cleaned = []
-
-        for sent in a_sentences:
-            sent_stripped = sent.strip()
-            if not sent_stripped:
-                continue
-            is_hallucination = False
-            for pattern in forbidden:
-                m = re.search(pattern, sent_stripped, re.I)
-                if m:
-                    # Proximity negation: check only the 6 words BEFORE the matched term
-                    before = sent_stripped[:m.start()]
-                    nearby_words = before.split()[-6:]
-                    negation_nearby = self._NEGATION_RE.search(" ".join(nearby_words))
-                    if negation_nearby:
-                        break  # term is locally negated — keep it
-                    is_hallucination = True
-                    break
-            if not is_hallucination:
-                cleaned.append(sent_stripped)
-
-        soap["A"] = " ".join(cleaned).strip()
-        return soap
-
-    def _inject_bladder_bowel_into_objective(self, transcript: str, soap: dict) -> dict:
-        """
-        Cauda-equina safety net for LWS/MT cases.
-        If the therapist mentioned bladder/bowel function but the AI buried it
-        in S or A instead of O, extract and place it explicitly in O.
-        """
-        t = transcript.lower()
-
-        # Only relevant for spinal/MT cases
-        is_spinal = any(k in t for k in [
-            "lws", "lumbal", "l4", "l5", "s1", "ischias",
-            "bandscheib", "manuelle therapie", " mt ", "hws",
-        ])
-        if not is_spinal:
-            return soap
-
-        # Already in O — nothing to do
-        o = soap.get("O", "")
-        # Type safety: ensure we're working with a string
-        if not isinstance(o, str):
-            o = str(o) if o else ""
-
-        if re.search(r'blasen|mastdarm|harninkontinenz|stuhlinkontinenz|miktion', o, re.I):
-            return soap
-
-        # Detect the finding from transcript
-        negated = bool(re.search(
-            r'keine?\s+blasen.?mastdarm|kein(?:e)?\s+(?:harn|stuhl)inkontinenz|'
-            r'blasen.?mastdarm(?:funktion|kontrolle|störung)?\s*(?:unauffällig|negativ|o\.?b\.?n\.?|nicht\s+gestört)|'
-            r'miktion\s+(?:regelrecht|unauffällig)|'
-            r'kontinenz\s+erhalten',
-            t, re.I
-        ))
-        positive = bool(re.search(
-            r'blasen.?mastdarm(?:störung|inkontinenz|verlust|ausfall)|'
-            r'harninkontinenz|stuhlinkontinenz|'
-            r'miktion\s+(?:gestört|eingeschränkt|schmerzhaft)',
-            t, re.I
-        ))
-
-        if negated:
-            finding = "Blasen-/Mastdarmfunktion: unauffällig (Cauda-equina-Screening: negativ)"
-        elif positive:
-            finding = "Blasen-/Mastdarmfunktion: GESTAERT — sofortige aerztliche Abklaerung erforderlich!"
-        else:
-            return soap  # not mentioned — don't fabricate
-
-        soap["O"] = (o.rstrip(" |") + " | " + finding).lstrip(" |")
-        return soap
-
-    def rom_sanity_check(self, transcript: str, parsed: dict) -> dict:
-        """
-        COMPREHENSIVE ROM validation across ALL body regions.
-        Prevents cross-contamination and anatomically impossible values.
-        """
-        obj = parsed["soap"].get("O", "")
-        if not isinstance(obj, str):
-            obj = str(obj) if obj else ""
+        # ── Rule 1: EXTREMITY profiles ONLY remove SPINE contamination ──
+        # (Extremities can co-occur - e.g., shoulder impingement with knee compensation)
+        if any(ex in profile_normalized for ex in ["KNIE", "KNEE", "SCHULTER", "SHOULDER",
+                                                     "FUSS", "FOOT", "HUFT", "HIP",
+                                                     "HAND", "ELLBOGEN", "ELBOW"]):
+            for pattern in all_spine:
+                if re.search(pattern, s_text, re.IGNORECASE):
+                    print(f"⚠️ CONTAMINATION: Removing SPINE mention from {profile_id} session")
+                    s_text = re.sub(r'[^.!?]*' + pattern + r'[^.!?]*[.!?]', '', s_text, flags=re.IGNORECASE)
         
-        profile_id = parsed.get("profile_id", "")
-        t_lower = transcript.lower()
+        # ── Rule 2: SPINE profiles ONLY remove EXTREMITY contamination ──
+        # (Spine sessions shouldn't discuss knee/shoulder unless it's compensatory finding in O-field)
+        elif any(sp in profile_normalized for sp in ["LWS", "HWS", "BWS"]):
+            extremity_patterns = [
+                r"\bKnie\w*\b", r"\bSchulter\w*\b", r"\bEllbogen\w*\b",
+                r"\bHandgelenk\w*\b", r"\bSprunggelenk\w*\b", r"\bHüft\w*\b",
+                r"\bFuß\w*\b", r"\bFuss\w*\b",
+            ]
+            for pattern in extremity_patterns:
+                if re.search(pattern, s_text, re.IGNORECASE):
+                    print(f"⚠️ CONTAMINATION: Removing EXTREMITY mention from {profile_id} session")
+                    s_text = re.sub(r'[^.!?]*' + pattern + r'[^.!?]*[.!?]', '', s_text, flags=re.IGNORECASE)
         
-        # Define what ROM data belongs to each body region
-        REGION_ROM_MAP = {
-            "SPINE_LWS": {
-                "allowed": ["FBA", "Finger-Boden", "Schober", "Flexion LWS", "Extension LWS", "Latflex"],
-                "forbidden": ["OSG", "Sprunggelenk", "Dorsalextension", "Plantarflexion", 
-                             "Schulter", "Abduktion", "ARO", "IRO",
-                             "Knie", "Flexion Knie",
-                             "Hüfte", "Flexion Hüfte"],
-                "profiles": ["EX_LWS", "MT"],
-                "keywords": ["lws", "lumbal", "lendenwirbel", "kreuzschmerz", "bandscheib"],
-                "impossible_patterns": [r'ROM\s+LWS[^|]*0-0-\d{2,3}'],  # LWS flexion not in degrees
-            },
-            "SPINE_HWS": {
-                "allowed": ["HWS", "Rotation HWS", "Flexion HWS", "Extension HWS", "Latflex HWS"],
-                "forbidden": ["OSG", "FBA", "Finger-Boden", "Schulterabduktion",
-                             "Knie", "Hüfte"],
-                "profiles": ["EX_HWS"],
-                "keywords": ["hws", "halswirbel", "zervikal", "nacken"],
-                "impossible_patterns": [],
-            },
-            "EXTREMITY_SHOULDER": {
-                "allowed": ["Schulter", "Abduktion", "Flexion Schulter", "ARO", "IRO", "Painful Arc"],
-                "forbidden": ["OSG", "FBA", "Knie", "ROM Knie", "Hüfte", "Trendelenburg"],
-                "profiles": ["EX_SCHULTER"],
-                "keywords": ["schulter", "rotatorenmanschette", "impingement"],
-                "impossible_patterns": [],
-            },
-            "EXTREMITY_KNEE": {
-                "allowed": ["Knie", "Flexion Knie", "Extension Knie", "Lachman", "McMurray"],
-                "forbidden": ["Schulter", "ARO", "IRO", "FBA", "Schober", "OSG"],
-                "profiles": ["EX_KNIE"],
-                "keywords": ["knie", "kniegelenk", "meniskus", "kreuzband"],
-                "impossible_patterns": [],
-            },
-            "EXTREMITY_HIP": {
-                "allowed": ["Hüfte", "Flexion Hüfte", "Abduktion Hüfte", "Trendelenburg", "Thomas"],
-                "forbidden": ["Schulter", "Knie Extension", "OSG", "FBA", "Schober"],
-                "profiles": ["EX_HUefte", "EX_HUFTE"],
-                "keywords": ["hüfte", "coxarthrose", "gluteus", "trochanter"],
-                "impossible_patterns": [],
-            },
-            "EXTREMITY_ANKLE": {
-                "allowed": ["OSG", "Sprunggelenk", "Dorsalextension", "Plantarflexion", "Schublade"],
-                "forbidden": ["FBA", "Finger-Boden", "Schober", "Schulter", "Hüfte"],
-                "profiles": ["EX_FUSS"],
-                "keywords": ["sprunggelenk", "knöchel", "osg", "achillessehne"],
-                "impossible_patterns": [],
-            },
-        }
+        # Clean up S-field formatting
+        s_text = re.sub(r'\s{2,}', ' ', s_text)
+        s_text = re.sub(r'^\s*[.!?]\s*', '', s_text)  # Remove leading punctuation
+        s_text = s_text.strip()
         
-        # Determine current region
-        current_region = None
+        # Update soap_dict with cleaned fields
+        soap_dict["S"] = s_text
+        soap_dict["O"] = obj_text
         
-        # Try profile-based detection first
-        for region, config in REGION_ROM_MAP.items():
-            if profile_id in config["profiles"]:
-                current_region = region
-                break
-        
-        # If no profile match, use keyword-based detection
-        if not current_region:
-            for region, config in REGION_ROM_MAP.items():
-                if any(kw in t_lower for kw in config["keywords"]):
-                    current_region = region
-                    break
-        
-        # Apply cleaning if region identified
-        if current_region:
-            config = REGION_ROM_MAP[current_region]
-            
-            # Remove forbidden data
-            for forbidden_term in config["forbidden"]:
-                # Remove patterns like "ROM OSG: ..." or "| OSG: ..." or "Dorsalextension: ..."
-                obj = re.sub(rf'\s*\|\s*(?:ROM\s+)?{re.escape(forbidden_term)}[^|]*', '', obj, flags=re.I)
-                obj = re.sub(rf'(?:ROM\s+)?{re.escape(forbidden_term)}[^|]*\|?', '', obj, flags=re.I)
-            
-            # Remove anatomically impossible patterns
-            for impossible_pattern in config["impossible_patterns"]:
-                obj = re.sub(impossible_pattern, '', obj, flags=re.I)
-        
-        # Check for ROM hallucinations (values not in transcript)
-        t_nums = set(re.findall(r"\b\d+\b", transcript))
-        rom_findings = list(re.findall(r"(\d+)-0-(\d+)", obj))
-        
-        for l, r in rom_findings:
-            if l not in t_nums or r not in t_nums:
-                parsed.setdefault("compliance_check", [])
-                parsed["compliance_check"].append(
-                    f"⚠️ ROM-Wert {l}-0-{r} nicht im Transkript erwähnt - bitte überprüfen!"
-                )
-        
-        # Clean up formatting
-        obj = obj.strip()
-        obj = re.sub(r'\s+\|', ' |', obj)  # Clean up spacing before pipes
-        obj = re.sub(r'\|\s+', ' | ', obj)  # Clean up spacing after pipes
-        obj = re.sub(r'\|\s*\|+', ' | ', obj)  # Remove double/triple pipes
-        obj = re.sub(r'^\s*\|\s*', '', obj)  # Remove leading pipe
-        obj = re.sub(r'\s*\|\s*$', '', obj)  # Remove trailing pipe
-        obj = re.sub(r'\s+', ' ', obj)  # Collapse multiple spaces
-        
-        if obj and obj != "n.d.":
-            parsed["soap"]["O"] = obj
-        
-        return parsed
-
-    # ── Billing ────────────────────────────────────────────────────────────────
-
-    def suggest_billing(self, icd10: str, soap: dict, transcript: str, profile_id: str = ""):
-        codes = self.config.billing_codes
-        t_low = transcript.lower() if isinstance(transcript, str) else ""
-
-        plan_val = soap.get("P", "")
-        plan_text = plan_val.lower() if isinstance(plan_val, str) else ""
-
-        obj_val = soap.get("O", "")
-        obj_text = obj_val.lower() if isinstance(obj_val, str) else ""
-
-        full_text = f"{obj_text} {plan_text} {t_low}"
-
-        # Detect spine-specific indicators FIRST before is_neuro check
-        # This prevents LWS cases from being misclassified as neuro just because
-        # the LLM hallucinated a stroke ICD code
-        spine_indicators = any(k in full_text for k in [
-            "schober", "lasègue", "lasegue", "lasek",
-            "l4/l5", "l5/s1", "l3/l4", "lumbal", "lws", "lendenwirbel",
-            "hws", "halswirbel", "c5/c6", "c6/c7", "c4/c5", "c0/c1", "c1/c2",
-            "zervikalsyndrom", "zervikal", "zervikogen",
-            "nacken", "nackenschmerz", "atlasübergang", "atlas", "okziput",
-            "kopfgelenk", "subokzipital",
-            "bandscheibenvorfall", "diskushernie", "spinalkanalstenose",
-            "ischiasschmerz", "lumboischialgie", "radikulär",
-            "wirbelsäule", "facettensyndrom", "iliosakralgelenk", "isg"
-        ])
-
-        # Profile-based override: if profile_id clearly indicates spine, force spine ICD
-        # This prevents LLM hallucinations from overriding correct profile detection
-        is_spine_profile = profile_id in ("EX_LWS", "EX_HWS", "MT")
-        
-        # is_neuro should NOT be true just because of ICD code - check actual symptoms
-        # Exclude spine cases even if LLM hallucinated a neuro ICD code
-        is_neuro = (not is_spine_profile and not spine_indicators and 
-                   any(k in full_text for k in ["bobath", "pnf", "neuro", "zns", "hemiparese", "ataxie", "spastik", "insult", "schlaganfall"]))
-        
-        _ly_profile = profile_id in ("LY", "LY1", "") or not profile_id
-        is_lymph = _ly_profile and any(
-            k in full_text for k in ["lymphoedem", "lymphödem", "kpe", "entstauung", "stemmer", "lipödem"]
-        )
-        is_ortho_mt = any(k in full_text for k in ["manuelle therapie", " mt ", "traktion", "gleitmobilisation", "manipulation", "mobilisation"])
-
-        res_icd = icd10
-        
-        # Priority 1: Spine cases (EX_LWS, EX_HWS, MT profiles) - override any wrong ICD
-        if is_spine_profile or spine_indicators:
-            # Check for specific spine region
-            if any(k in full_text for k in ["hws", "halswirbel", "c5/c6", "c6/c7", "c4/c5", "zervikalsyndrom", "nacken"]):
-                res_icd = "M54.2"  # Cervical pain
-            elif any(k in full_text for k in ["bandscheibenvorfall", "diskushernie", "radikulär", "ausstrahlung ins bein"]):
-                res_icd = "M51.1"  # Lumbar disc herniation with radiculopathy
-            elif any(k in full_text for k in ["lws", "lumbal", "lendenwirbel", "kreuzschmerz", "rückenschmerz", "quadratus lumborum"]):
-                res_icd = "M54.5"  # Low back pain
-            elif any(k in full_text for k in ["isg", "iliosakralgelenk", "sacroiliakal"]):
-                res_icd = "M54.5"  # Low back pain (ISG is lumbar region)
-            else:
-                res_icd = "M54.5"  # Default low back pain
-        # Priority 2: Neurological cases (only if NOT spine)
-        elif is_neuro:
-            if not icd10.startswith(("G", "I69")):
-                res_icd = "I69.3"
-        # Priority 3: Lymphatic cases
-        elif is_lymph:
-            if not icd10.startswith("I89"):
-                res_icd = "I89.0"
-        # Priority 4: Other orthopedic conditions
-        else:
-                hip_fracture_ctx = any(k in t_low for k in [
-                    "schenkelhalsfraktur", "schenkelhals", "hüftfraktur", "femurhalsfraktur",
-                    "pertrochantär", "pertrochantar", "subtrochantär",
-                ])
-                hip_ctx = any(k in t_low for k in [
-                    "hüft", "huefte", "koxarthrose", "hüft-tep", "hüftprothese",
-                    "femur", "oberschenkelhals",
-                ])
-
-                if hip_fracture_ctx:
-                    is_osteoporotic = any(k in t_low for k in ["osteoporose", "osteoporotisch", "knochendichte"])
-                    res_icd = "M80.05" if is_osteoporotic else "S72.0"
-                elif icd10.startswith("M81") and any(k in t_low for k in ["fraktur", "bruch", "gebrochen"]):
-                    res_icd = "M80.05" if hip_ctx else "M80.08"
-                # "schulter" alone is too broad — patients mention shoulders
-                # as secondary context (e.g. "Schmerz im Nacken und Schultern").
-                # Only trigger the shoulder override when no neck/cervical context exists.
-                _neck_ctx = any(k in full_text for k in [
-                    "nacken", "hws", "atlasübergang", "zervikal", "c0/c1", "c1/c2",
-                ])
-                _is_schulter = ("schulter" in t_low and not _neck_ctx) or icd10.startswith("M75")
-                _is_knie     = "knie" in t_low or icd10.startswith("M17")
-                if _is_schulter and not icd10.startswith("M75"):
-                    res_icd = "M75.4"
-                elif _is_knie and not _is_schulter and not icd10.startswith("M17"):
-                    res_icd = "M17.1"
-                elif hip_ctx and not _is_schulter and not _is_knie and not icd10.startswith(("M16", "M80", "S72")):
-                    res_icd = "M16.1"
-                elif (not _is_schulter and not _is_knie and not hip_ctx and
-                      (any(k in t_low for k in ["hexenschuss", "lumbago", "ischiasschmerz", "lws"]) or
-                       re.search(r'rücken(?:schmerz|weh|beschwerden|problem)', t_low))):
-                    res_icd = "M54.5"
-                    if any(k in t_low for k in ["ausstrahlung", "lasegue", "radikulär", "bein", "wade"]):
-                        res_icd = "M51.1"
-
-        # Apply ICD domain lock before billing allocation
-        res_icd = self._lock_icd_domain(res_icd, soap, transcript)
-
-        if "krankengymnastik" in plan_text or " kg" in plan_text:
-            if is_neuro:
-                return res_icd, codes.get("KG_ZNS", "20511")
-            return res_icd, codes.get("KG", "20501")
-
-        if is_neuro:
-            return res_icd, codes.get("KG_ZNS", "20511")
-        # MT must NOT override lymph — a lymph case mentioning "mobilisation" is still MLD
-        if is_ortho_mt and not is_lymph:
-            return res_icd, codes.get("MT", "21201")
-        if is_lymph:
-            # Post-cancer / oncological secondary lymphedema → KPE (21110)
-            is_post_cancer = any(k in t_low for k in [
-                "ablation", "mastektomie", "mamma", "sentinel",
-                "bestrahlung", "axillaer", "onkol", "karzinom",
-            ])
-            if is_post_cancer:
-                res_icd = "I97.21" if not res_icd.startswith("I97") else res_icd
-                return res_icd, codes.get("KPE_I", "21110")
-
-            # Oct 2024 rule: duration determined by stadium, not just time keyword
-            is_stadium2_3 = any(k in t_low for k in [
-                "stadium 2", "stadium 3", "irreversibel", "fibrosiert",
-                "elephantiasis", "hart", "derb",
-                "prall", "chronisch", "delle bleibend", "persistierend",
-            ])
-            two_parts = bool(re.search(
-                r"arm.*bein|bein.*arm|beidseitig|bilateral|"
-                r"(?:hand|ober|unter).{0,10}(?:ober|unter)|zwei.{0,10}(?:glied|extrem)",
-                t_low
-            ))
-            explicit_60 = bool(re.search(r"60\s*(?:min|minuten)", t_low))
-            explicit_30 = bool(re.search(r"30\s*(?:min|minuten)", t_low))
-
-            if is_stadium2_3 or explicit_60:
-                return res_icd, codes.get("MLD_60", "20202")
-            if explicit_30 and not two_parts:
-                return res_icd, codes.get("MLD_30", "20205")
-            return res_icd, codes.get("MLD_45", "20201")
-
-        return res_icd, codes.get("KG", "20501")
-
-    def _lock_icd_domain(self, icd10: str, soap: dict, transcript: str) -> str:
-        """
-        Safety net: prevent cross-domain ICD-10 coding errors.
-        E.g. a stroke patient must never receive a knee code (M17).
-        Uses a 2-hit confidence threshold for hard blocks.
-        """
-        if not icd10:
-            return icd10
-
-        t = transcript.lower() if isinstance(transcript, str) else ""
-        a_text = (soap.get("A", "") or "").lower()
-        combined = f"{t} {a_text}"
-
-        # Tension headache / cervicogenic headache → G44.2 (prevents M45/M51 upcoding)
-        is_tension_ha = any(k in t for k in [
-            "spannungskopfschmerz", "tension headache", "kopfschmerz",
-            "schädelbasis", "subokzipital",
-        ])
-        is_hws_context = any(k in t for k in [
-            "nacken", "hws", "trapezius", "scaleni", "zervik", "cervical",
-        ])
-        if is_tension_ha and is_hws_context:
-            if re.match(r"^M4[5-9]|^M51|^M54$", icd10):
-                return "G44.2"  # Spannungskopfschmerz — no M45/M51 for headache sessions
-
-        # M51.1 carve-out: disc herniation with neurological signs is legitimately M5x
-        if re.match(r"^M5[0-9]", icd10):
-            disc_neuro = bool(re.search(
-                r"bandscheib|diskus|prolaps|protrusion|radikulär|ausstrahlung|dermatom",
-                combined
-            ))
-            if disc_neuro:
-                return icd10  # preserve M51.1 etc.
-
-        # Domain keyword sets
-        domains = {
-            "neuro_stroke":  (["schlaganfall", "apoplex", "insult", "hemiparese", "hemiplegie",
-                                "hirninfarkt", "tia", "stroke"], "I69.3"),
-            "neuro_parkinson": (["parkinson", "tremor", "rigor", "bradykinese",
-                                  "hoehn yahr", "hoehn-yahr"], "G20"),
-            "neuro_ms":      (["multiple sklerose", "ms-schub", "ms schub", "demyelini",
-                                "fatigue ms", "gangstörung ms"], "G35"),
-            "neuro_facial":  (["fazialisparese", "fazialis", "bellsche",
-                                "gesichtslähmung", "house-brackmann"], "G51.0"),
-            "lymph":         (["lymphödem", "lymphdrainage", "mld", "entstauung",
-                                "stemmer", "kpe", "lipödem"], "I89.0"),
-            "copd":          (["copd", "atemwegsobstruktion", "emphysem", "dyspnoe",
-                                "atemtherapie", "atemübung"], "J44.1"),
-        }
-
-        for domain, (keywords, fallback_icd) in domains.items():
-            hits = sum(1 for kw in keywords if kw in combined)
-            if hits >= 2:
-                if domain.startswith("neuro_") and icd10[0] == "M":
-                    return fallback_icd
-                if domain == "lymph" and icd10[0] == "M":
-                    return fallback_icd
-                if domain == "copd" and icd10[0] == "M":
-                    return fallback_icd
-
-        return icd10
-
-    # ── Compliance ────────────────────────────────────────────────────────────
-
-    def compliance_check(self, soap: dict, billing_code: str) -> list:
-        warns = []
-        obj_val = soap.get("O", "")
-        obj = obj_val.lower() if isinstance(obj_val, str) else ""
-
-        for f in self.audit_rules.get("red_flags", []):
-            idx = obj.find(f.lower())
-            if idx != -1:
-                after = obj[idx: idx + 70]
-                if not any(n in after for n in ["negativ", "unauffällig", "keine", "kein", "ausgeschlossen", "normal"]):
-                    warns.append(f"🔴 NOTFALL: {f.upper()}!")
-
-        if billing_code in ["21201", "20511"] and len(obj) < 60:
-            warns.append(f"📋 DOKU: Befunddichte zu gering für {billing_code}.")
-
-        if "°" in obj and not re.search(r"\d+-\d+-\d+", obj):
-            warns.append("⚠️ HINWEIS: Bitte Neutral-Null-Methode nutzen.")
-
-        return warns if warns else ["✅ Dokumentation GKV-konform."]
-
-    # ── JSON parsing ───────────────────────────────────────────────────────────
-
-    def parse_robust_json(self, text: str) -> dict:
-        """
-        Robust JSON parser with multiple fallback strategies for malformed LLM output.
-        Ensures all SOAP fields are strings, not nested objects.
-        """
-        text = text.strip()
-        if not text.startswith("{"):
-            text = "{" + text
-
-        # Strategy 1: Try direct parse with basic JSON cleaning
-        try:
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                clean = match.group()
-                
-                # Fix common JSON errors
-                clean = re.sub(r",\s*([\]}])", r"\1", clean)  # Remove trailing commas
-                clean = re.sub(r'"\s*\n\s*"', '", "', clean)  # Fix line breaks between strings
-                
-                data = json.loads(clean)
-                soap_raw = data.get("soap", {})
-                
-                # Ensure all SOAP fields are strings, not nested objects
-                soap_clean = {}
-                for field in ["S", "O", "A", "P"]:
-                    value = soap_raw.get(field, "")
-                    if isinstance(value, dict):
-                        value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
-                    elif not isinstance(value, str):
-                        value = str(value) if value else "N/A"
-                    # Flatten embedded JSON object string: {"key": "val"} | rest → key: val | rest
-                    if isinstance(value, str) and value.strip().startswith("{"):
-                        try:
-                            import json as _json
-                            _dec = _json.JSONDecoder()
-                            _obj, _end = _dec.raw_decode(value.strip())
-                            if isinstance(_obj, dict):
-                                _flat = " | ".join(f"{k}: {v}" for k, v in _obj.items() if v)
-                                _rest = value.strip()[_end:].strip().lstrip("|").strip()
-                                value = (_flat + " | " + _rest) if _rest else _flat
-                        except Exception:
-                            pass
-                    value = KuraEngine._strip_rule_text(value) if value else value
-                    soap_clean[field] = value.strip() if value else "N/A"
-
-                raw_icd = data.get("icd10", "M99.9")
-                # Normalise spaced codes: "M54. 2. x" → "M54.2"
-                icd10_val = re.sub(r'\b([A-Z]\d{2})\.\s+(\d{1,2})(?:\.\s*\w)?\b', r'\1.\2', str(raw_icd))
-                if not re.match(r'^[A-Z]\d{2}(\.\d{1,2})?$', icd10_val):
-                    icd10_val = "M99.9"
-                # Rescue ICD if LLM embedded it in A-field instead of top-level
-                if icd10_val == "M99.9":
-                    a_text = soap_clean.get("A", "")
-                    _icd_rescue = re.search(r'\b([A-Z]\d{2})\s*\.?\s*(\d+)\b', a_text)
-                    if _icd_rescue:
-                        icd10_val = _icd_rescue.group(1) + "." + _icd_rescue.group(2)
-                return {
-                    "icd10": icd10_val,
-                    "soap": soap_clean,
-                    "billing_suggestion": data.get("billing_suggestion", "20501"),
-                }
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"⚠️ JSON Strategy 1 failed: {e}")
-
-        # Strategy 2: Extract fields with regex (more lenient)
-        try:
-            soap_dict = {}
-            for field in ["S", "O", "A", "P"]:
-                # Try to match quoted string value
-                pattern = rf'"{field}"\s*:\s*"([^"]*(?:\\"[^"]*)*)"'
-                match = re.search(pattern, text, re.DOTALL)
-                if match:
-                    soap_dict[field] = match.group(1).replace('\\"', '"').strip()
-                else:
-                    # Try to extract any content after field name (handles malformed JSON)
-                    alt_pattern = rf'"{field}"\s*:\s*([^,\}}]+)'
-                    alt_match = re.search(alt_pattern, text, re.DOTALL)
-                    if alt_match:
-                        value = alt_match.group(1).strip().strip('"\'')
-                        soap_dict[field] = value if value else "N/A"
-                    else:
-                        soap_dict[field] = "N/A"
-
-            icd_match = re.search(r'"icd10"\s*:\s*"([A-Z]\d{2}[\.\d\s]*)"', text)
-            icd = re.sub(r'\s', '', icd_match.group(1)) if icd_match else "M99.9"
-
-            billing_match = re.search(r'"billing_suggestion"\s*:\s*"(\d+)"', text)
-            billing = billing_match.group(1) if billing_match else "20501"
-
-            if any(v != "N/A" for v in soap_dict.values()):
-                return {
-                    "icd10": icd,
-                    "soap": soap_dict,
-                    "billing_suggestion": billing,
-                }
-        except Exception as e:
-            print(f"⚠️ JSON Strategy 2 failed: {e}")
-
-        # Strategy 3: Last resort — use n.d. so recover_hard_metrics can still append
-        print("⚠️ All JSON parsing failed, using n.d. fallback")
-        return {
-            "icd10": "M99.9",
-            "soap": {
-                "S": "n.d.",
-                "O": "n.d.",
-                "A": "n.d. | Red Flags klinisch ausgeschlossen.",
-                "P": "n.d."
-            },
-            "billing_suggestion": "20501",
-        }
-
-    # ── Main flow ─────────────────────────────────────────────────────────────
-
-    def _validate_and_fix_soap(self, soap_dict: dict, icd10: str) -> dict:
-        """
-        Validate SOAP dict after parsing - ensure all fields are strings and non-empty.
-        Fixes common LLM errors: empty fields, nested objects, missing Assessment.
-        """
-        # Ensure all SOAP fields exist and are strings
-        for field in ["S", "O", "A", "P"]:
-            value = soap_dict.get(field, "")
-
-            if isinstance(value, dict):
-                value = " | ".join(f"{k}: {v}" for k, v in value.items() if v)
-            elif not isinstance(value, str):
-                value = str(value) if value else ""
-
-            # Flatten embedded JSON object string: {"key": "val"} | rest → key: val | rest
-            if isinstance(value, str) and value.strip().startswith("{"):
-                try:
-                    import json as _json
-                    _dec = _json.JSONDecoder()
-                    _obj, _end = _dec.raw_decode(value.strip())
-                    if isinstance(_obj, dict):
-                        _flat = " | ".join(f"{k}: {v}" for k, v in _obj.items() if v)
-                        _rest = value.strip()[_end:].strip().lstrip("|").strip()
-                        value = (_flat + " | " + _rest) if _rest else _flat
-                except Exception:
-                    pass
-
-            value = KuraEngine._strip_rule_text(value) if value else value
-            if not value or value.strip() in ("N/A", "Fehler", "KI-Fehler", "Parsing-Fehler", "{}"):
-                if field == "A":
-                    value = f"{icd10} | Red Flags klinisch ausgeschlossen."
-                else:
-                    value = "n.d."
-
-            soap_dict[field] = value
-
         return soap_dict
 
     def run_full_flow(self, audio_path: str, status_callback=None, insurance_type=None):
+        """
+        Complete pipeline: audio → transcript → SOAP note → billing
+        
+        Args:
+            audio_path: Path to audio file
+            status_callback: Optional callback for status updates
+            insurance_type: GKV or PKV (defaults to GKV)
+        
+        Returns:
+            dict with keys: icd10, soap, billing_suggestion, billing_result, 
+                           compliance_check, transcript, profile_id, profile_label
+        """
         from shared.billing_engine import BillingEngine, InsuranceType
         if insurance_type is None:
             insurance_type = InsuranceType.GKV
 
-        if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"Audio file not found: {audio_path}")
-
         if status_callback:
             status_callback("✍️ Transkription...")
-        raw_t = self._transcribe(audio_path)
-        transcript = self.clean_transcript(raw_t)
+        
+        # Transcribe audio using the safe method with FFmpeg fallback
+        audio_size = os.path.getsize(audio_path) if os.path.exists(audio_path) else 0
+        print(f"🎤 Whisper start | audio={audio_path} ({audio_size} bytes)")
+        
+        # Use the _transcribe method which has FFmpeg fallback logic
+        raw_transcript = self._transcribe(audio_path)
+        print(f"✅ Whisper done | transcript length={len(raw_transcript)}")
+        
+        transcript = self.clean_transcript(raw_transcript)
 
+        # Detect profile
         profile_id = self._detect_profile(transcript)
         prof_label = self._PROFILES[profile_id]["label"]
-
+        
         if status_callback:
-            status_callback(f"🧠 KI-Analyse [{prof_label}]...")
-
+            status_callback(f"🤖 KI-Analyse [{prof_label}]...")
+        
+        print(f"🤖 LLM generate start | profile={profile_id}")
         raw_output = self._generate_soap_note(transcript, profile_id)
+        print(f"✅ LLM generate done | output_len={len(raw_output)}")
 
         if status_callback:
             status_callback("🔍 Validierung...")
-        parsed = self.parse_robust_json(raw_output)
+        
+        # Parse JSON output - robust extraction
+        try:
+            # Extract JSON from LLM output (may have extra text)
+            json_match = re.search(r'\{.*"icd10".*"soap".*\}', raw_output, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+            else:
+                parsed = json.loads(raw_output)
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"⚠️ JSON parse error: {e}, using fallback")
+            parsed = {
+                "icd10": "M99.9",
+                "soap": {"S": "n.d.", "O": "n.d.", "A": "n.d.", "P": "n.d."}
+            }
 
-        # ICD correction (profile detection + keyword-based upgrade)
-        icd, _ = self.suggest_billing(parsed["icd10"], parsed["soap"], transcript, profile_id=profile_id)
-        parsed["icd10"] = icd
+        # ICD correction (if suggest_billing method exists)
+        if hasattr(self, 'suggest_billing'):
+            icd, _ = self.suggest_billing(parsed["icd10"], parsed["soap"], transcript, profile_id=profile_id)
+            parsed["icd10"] = icd
+        else:
+            icd = parsed["icd10"]
 
-        parsed["soap"] = self.apply_medical_corrections(parsed["soap"], profile_id=profile_id)
-        parsed["soap"] = self._clean_subjective_field(parsed["soap"], transcript)
+        # Apply all post-processing corrections (only if methods exist)
+        if hasattr(self, 'apply_medical_corrections'):
+            parsed["soap"] = self.apply_medical_corrections(parsed["soap"], profile_id=profile_id)
+        
         parsed["soap"] = self.recover_hard_metrics(transcript, parsed["soap"], profile_id=profile_id)
-        if profile_id == "LY":
+        
+        # Lymphedema staging (if applicable and method exists)
+        if profile_id == "LY" and hasattr(self, '_inject_ly_staging'):
             parsed["soap"] = self._inject_ly_staging(transcript, parsed["soap"])
-        parsed["soap"] = self._migrate_diagnoses_from_s_to_a(parsed["soap"])
-        parsed["soap"] = self._clean_hallucinated_regions(parsed["soap"], icd, profile_id)
-        parsed["soap"] = self._inject_bladder_bowel_into_objective(transcript, parsed["soap"])
-        parsed["soap"] = self.inject_audit_stamps(parsed["soap"])
-        parsed = self.rom_sanity_check(transcript, parsed)
+            suffix = parsed["soap"].pop("_ly_icd_suffix", None)
+            if suffix and re.match(r"^[IQE]\d{2}\.\d$", icd):
+                icd = icd + suffix
+            elif suffix and re.match(r"^[IQE]\d{2}\.\d0?$", icd):
+                base = icd.rstrip("0") if icd.endswith("0") and len(icd) > 5 else icd
+                icd = base + suffix
+                parsed["icd10"] = icd
+        
+        # Apply remaining post-processing (if methods exist)
+        if hasattr(self, '_migrate_diagnoses_from_s_to_a'):
+            parsed["soap"] = self._migrate_diagnoses_from_s_to_a(parsed["soap"])
+        if hasattr(self, '_clean_hallucinated_regions'):
+            parsed["soap"] = self._clean_hallucinated_regions(parsed["soap"], icd, profile_id)
+        if hasattr(self, '_inject_bladder_bowel_into_objective'):
+            parsed["soap"] = self._inject_bladder_bowel_into_objective(transcript, parsed["soap"])
+        if hasattr(self, 'inject_audit_stamps'):
+            parsed["soap"] = self.inject_audit_stamps(parsed["soap"])
+        if hasattr(self, 'rom_sanity_check'):
+            parsed = self.rom_sanity_check(transcript, parsed)
 
-        # Validate and fix SOAP fields before final processing
-        parsed["soap"] = self._validate_and_fix_soap(parsed["soap"], icd)
-
-        if status_callback:
-            status_callback("💰 Abrechnung berechnen...")
-        # Dual billing engine: GKV deterministic / PKV AI-assisted / BG DGUV
+        # Billing evaluation
         billing_result = BillingEngine().evaluate(
             icd10=icd,
             soap=parsed["soap"],
@@ -3214,10 +2398,6 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             pkv_preise=self.config.pkv_preise,
             profile_id=profile_id,
         )
-
-        if status_callback:
-            status_callback("✅ Fertig!")
-
 
         return {
             "icd10": icd,
@@ -3230,7 +2410,3 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
             "profile_label": prof_label,
         }
 
-    def cleanup(self):
-        self.llm = None
-        self.whisper = None
-        gc.collect()

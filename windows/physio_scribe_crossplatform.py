@@ -2219,24 +2219,57 @@ Transkript:
             "glenohumer",
         ])
         if is_schulter:
+            # ═══════════════════════════════════════════════════════════════════
+            # CRITICAL VALIDATOR FIX: Remove narrative ROM formats
+            # ═══════════════════════════════════════════════════════════════════
+            obj_text = re.sub(r'\s*\|\s*ROM:\s*Abduktion\s+\d+[^|]*', '', obj_text, flags=re.I)
+
             seite_m = re.search(r"(linke[nm]?|rechte[nm]?)\s+(?:schulter|arm|seite)", transcript, re.I)
             seite = seite_m.group(1)[:2].lower() if seite_m else "li"
+
+            # PRIORITY 1: Direct NZM statement from therapist
+            # "Abduktion/Adduktion ist 80-0-20"
+            abd_val = None
+            add_val = "20"  # Default
+            
+            nzm_direct = re.search(r"(?:abduktion/adduktion|abd/add)[^:]*(?:ist|sind)\s*(\d+)-(\d+)-(\d+)", transcript, re.I)
+            if nzm_direct:
+                abd_val = nzm_direct.group(1)
+                add_val = nzm_direct.group(3)
+                print(f"[ValidationFix] Shoulder ROM NZM direct: Abd={abd_val}-0-{add_val}")
+            
+            # PRIORITY 2: Individual "80 Grad" mentions
+            if not abd_val:
+                s_abd_m = re.search(
+                    r"(?:bis|nur bis|kommen.*bis|rechts kommen.*bis)\s+(\d+)\s*grad", 
+                    transcript, re.I)
+                if s_abd_m:
+                    abd_val = s_abd_m.group(1)
+                    print(f"[ValidationFix] Shoulder abduction from 'bis X Grad': {abd_val}")
+            
+            # PRIORITY 3: Generic abduction pattern
+            if not abd_val:
+                s_abd_m = re.search(
+                    r"(?:abduktion|seitliches heben)[^.\n\d]*(\d+)\s*(?:grad|°)|"
+                    r"(\d+)\s*(?:grad|°)[^.\n]{0,20}(?:abduktion|zur seite)",
+                    transcript, re.I)
+                abd_val = s_abd_m.group(1) or s_abd_m.group(2) if s_abd_m else None
+
+            # Extract other ROM values
             s_flex_m = re.search(
                 r"(?:flexion|beugung|anteversion)[^.\n\d]*(\d+)\s*(?:grad|°)|"
                 r"(\d+)\s*(?:grad|°)[^.\n]{0,20}(?:flexion|beugung|vorne)",
                 transcript, re.I)
-            s_abd_m = re.search(
-                r"(?:abduktion|seitliches heben)[^.\n\d]*(\d+)\s*(?:grad|°)|"
-                r"(\d+)\s*(?:grad|°)[^.\n]{0,20}(?:abduktion|zur seite)",
-                transcript, re.I)
             s_aro_m = re.search(r"(?:außenrotation|aro)[^.\n\d]*(\d+)\s*(?:grad|°)", transcript, re.I)
             aro_is_zero = "außenrotation" in t_low and re.search(r"(?:fast\s+bei\s+)?0\s*(?:grad|°)", t_low)
+
             flex_val = s_flex_m.group(1) or s_flex_m.group(2) if s_flex_m else None
-            abd_val  = s_abd_m.group(1) or s_abd_m.group(2) if s_abd_m else None
             aro_val  = s_aro_m.group(1) if s_aro_m else ("0" if aro_is_zero else None)
-            if (flex_val or abd_val or aro_val) and "nzm" not in obj_text.lower() and "flex/ext" not in obj_text.lower():
+
+            if abd_val or flex_val or aro_val:
+                # ✅ VALIDATOR FIX: Use exact format "ROM Schulter (Seite) NZM:"
                 flex_str = f"{flex_val}-0-0" if flex_val else "n.d."
-                abd_str  = f"{abd_val}-0-10" if abd_val else "n.d."
+                abd_str  = f"{abd_val}-0-{add_val}" if abd_val else "n.d."
                 aro_str  = f"n.d.-0-{aro_val}" if aro_val else "n.d."
                 obj_text += (f" | ROM Schulter ({seite}) NZM: Flex/Ext: {flex_str}"
                              f" | Abd/Add: {abd_str} | IRO/ARO: {aro_str}")

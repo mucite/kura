@@ -60,12 +60,17 @@ except ValueError:
 def get_model_dir() -> Path:
     """Get the models directory path."""
     if getattr(sys, "frozen", False):
-        # Running as PyInstaller bundle
-        base = Path(os.path.dirname(sys.executable))
+        # Running as PyInstaller bundle - use persistent user directory
+        # NOT the app bundle (which gets replaced on updates and is read-only)
+        user_app_support = Path(os.path.expanduser("~/Library/Application Support/Kura"))
+        user_app_support.mkdir(parents=True, exist_ok=True)
+        model_dir = user_app_support / "models"
+        print(f"[Bundle mode] Model directory: {model_dir}")
+        return model_dir
     else:
         # Running as Python script - go up from core/ to root medic/
         base = Path(__file__).parent.parent
-    return base / "models"
+        return base / "models"
 
 def check_model_exists(model_name: str) -> bool:
     """Check if a model file exists and is complete (not corrupted)."""

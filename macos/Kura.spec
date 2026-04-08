@@ -1,8 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
 import shutil
+import os
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('../models', 'models'), ('../shared', 'shared'), ('../.env.dist', '.'), ('../.env.example', '.'), ('physio_scribe.py', '.'), ('Info.plist', '.'), ('assets', 'assets')]
+# Build datas list - models are optional (downloaded on first launch)
+datas = [
+    ('../core', 'core'),  # Model downloader and utilities
+    ('../shared', 'shared'),  # Shared configuration and utilities
+    ('../.env.dist', '.'),
+    ('../.env.example', '.'),
+    ('physio_scribe.py', '.'),
+    ('Info.plist', '.'),
+    ('assets', 'assets'),
+]
+
+# Only include models if they exist (for development builds)
+# Production builds download models on first launch to keep installer small
+if os.path.exists('../models') and os.path.isdir('../models'):
+    print("📦 Including models directory in bundle (development build)")
+    datas.append(('../models', 'models'))
+else:
+    print("⚠️  Models directory not found - will be downloaded on first launch (production build)")
 
 # Bundle ffmpeg so customers don't need it installed
 _ffmpeg = shutil.which('ffmpeg')
@@ -15,7 +33,16 @@ if not _ffmpeg:
 if not _ffmpeg:
     raise RuntimeError("ffmpeg not found — run: brew install ffmpeg")
 binaries = [(_ffmpeg, '.')]
-hiddenimports = ['mlx', 'mlx.core', 'mlx.nn', 'mlx.optimizers', 'mlx._reprlib_fix', 'mlx_lm', 'mlx_lm.models', 'mlx_lm.models.llama', 'mlx_whisper', 'fpdf', 'requests', 'dotenv', 'rumps', 'sounddevice', 'numpy', 'tkinter', 'physio_scribe', 'shared.config_manager', 'shared.license_manager', 'shared.practice_config']
+hiddenimports = [
+    'mlx', 'mlx.core', 'mlx.nn', 'mlx.optimizers', 'mlx._reprlib_fix',
+    'mlx_lm', 'mlx_lm.models', 'mlx_lm.models.llama',
+    'mlx_whisper',
+    'fpdf', 'requests', 'dotenv', 'rumps', 'sounddevice', 'numpy', 'tkinter',
+    'physio_scribe',
+    'shared.config_manager', 'shared.license_manager', 'shared.practice_config',
+    'core.model_downloader', 'core.model_download_dialog',
+    'huggingface_hub', 'huggingface_hub.hf_api', 'huggingface_hub.file_download',
+]
 tmp_ret = collect_all('mlx')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('mlx_lm')

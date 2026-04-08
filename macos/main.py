@@ -767,16 +767,23 @@ class KuraApp(rumps.App):
 
             self._set_status("⏳ Modelle laden... (0%)")
 
-            # Resolve correct models path first (bundle vs source)
+            # Resolve correct models path
+            # For bundled apps, use persistent user directory (survives app updates)
             if getattr(sys, 'frozen', False):
-                bundle_dir = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
-                models_path = os.path.join(bundle_dir, 'models')
-                print(f"Running as bundle, models path: {models_path}")
+                user_app_support = os.path.expanduser("~/Library/Application Support/Kura")
+                os.makedirs(user_app_support, exist_ok=True)
+                models_path = os.path.join(user_app_support, 'models')
+                print(f"[Bundle mode] Models path: {models_path}")
             else:
+                # Running from source
                 models_path = os.path.join(os.path.dirname(__file__), '..', 'models')
+                print(f"[Source mode] Models path: {models_path}")
 
+            # Models will be downloaded on first launch if missing
+            # This check is now handled inside KuraEngine.__init__
             if not os.path.exists(models_path):
-                raise FileNotFoundError(f"Models directory not found: {models_path}")
+                print(f"⚠️  Models directory doesn't exist yet: {models_path}")
+                print(f"    Will be created during first-launch model download")
 
             self._set_status("⏳ Modelle laden... (30%)")
 

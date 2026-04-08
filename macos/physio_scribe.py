@@ -64,14 +64,18 @@ class KuraEngine:
         self.whisper_config = self.config.data.get("whisper_config", {})
 
     def _setup_paths(self):
+        # For bundled apps, models should be in a persistent user directory
+        # NOT inside the app bundle (which is read-only and gets replaced on updates)
         if getattr(sys, 'frozen', False):
-            # PyInstaller COLLECT+BUNDLE: models land in Contents/MacOS/ next to the exe.
-            # _MEIPASS is set for one-file builds; for one-dir COLLECT it equals the exe dir.
-            # Never use '../Resources' — that path is empty in a COLLECT bundle.
-            base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(sys.executable)))
-            self.model_dir = os.path.join(base_path, "models")
+            # Running as PyInstaller bundle - use user's Application Support folder
+            user_app_support = os.path.expanduser("~/Library/Application Support/Kura")
+            os.makedirs(user_app_support, exist_ok=True)
+            self.model_dir = os.path.join(user_app_support, "models")
+            print(f"[Bundle mode] Model directory: {self.model_dir}")
         else:
+            # Running from source - use project's models directory
             self.model_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "models")
+            print(f"[Source mode] Model directory: {self.model_dir}")
 
         self.llm_repo  = os.path.join(self.model_dir, "Meta-Llama-3.1-8B-Instruct-4bit")
         self.stt_model = os.path.join(self.model_dir, "whisper-large-v3-turbo")

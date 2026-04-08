@@ -710,6 +710,31 @@ class KuraApp(rumps.App):
     def boot(self):
         """Initialize AI engine with proper error handling"""
         try:
+            self._set_status("⏳ Modelle prüfen...")
+
+            # ── First-launch model download (one-time, ~5.7 GB) ───────────────
+            # Fast path: if models are already on disk this returns instantly.
+            # Slow path (first launch): shows a GUI progress dialog, then continues.
+            try:
+                import sys as _sys, os as _os
+                _core = _os.path.join(_os.path.dirname(__file__), '..', 'core')
+                if _core not in _sys.path:
+                    _sys.path.insert(0, _core)
+                from core.model_download_dialog import show_download_dialog_if_needed_macos
+                models_ready = show_download_dialog_if_needed_macos()
+                if not models_ready:
+                    self._set_status("❌ Modelle fehlen")
+                    self._on_main(lambda: rumps.alert(
+                        "Kura – Setup abgebrochen",
+                        "Die KI-Modelle wurden nicht heruntergeladen.\n\n"
+                        "Bitte stellen Sie eine Internetverbindung her\n"
+                        "und starten Sie Kura neu.",
+                        ok="OK"
+                    ))
+                    return
+            except Exception as _dl_err:
+                print(f"[download-dialog] {_dl_err} — continuing anyway")
+
             self._set_status("⏳ Modelle laden... (0%)")
 
             # Resolve correct models path first (bundle vs source)

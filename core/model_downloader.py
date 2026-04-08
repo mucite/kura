@@ -28,11 +28,12 @@ from pathlib import Path
 
 # Import huggingface_hub at module level to avoid threading issues
 try:
-    from huggingface_hub import hf_hub_download
+    from huggingface_hub import hf_hub_download, snapshot_download
     HF_HUB_AVAILABLE = True
 except ImportError:
     HF_HUB_AVAILABLE = False
     hf_hub_download = None
+    snapshot_download = None
 
 # Thread lock for download operations
 _download_lock = threading.Lock()
@@ -345,6 +346,161 @@ def ensure_models_available() -> bool:
         print("\nDownload cancelled. Partial files saved for next time.")
         print("="*70 + "\n")
         return False
+
+# ══════════════════════════════════════════════════════════════════════════════
+# macOS / MLX model support
+# Models are in safetensors format from mlx-community, downloaded via
+# snapshot_download (entire repo in one call, with resume support).
+# ══════════════════════════════════════════════════════════════════════════════
+
+# macOS model specs: (repo_id, local_subdir, min_size_bytes, description)
+_MACOS_MODELS = [
+    (
+        "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
+        "Meta-Llama-3.1-8B-Instruct-4bit",
+        "model.safetensors",
+        4_000_000_000,   # at least 4 GB
+        "Llama 3.1-8B MLX (Medical AI, ~4.2 GB)",
+    ),
+    (
+        "mlx-community/whisper-large-v3-turbo",
+        "whisper-large-v3-turbo",
+        "weights.safetensors",
+        1_000_000_000,   # at least 1 GB
+        "Whisper large-v3-turbo MLX (Speech recognition, ~1.5 GB)",
+    ),
+]
+
+
+def check_macos_model_exists(local_subdir: str, key_file: str, min_size: int) -> bool:
+    """Return True if the local MLX model directory is complete."""
+    model_path = get_model_dir() / local_subdir / key_file
+    if model_path.exists():
+        size = model_path.stat().st_size
+        if size >= min_size:
+            print(f"✅ {local_subdir}: already installed ({size/1e9:.2f} GB)")
+            return True
+        print(f"⚠️  {local_subdir}: incomplete ({size/1e9:.2f} GB) — will re-download")
+    return False
+
+
+def download_macos_model(repo_id: str, local_subdir: str, description: str) -> bool:
+    """Download a full HuggingFace repo (MLX safetensors) via snapshot_download."""
+    with _download_lock:
+        if not HF_HUB_AVAILABLE or snapshot_download is None:
+            print("❌ huggingface_hub not installed. Run: pip install huggingface_hub")
+            return False
+
+        local_dir = get_model_dir() / local_subdir
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
+        if not hf_token or hf_token == "your_token_here":
+            hf_token = None
+
+        print(f"\n📥 Downloading {description}")
+        print(f"   Source : {repo_id}")
+        print(f"   Target : {local_dir}")
+
+        try:
+            snapshot_download(
+                repo_id=repo_id,
+                local_dir=str(local_dir),
+                local_dir_use_symlinks=False,
+                resume_download=True,
+                token=hf_token,
+                ignore_patterns=["*.msgpack", "flax_model*", "tf_model*", "pytorch_model*"],
+            )
+            print(f"✅ {local_subdir} ready")
+            return True
+        except KeyboardInterrupt:
+            print(f"\n⚠️  Download of {local_subdir} cancelled — will resume next time")
+            return False
+        except Exception as e:
+            print(f"❌ Download failed for {local_subdir}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+
+def ensure_models_available_macos() -> bool:
+    """
+    macOS equivalent of ensure_models_available().
+    Downloads MLX LLM + Whisper safetensors on first launch.
+    Subsequent launches skip instantly when files are already present.
+    """
+    global _shutdown_requested
+
+    try:
+        print("\n" + "="*70)
+        print("🔍 CHECKING MODEL AVAILABILITY (macOS / MLX)")
+        print("="*70)
+
+        model_dir = get_model_dir()
+        print(f"Model directory: {model_dir}")
+
+        statuses = [
+            check_macos_model_exists(sub, key, min_sz)
+            for _, sub, key, min_sz, _ in _MACOS_MODELS
+        ]
+
+        if all(statuses):
+            print("✅ All models already installed")
+            print("="*70 + "\n")
+            return True
+
+        print("\n" + "="*70)
+        print("🩺 KURA MEDICAL — FIRST TIME SETUP (macOS)")
+        print("="*70)
+        print("Kura needs to download AI models for local processing.")
+        print("This is a ONE-TIME download (~5.7 GB total).")
+        print("All patient data stays on your Mac — 100% DSGVO compliant.")
+        print("="*70)
+
+        # Check internet
+        print("\n🌐 Checking internet connection...")
+        try:
+            import socket
+            socket.create_connection(("huggingface.co", 443), timeout=5)
+            print("✅ Internet connection OK")
+        except Exception as e:
+            print(f"\n❌ No internet connection: {e}")
+            print("Please connect to the internet and restart Kura.")
+            return False
+
+        success = True
+        for (repo_id, local_subdir, key_file, min_size, description), already_ok in zip(_MACOS_MODELS, statuses):
+            if already_ok or _shutdown_requested:
+                if already_ok:
+                    print(f"\n✅ {local_subdir} already installed — skipping")
+                continue
+            print(f"\n📥 {local_subdir} not found — starting download...")
+            if not download_macos_model(repo_id, local_subdir, description):
+                if _shutdown_requested:
+                    print(f"⚠️  {local_subdir} download cancelled — will resume next time")
+                else:
+                    print(f"❌ {local_subdir} download failed!")
+                success = False
+            else:
+                print(f"✅ {local_subdir} download complete!")
+
+        if _shutdown_requested:
+            print("\n⚠️  SETUP CANCELLED — partial downloads saved for next time")
+            return False
+
+        if success:
+            print("\n" + "="*70)
+            print("✅ SETUP COMPLETE — KURA IS READY!")
+            print("="*70 + "\n")
+        else:
+            print("\n❌ SETUP INCOMPLETE — check internet and restart\n")
+
+        return success
+
+    except (KeyboardInterrupt, SystemExit):
+        print("\n⚠️  SETUP CANCELLED — partial files saved for next time\n")
+        return False
+
 
 if __name__ == "__main__":
     success = ensure_models_available()

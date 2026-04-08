@@ -289,10 +289,9 @@ class ModelDownloadDialog:
 
 def show_download_dialog_if_needed():
     """
-    Show download dialog if models are missing.
+    Show download dialog if models are missing (Windows / GGUF).
     Returns True if models are ready, False if download failed.
     """
-    # Check if models exist
     try:
         from core.model_downloader import check_model_exists
 
@@ -300,20 +299,162 @@ def show_download_dialog_if_needed():
         whisper_exists = check_model_exists("whisper")
 
         if llm_exists and whisper_exists:
-            # Models already exist, no need for dialog
             return True
 
-        # Models missing - show dialog
         dialog = ModelDownloadDialog()
         return dialog.run()
 
     except Exception as e:
-        # Error checking models - show error dialog
         messagebox.showerror(
             "Kura Error",
             f"Error checking models: {type(e).__name__}: {e}\n\n"
             "Please ensure you have internet connection and restart Kura."
         )
+        return False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# macOS / MLX variant
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ModelDownloadDialogMacOS(ModelDownloadDialog):
+    """
+    Same UI as the Windows dialog, but downloads MLX safetensors models
+    (Llama 3.1-8B + Whisper large-v3-turbo) instead of GGUF.
+    """
+
+    def _download_models(self):
+        """Download MLX models (runs in background thread)."""
+        try:
+            # Load .env for HF_TOKEN
+            try:
+                from dotenv import load_dotenv
+                user_data_dir = os.path.expanduser("~/Library/Application Support/Kura")
+                env_file = os.path.join(user_data_dir, ".env")
+                if os.path.exists(env_file):
+                    load_dotenv(env_file)
+                    self.log("✅ Konfiguration geladen")
+            except Exception:
+                pass
+
+            from core.model_downloader import ensure_models_available_macos
+
+            self.update_progress(10, "Internetverbindung prüfen...")
+            self.log("Verbindung zu HuggingFace...\n")
+
+            class ProgressWriter:
+                def __init__(self, dialog):
+                    self.dialog = dialog
+                    self.buffer = ""
+                    self.llm_done = False
+                    self.whisper_done = False
+
+                def write(self, text):
+                    self.buffer += text
+                    if '\n' in text:
+                        lines = self.buffer.split('\n')
+                        for line in lines[:-1]:
+                            if line.strip():
+                                self.dialog.log(line.strip())
+                                ll = line.lower()
+
+                                if "llama" in ll and ("download" in ll or "📥" in ll):
+                                    self.dialog.update_progress(15, "Downloading Llama 3.1-8B (4.2 GB)...")
+                                elif "whisper" in ll and ("download" in ll or "📥" in ll):
+                                    self.dialog.update_progress(70, "Downloading Whisper large-v3-turbo (1.5 GB)...")
+                                elif "llama" in ll and "ready" in ll:
+                                    self.llm_done = True
+                                    self.dialog.update_progress(65, "Llama 3.1-8B ✓")
+                                elif "whisper" in ll and "ready" in ll:
+                                    self.whisper_done = True
+                                    self.dialog.update_progress(95, "Whisper ✓")
+                                elif "already installed" in ll:
+                                    if "llama" in ll or "8b" in ll:
+                                        self.dialog.update_progress(65, "Llama 3.1-8B ✓ (bereits vorhanden)")
+                                    elif "whisper" in ll:
+                                        self.dialog.update_progress(95, "Whisper ✓ (bereits vorhanden)")
+                                elif "setup complete" in ll or "kura is ready" in ll:
+                                    self.dialog.update_progress(100, "Fertig!")
+                        self.buffer = lines[-1]
+
+                def flush(self):
+                    pass
+
+            original_stdout = sys.stdout
+            sys.stdout = ProgressWriter(self)
+            try:
+                result = ensure_models_available_macos()
+            finally:
+                sys.stdout = original_stdout
+
+            if result:
+                self.success = True
+                self.downloading = False
+                self.update_progress(100, "✅ Setup abgeschlossen!")
+                self.log("\n✅ Alle Modelle bereit — Kura startet...")
+                self.root.after(2000, self.close_success)
+            else:
+                self.downloading = False
+                self.show_error("Download fehlgeschlagen. Bitte Internetverbindung prüfen.")
+
+        except Exception as e:
+            self.downloading = False
+            error_msg = f"{type(e).__name__}: {str(e)}"
+            self.log(f"\n❌ FEHLER: {error_msg}")
+            self.show_error(error_msg)
+
+    def show_error(self, error_msg):
+        """Show retry dialog in German."""
+        self.update_progress(0, "❌ Setup fehlgeschlagen")
+        if messagebox.askretrycancel(
+            "Kura Setup Fehler",
+            f"Modell-Download fehlgeschlagen:\n\n{error_msg}\n\n"
+            "Bitte sicherstellen:\n"
+            "• Internetverbindung aktiv\n"
+            "• Mind. 8 GB freier Speicher\n"
+            "• Keine Firewall blockiert huggingface.co\n\n"
+            "Erneut versuchen?"
+        ):
+            self.progress['value'] = 0
+            self.percent_label.config(text="0%")
+            self.log_text.delete("1.0", "end")
+            self.start_download()
+        else:
+            self.success = False
+            self.root.destroy()
+
+
+def show_download_dialog_if_needed_macos() -> bool:
+    """
+    macOS: show the MLX model download dialog if models are missing.
+    Fast path (models present) returns True instantly with no GUI shown.
+    Returns True when models are ready, False if download failed/cancelled.
+    """
+    try:
+        from core.model_downloader import check_macos_model_exists, _MACOS_MODELS
+
+        all_present = all(
+            check_macos_model_exists(sub, key, min_sz)
+            for _, sub, key, min_sz, _ in _MACOS_MODELS
+        )
+        if all_present:
+            return True
+
+        # Suppress output from fast-path checks above before showing GUI
+        dialog = ModelDownloadDialogMacOS()
+        # German UI labels
+        dialog.root.title("Kura – Ersteinrichtung")
+        return dialog.run()
+
+    except Exception as e:
+        try:
+            messagebox.showerror(
+                "Kura Fehler",
+                f"Modell-Prüfung fehlgeschlagen:\n{type(e).__name__}: {e}\n\n"
+                "Bitte Internetverbindung prüfen und Kura neu starten."
+            )
+        except Exception:
+            print(f"[ERROR] Model check failed: {e}")
         return False
 
 

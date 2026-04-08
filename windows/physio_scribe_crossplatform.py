@@ -1,4 +1,4 @@
-"""
+nnon"""
 Kura Engine — Windows
 Inference: llama-cpp-python (GGUF) + openai-whisper (local CPU)
 Clinical logic: identical to macOS (LearningManager, post-processing pipeline, compliance checks)
@@ -886,7 +886,8 @@ class KuraEngine:
             "EX_LWS": [
                 "lws-syndrom", "lws syndrom", "lendenwirbelsäule",
                 "quadratus lumborum", "finger-boden-abstand", "finger-boden-distanz",
-                "lasègue", "lasegue-test", "lasek",
+                "fingerbodenabstand", "fingerboardistanz",
+                "lasègue", "lasegue-test", "lasek", "lasegue",
                 "schober-zeichen", "vorlaufphänomen", "vorlauf-test",
                 "lumbalgie", "lumboischialgie", "kreuzschmerz",
                 "bandscheibenvorfall lumbal", "bandscheibenprotrusion lws",
@@ -2112,38 +2113,59 @@ Transkript:
             # ═══════════════════════════════════════════════════════════════════
             obj_text = re.sub(r'\s*\|\s*ROM[^|]*(?:Ext|Flex|Extension|Flexion)[^|]*', '', obj_text, flags=re.I)
             obj_text = re.sub(r'ROM:\s*Extension/Flexion[^|]*', '', obj_text, flags=re.I)
-            
+
             # ROM Knie — Neutral-Null-Method: Extension-0-Flexion (e.g., 0-10-90)
             # Normal: 0-0-130 to 0-0-150
             # Extension deficit = negative value = "Streckdefizit"
             flex_val = None
             ext_val = None
-            
-            # PRIORITY 1: Direct NZM statement ("0-10-90")
-            nzm_direct = re.search(r"(\d+)-(\d+)-(\d+)", transcript)
-            if nzm_direct:
-                ext_val = nzm_direct.group(2)  # Middle number is extension deficit
-                flex_val = nzm_direct.group(3)  # Last number is flexion
-                print(f"[ROM-Extract] Direct NZM found: 0-{ext_val}-{flex_val}")
-            
-            # PRIORITY 2: "fehlen X Grad" (extension deficit) + "bei Y Grad" (flexion)
+
+            # PRIORITY 0: LLM already wrote "ROM: 0-X-Y" — normalize label and extract values
+            rom_in_obj = re.search(r'\bROM:\s*(\d+)-(\d+)-(\d+)', obj_text, re.I)
+            if rom_in_obj:
+                ext_val = rom_in_obj.group(2)   # middle = extension deficit
+                flex_val = rom_in_obj.group(3)  # last = flexion
+                obj_text = re.sub(r'\s*\|\s*ROM:\s*\d+-\d+-\d+[^|]*', '', obj_text, flags=re.I)
+                obj_text = re.sub(r'^ROM:\s*\d+-\d+-\d+[^|]*\s*\|?\s*', '', obj_text, flags=re.I)
+                print(f"[ROM-Extract] Normalized LLM ROM: format → ext={ext_val}, flex={flex_val}")
+
+            # PRIORITY 1: Direct NZM statement in transcript ("0-10-90")
             if not ext_val or not flex_val:
-                fehlen_m = re.search(r"fehlen[^\d]*(\d+)\s*grad", transcript, re.I)
-                bei_m = re.search(r"bei\s+(\d+)\s*grad", transcript, re.I)
-                
+                nzm_direct = re.search(r"(\d+)-(\d+)-(\d+)", transcript)
+                if nzm_direct:
+                    ext_val = nzm_direct.group(2)  # Middle number is extension deficit
+                    flex_val = nzm_direct.group(3)  # Last number is flexion
+                    print(f"[ROM-Extract] Direct NZM found: 0-{ext_val}-{flex_val}")
+
+            # PRIORITY 2: "fehlen X Grad" (extension deficit) + "bis/bei Y" (flexion, Grad optional)
+            if not ext_val or not flex_val:
+                fehlen_m = re.search(r"fehlen[^\d]*(\d+)\s*(?:grad|°)?", transcript, re.I)
+                bei_m    = re.search(r"(?:bis|bei)\s+(\d+)\s*(?:grad|°)?", transcript, re.I)
+
                 if fehlen_m:
                     ext_val = fehlen_m.group(1)
                     print(f"[ROM-Extract] Extension deficit from 'fehlen': {ext_val}")
-                
+
                 if bei_m:
-                    # "bei X Grad" typically refers to flexion limit
                     potential_flex = bei_m.group(1)
                     # Only accept if it's a reasonable flexion value (50-150)
                     if 50 <= int(potential_flex) <= 150:
                         flex_val = potential_flex
-                        print(f"[ROM-Extract] Flexion from 'bei X Grad': {flex_val}")
-            
-            # PRIORITY 3: Combined pattern "Streckung/Beugung"
+                        print(f"[ROM-Extract] Flexion from 'bis/bei X': {flex_val}")
+
+            # PRIORITY 3: "Beugung geht bis X" / "Beugung X Grad"
+            if not flex_val:
+                beugung_m = re.search(
+                    r"(?:beugung|flexion)\s+(?:geht\s+)?(?:bis\s+)?(\d+)\s*(?:grad|°)?|"
+                    r"(\d+)\s*(?:grad|°)?\s*(?:beugung|flexion)",
+                    transcript, re.I)
+                if beugung_m:
+                    candidate = beugung_m.group(1) or beugung_m.group(2)
+                    if candidate and 50 <= int(candidate) <= 150:
+                        flex_val = candidate
+                        print(f"[ROM-Extract] Flexion from 'Beugung bis X': {flex_val}")
+
+            # PRIORITY 4: Combined pattern "Streckung/Beugung"
             if not ext_val or not flex_val:
                 combined_m = re.search(
                     r"(?:streckung|extension)[^\d-]*?(-?\d+)\s*(?:grad|°)?[^,]{0,50}?,?\s*"

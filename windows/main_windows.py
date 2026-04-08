@@ -1504,6 +1504,35 @@ class KuraApp:
 
 
 if __name__ == "__main__":
+    # ══════════════════════════════════════════════════════════════════════
+    # CRITICAL: Check for models BEFORE starting the main app
+    # If models are missing, show download dialog (GUI)
+    # ══════════════════════════════════════════════════════════════════════
+    try:
+        from core.model_download_dialog import show_download_dialog_if_needed
+
+        print("Checking if AI models need to be downloaded...")
+        if not show_download_dialog_if_needed():
+            print("Model download failed or was cancelled - exiting")
+            messagebox.showerror(
+                "Kura Error",
+                "AI models could not be downloaded.\n\n"
+                "Please ensure you have:\n"
+                "1. Active internet connection\n"
+                "2. At least 8 GB free disk space\n"
+                "3. Permission to download files\n\n"
+                "Kura will now exit."
+            )
+            sys.exit(1)
+
+        print("✅ Models ready - starting Kura...")
+    except Exception as e:
+        print(f"Error checking models: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        # Continue anyway - the engine will handle missing models
+
+    # Start the main app
     app = KuraApp()
     app.run()
 

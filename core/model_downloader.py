@@ -85,6 +85,16 @@ def download_model_with_progress(repo_id: str, filename: str, local_dir: Path) -
         # Create directory
         local_dir.mkdir(parents=True, exist_ok=True)
 
+        # Get HF_TOKEN from environment (if available)
+        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
+
+        if hf_token and hf_token != "your_token_here":
+            print("✅ Using HF_TOKEN for authenticated download (faster)")
+        else:
+            print("⚠️  No HF_TOKEN - using anonymous download (slower)")
+            print("   To speed up: Get free token from https://huggingface.co/settings/tokens")
+            hf_token = None  # Use anonymous
+
         # Download with resume capability
         model_path = hf_hub_download(
             repo_id=repo_id,
@@ -92,6 +102,7 @@ def download_model_with_progress(repo_id: str, filename: str, local_dir: Path) -
             local_dir=str(local_dir),
             local_dir_use_symlinks=False,
             resume_download=True,
+            token=hf_token,  # ✅ Use token if available
         )
 
         file_size = Path(model_path).stat().st_size / (1024**3)
@@ -126,20 +137,6 @@ def download_llm_model() -> bool:
         filename="Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
         local_dir=model_dir
     )
-
-    if success:
-        # Also download tokenizer configs (small files)
-        config_files = ["config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"]
-        print("\n📥 Downloading configuration files...")
-        for cfg_file in config_files:
-            try:
-                download_model_with_progress(
-                    repo_id="meta-llama/Meta-Llama-3.1-8B-Instruct",
-                    filename=cfg_file,
-                    local_dir=model_dir
-                )
-            except:
-                pass  # Config files are optional
 
     return success
 
@@ -180,11 +177,23 @@ def ensure_models_available() -> bool:
     Returns:
         True if all models available, False if download failed
     """
+    print("\n" + "="*70)
+    print("🔍 CHECKING MODEL AVAILABILITY")
+    print("="*70)
+
+    model_dir = get_model_dir()
+    print(f"Model directory: {model_dir}")
+    print(f"Directory exists: {model_dir.exists()}")
+
     llm_exists = check_model_exists("llm")
     whisper_exists = check_model_exists("whisper")
 
+    print(f"LLM model found: {llm_exists}")
+    print(f"Whisper model found: {whisper_exists}")
+
     if llm_exists and whisper_exists:
         print("✅ All models already installed")
+        print("="*70 + "\n")
         return True
 
     print("\n" + "="*70)
@@ -196,11 +205,13 @@ def ensure_models_available() -> bool:
     print("="*70)
 
     # Check internet connection
+    print("\n🌐 Checking internet connection...")
     try:
         import socket
         socket.create_connection(("huggingface.co", 443), timeout=5)
-    except:
-        print("\n❌ ERROR: No internet connection detected.")
+        print("✅ Internet connection OK")
+    except Exception as e:
+        print(f"\n❌ ERROR: No internet connection detected: {e}")
         print("Please connect to the internet and restart Kura.")
         return False
 
@@ -208,15 +219,23 @@ def ensure_models_available() -> bool:
 
     # Download LLM if missing
     if not llm_exists:
+        print("\n📥 LLM model not found - starting download...")
         if not download_llm_model():
             success = False
+            print("❌ LLM download failed!")
+        else:
+            print("✅ LLM download successful!")
     else:
         print("\n✅ LLM model already installed")
 
     # Download Whisper if missing
     if not whisper_exists:
+        print("\n📥 Whisper model not found - starting download...")
         if not download_whisper_model():
             success = False
+            print("❌ Whisper download failed!")
+        else:
+            print("✅ Whisper download successful!")
     else:
         print("\n✅ Whisper model already installed")
 

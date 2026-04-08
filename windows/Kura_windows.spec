@@ -35,6 +35,7 @@ hiddenimports = [
     'shared.learning_manager',
     'huggingface_hub',  # For model downloads on first launch
     'core.model_downloader',  # Model download logic
+    'core.model_download_dialog',  # GUI dialog for model downloads
 ]
 
 # Collect llama_cpp with its dynamic libraries

@@ -101,10 +101,18 @@ class KuraEngine:
         # Check if models need to be downloaded (first launch)
         try:
             from core.model_downloader import ensure_models_available
+            print("🔍 Checking if models need to be downloaded...")
             if not ensure_models_available():
-                raise RuntimeError("Model download failed. Please check internet connection and try again.")
-        except ImportError:
-            pass  # Downloader not available, proceed with existing models
+                raise RuntimeError(
+                    "Model download failed. Please check internet connection and try again.\n"
+                    "If problem persists, please contact support."
+                )
+        except ImportError as e:
+            print(f"⚠️ Model downloader not available: {e}")
+            print("   Proceeding with existing models (if any)...")
+        except Exception as e:
+            print(f"⚠️ Error checking models: {type(e).__name__}: {e}")
+            print("   Proceeding with existing models (if any)...")
 
         # Suppress llama.cpp verbose C++ output
         os.environ['LLAMA_CPP_LOG_DISABLE'] = '1'

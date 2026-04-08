@@ -1,7 +1,8 @@
-param([string]$Version = "2026.3.0")
+param([string]$Version = "2026.4.0")
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Kura - Optimized Build (5-6 GB)" -ForegroundColor Green
+Write-Host "  Kura - SLIM Build (300 MB)" -ForegroundColor Green
+Write-Host "  Models download on first launch" -ForegroundColor Yellow
 Write-Host "  Version: $Version" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
@@ -39,29 +40,21 @@ Copy-Item (Join-Path $scriptDir "Kura_Uninstaller.ps1") $distPath -Force
 Write-Host "[OK] Scripts added"
 Write-Host ""
 
-# Add models (if available)
-Write-Host "[4/5] Checking for AI models..." -ForegroundColor Yellow
+# Skip models - they will download on first launch
+Write-Host "[4/5] Checking for models..." -ForegroundColor Yellow
 $modelsSource = Join-Path $scriptDir "..\models"
-$modelsDest = Join-Path $distPath "models"
 if (Test-Path $modelsSource) {
-    $modelFiles = Get-ChildItem $modelsSource -Recurse -File
-    if ($modelFiles.Count -gt 0) {
-        Write-Host "   Found models - copying to bundle..." -ForegroundColor Green
-        Copy-Item $modelsSource $modelsDest -Recurse -Force
-        Write-Host "[OK] Models included (build will be 5-6 GB)"
-    } else {
-        Write-Host "   Models folder empty - skipping" -ForegroundColor Yellow
-        Write-Host "[OK] No models (will download on first launch)"
-    }
+    Write-Host "   Models folder found - SKIPPING (slim build)" -ForegroundColor Yellow
+    Write-Host "   Models will auto-download on first app launch" -ForegroundColor Cyan
 } else {
-    Write-Host "   No models folder found - skipping" -ForegroundColor Yellow
-    Write-Host "[OK] No models (will download on first launch)"
+    Write-Host "   No models folder - will download on first launch" -ForegroundColor Cyan
 }
+Write-Host "[OK] Slim build (no models included)"
 Write-Host ""
 
 # Create ZIP
 Write-Host "[5/5] Creating ZIP..." -ForegroundColor Yellow
-$zipPath = Join-Path $outputDir "Kura_Setup_$Version.zip"
+$zipPath = Join-Path $outputDir "Kura_Setup_v${Version}_SLIM.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -85,6 +78,9 @@ if (Test-Path $zipPath) {
     } else {
         Write-Host "Size: $sizeMB MB" -ForegroundColor Green
     }
+    Write-Host ""
+    Write-Host "Build Type: SLIM (models auto-download)" -ForegroundColor Cyan
+    Write-Host "On first launch, users will see download dialog" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Ready to share with users!" -ForegroundColor Green
     Write-Host ""

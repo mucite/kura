@@ -1595,10 +1595,12 @@ A-FELD (Assessment):
 - ⚠️ SAFETY RULE - Red Flags Logic:
   • If CRPS signs present (brennen, glänzende Haut, Verfärbung, Allodynie):
     ➜ Write "ACHTUNG: Verdacht auf CRPS (Sudeck) - Arztbericht erforderlich!"
-  • If positive neurological tests (Tinel, Phalen) or Parästhesien detected:
+  • If neurological tests are POSITIVE (Tinel positiv, Phalen positiv, Spurling positiv) AND patient CONFIRMS Parästhesien/Kribbeln/Taubheit:
     ➜ Write "ACHTUNG: Verdacht auf Nervenkompressionssyndrom - Arztbericht erforderlich!"
+  • ❌ DO NOT fire this warning if Spurling-Test is negativ OR the patient denies symptoms ("keine Kribbeln", "kein Taubheitsgefühl", "Nein") — a NEGATED symptom is NOT a confirmed symptom!
   • ONLY if NO warning signs: Write "Red Flags klinisch ausgeschlossen"
 - ❌ NEVER write BOTH "Keine Anzeichen für CRPS" AND "Verdacht auf CRPS" - this is a LEGAL CONTRADICTION!
+- ❌ NEVER write BOTH "Spurling-Test: negativ" AND "Verdacht auf Nervenkompressionssyndrom" - this is a CLINICAL CONTRADICTION!
 - Beispiel: "{icd_hint} | {red_flag_ex}"
 
 P-FELD (Plan):
@@ -2575,6 +2577,24 @@ Transkript:
             "nackenschmerz", "nackenmuskulatur",
         ])
         if is_hws:
+            # ── CRITICAL: Strip LWS-specific tests hallucinated by LLM ──────────
+            # Lasègue is a lower-back nerve-stretch test — clinically impossible in HWS.
+            obj_text = re.sub(r'\s*\|\s*Las[eèê][gq][uü]e?-?[Tt]est[^|]*', '', obj_text, flags=re.I)
+            obj_text = re.sub(r'\s*\|\s*FBA[^|]*', '', obj_text, flags=re.I)
+            obj_text = re.sub(r'\s*\|\s*Schober-Zeichen[^|]*', '', obj_text, flags=re.I)
+
+            # ── CRITICAL: Replace non-cervical segment with correct HWS segment ─
+            # LLM sometimes hallucinates a non-spinal segment (e.g. Handgelenk/Wrist).
+            # Detect and replace before the normal "absent" check below.
+            _non_cervical_seg = re.search(
+                r'(Behandeltes Segment:\s*(?:Articulatio\s+(?:radiocarp\w+|cubiti|genus)|'
+                r'Handgelenk|Ellenbogen|Kniegelenk|OSG|USG|MTP|Schultergelenk)[^|]*)',
+                obj_text, re.I)
+            if _non_cervical_seg:
+                obj_text = obj_text[:_non_cervical_seg.start()] + obj_text[_non_cervical_seg.end():]
+                obj_text = obj_text.strip(' |,')
+                print(f"[SafetyFix] Removed non-cervical segment from HWS report: {_non_cervical_seg.group(1)}")
+
             # HWS Rotation — "Rotation nach links ist bei etwa 45 Grad"
             rot_li = re.search(
                 r"rotation\s+(?:nach\s+)?links[^.\n\d]*(\d+)\s*(?:grad|°)|"
@@ -2596,11 +2616,23 @@ Transkript:
                 val = block_deg.group(1) or block_deg.group(2)
                 rot_li_val = val  # assume left (blocked side mentioned first in transcript)
 
-            if (rot_li_val or rot_re_val) and "rom hws" not in obj_text.lower() and "rotation" not in obj_text.lower():
-                # NZM for bilateral rotation: re°-0-li° (right-neutral-left)
-                _rv = rot_re_val or rot_li_val  # fallback to whichever side was mentioned
+            if rot_li_val or rot_re_val:
+                _rv = rot_re_val or rot_li_val
                 _lv = rot_li_val or rot_re_val
-                obj_text += f" | ROM HWS Rotation (NZM): {_rv}-0-{_lv}"
+                _nzm_rot = f"{_rv}-0-{_lv}"
+                if "nzm" in obj_text.lower() and "rotation" in obj_text.lower():
+                    pass  # already converted
+                elif "rom hws" not in obj_text.lower() and "rotation" not in obj_text.lower():
+                    # NZM for bilateral rotation: re°-0-li° (right-neutral-left)
+                    obj_text += f" | ROM HWS Rotation (NZM): {_nzm_rot}"
+                else:
+                    # Rotation already in obj_text from LLM but NOT in NZM format — replace it
+                    _rot_raw = re.search(
+                        r'[Rr]otation[^|.\n]{0,60}?\d+\s*(?:[Gg]rad|°)[^|.\n]{0,30}',
+                        obj_text)
+                    if _rot_raw and "nzm" not in obj_text[_rot_raw.start():_rot_raw.end()].lower():
+                        obj_text = obj_text[:_rot_raw.start()] + obj_text[_rot_raw.end():]
+                        obj_text = obj_text.strip(' |,') + f" | ROM HWS Rotation (NZM): {_nzm_rot}"
 
             # Seitneigung — "Seitneigung ist auch eingeschränkt"
             if re.search(r"seitneigung[^.\n]{0,30}eingeschränkt|eingeschränkte[rn]?\s+seitneigung", transcript, re.I):
@@ -2658,16 +2690,23 @@ Transkript:
 
             # Spurling-Test: derive from symptom context, not raw keyword presence.
             # "keine Ausstrahlung" / "Taubheit nicht" → negativ; confirmed symptoms → positiv.
+            # Note: neuro terms may appear only in the therapist's QUESTION (e.g. "Haben Sie
+            # Kribbeln?") — check the LLM-generated S-field too, which correctly reflects the
+            # patient's answer (e.g. "keine Kribbeln oder Taubheitsgefühl").
             _neuro_raw = bool(re.search(
                 r'ausstrahlung|parästhes|taubheit|kribbeln|dermatom|sensibilitätsstörung',
                 t_low
             ))
-            _neuro_denied = bool(re.search(
+            _s_low = soap_dict.get("S", "").lower()
+            _denial_pattern = (
                 r'keine?\s+\w{0,15}\s*(?:ausstrahlung|parästhes|taubheit|kribbeln)|'
                 r'(?:ausstrahlung|parästhes|taubheit|kribbeln)\s*(?:nicht|verneint|negativ|ausgeschlossen)|'
-                r'ohne\s+(?:ausstrahlung|parästhesien?|taubheit|kribbeln)',
-                t_low
-            ))
+                r'ohne\s+(?:ausstrahlung|parästhesien?|taubheit|kribbeln)'
+            )
+            _neuro_denied = bool(
+                re.search(_denial_pattern, t_low) or
+                re.search(_denial_pattern, _s_low)
+            )
             _has_neuro = _neuro_raw and not _neuro_denied
             if "spurling" in obj_text.lower():
                 if not _has_neuro and re.search(r'spurling[^.]{0,30}positiv', obj_text, re.I):
@@ -2681,6 +2720,27 @@ Transkript:
                     obj_text += " | Spurling-Test: positiv (Ausstrahlung reproduzierbar)"
                 else:
                     obj_text += " | Spurling-Test: negativ | Sensibilität/Kraft (C5-Th1): unauffällig"
+
+        # ── A-field: remove "ghost" Nervenkompressionssyndrom warning ───────────
+        # The LLM fires this warning whenever neuro terms appear in the transcript —
+        # even when the patient DENIED them and Spurling is documented as negativ.
+        # A contradictory Assessment (Spurling neg. + "Verdacht auf Nervenkompression")
+        # is a legal liability and a billing red flag. Remove it when the O-field
+        # already documents "Spurling-Test: negativ" or confirmed neuro-clear status.
+        a_field = soap_dict.get("A", "")
+        _spurling_neg_in_o = bool(re.search(r'spurling[^|.]{0,30}negativ', obj_text, re.I))
+        _neuro_warn_in_a   = bool(re.search(r'verdacht auf nervenkompressionssyndrom', a_field, re.I))
+        if _neuro_warn_in_a and (_spurling_neg_in_o or not _has_neuro):
+            a_field = re.sub(
+                r'\s*\|?\s*ACHTUNG:\s*Verdacht auf Nervenkompressionssyndrom[^|.]*[.|]?',
+                '',
+                a_field, flags=re.I
+            ).strip(' |')
+            # Ensure the clean exclusion statement is present
+            if "red flags klinisch ausgeschlossen" not in a_field.lower():
+                a_field += " | Red Flags klinisch ausgeschlossen."
+            soap_dict["A"] = a_field
+            print("[SafetyFix] Removed ghost 'Nervenkompression' warning — Spurling negativ / no confirmed neuro symptoms")
 
         # ── Krücke Seitenkontrolle ─────────────────────────────────────────────
         # A crutch must be held CONTRALATERAL to the affected side.
@@ -2767,6 +2827,16 @@ Transkript:
         sess_m = re.search(r"(sechs|6|acht|8|zehn|10|zwölf|12)\s+(?:termine?|einheiten?|EH)", transcript, re.I)
         if sess_m and sess_m.group(1).lower() not in p_field.lower():
             p_additions.append(f"{sess_m.group(1)} EH")
+        # Ergonomie-Check next session — therapist explicitly notes it for follow-up
+        if re.search(
+            r"ergonomi\w*|arbeitsplatz\w*|monitor(?:höhe)?|bildschirm(?:höhe)?|sitzposition",
+            transcript, re.I
+        ):
+            if "ergonomi" not in p_field.lower():
+                p_additions.append(
+                    "Nächste EH: Ergonomie-Beratung (Monitor-/Tastaturhöhe, Sitzposition, "
+                    "Laptop-Nutzung) zur Rezidivprophylaxe"
+                )
         if p_additions:
             soap_dict["P"] = p_field + " | " + " | ".join(p_additions)
             print(f"[ValidationFix] Added P-field details: {p_additions}")

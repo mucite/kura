@@ -574,7 +574,7 @@ class KuraEngine:
         "EX_HAND": {
             "label":    "Extremitaeten Hand / Handgelenk / Finger",
             "billing":  "21201",
-            "priority": 45,   # unique; above EX_KNIE(44)
+            "priority": 52,   # CRITICAL: Above MT(50) to prevent spine misdetection
             "triggers": [
                 "handgelenk", "handgelenkschmerz",
                 "handwurzel", "handwurzelknochen", "karpalknochen",
@@ -2297,6 +2297,82 @@ Transkript:
                     obj_text += " | Painful Arc: n.d."
             if "schultergelenk" not in obj_text.lower() and "glenohumer" not in obj_text.lower():
                 obj_text += " | Behandeltes Segment: Art. glenohumeralis (Schultergelenk)"
+
+        # ══════════════════════════════════════════════════════════════════════
+        # ── Hand / Handgelenk (EX_HAND): ROM, FHA, Segment, Red Flag ──────────
+        # ══════════════════════════════════════════════════════════════════════
+        is_hand = (profile_id == "EX_HAND") or any(k in t_low for k in [
+            "handgelenk", "radiokarpal", "radiusfraktur", "speichenbruch",
+            "handwurzel", "karpaltunnel", "finger", "daumen", "faustschluss",
+        ])
+        if is_hand:
+            # ═══════════════════════════════════════════════════════════════════
+            # CRITICAL FIX: Remove spine contamination (FBA, Lasègue)
+            # ═══════════════════════════════════════════════════════════════════
+            obj_text = re.sub(r'\s*\|\s*FBA[^|]*', '', obj_text, flags=re.I)
+            obj_text = re.sub(r'\s*\|\s*Lasègue[^|]*', '', obj_text, flags=re.I)
+            obj_text = re.sub(r'\s*\|\s*Finger-Boden[^|]*', '', obj_text, flags=re.I)
+            obj_text = re.sub(r'\s*\|\s*Schober[^|]*', '', obj_text, flags=re.I)
+            
+            # ROM Handgelenk — Neutral-Null-Method: Extension-0-Flexion
+            # CRITICAL: In NZM, Extension ALWAYS comes first!
+            # "20 Grad strecken, 30 Grad beugen" → 20-0-30
+            flex_val = None
+            ext_val = None
+            
+            # PRIORITY 1: Extract from "X Grad Handbeugung, Y Grad Handstreckung"
+            # Note: Can be in either order in transcript
+            beugung_m = re.search(r"(\d+)\s*(?:grad|°)?\s*(?:handbeugung|beugen|flexion)", transcript, re.I)
+            streckung_m = re.search(r"(\d+)\s*(?:grad|°)?\s*(?:handstreckung|strecken|extension)", transcript, re.I)
+
+            if beugung_m:
+                flex_val = beugung_m.group(1)
+                print(f"[HandROM] Flexion: {flex_val}")
+            if streckung_m:
+                ext_val = streckung_m.group(1)
+                print(f"[HandROM] Extension: {ext_val}")
+            
+            if ext_val and flex_val:
+                # ✅ CRITICAL: Extension-0-Flexion format (Extension FIRST!)
+                obj_text += f" | ROM Handgelenk (Ext/Flex): {ext_val}-0-{flex_val}"
+                print(f"[ValidationFix] Hand ROM NZM: {ext_val}-0-{flex_val}")
+            
+            # FHA (Finger-Hohlhand-Abstand) — recovery
+            fha_m = re.search(r"(?:finger.?hohlhand|fha)[^\d]*(\d+)\s*cm", transcript, re.I)
+            if fha_m and "fha" not in obj_text.lower():
+                obj_text += f" | FHA (Finger-Hohlhand-Abstand): {fha_m.group(1)} cm"
+            
+            # Kraft — normalize to MGT format
+            kraft_m = re.search(r"(?:greif)?kraft[^\d]*(\d)\s*/\s*5", transcript, re.I)
+            if kraft_m and "mgt" not in obj_text.lower():
+                obj_text += f" | Kraft (MGT): {kraft_m.group(1)}/5"
+            
+            # Endgefühl — capture if mentioned
+            if any(k in t_low for k in ["endgefühl", "end-gefühl"]):
+                if "endgefühl" not in obj_text.lower():
+                    if any(k in t_low for k in ["hart", "kapsulär", "fest"]):
+                        obj_text += " | Endgefühl: hart-kapsulär"
+                    else:
+                        obj_text += " | Endgefühl: n.d."
+            
+            # Sensibilität — exclude CRPS/Sudeck
+            if any(k in t_low for k in ["sensibilität", "sensibel"]):
+                if "sensibilität" not in obj_text.lower():
+                    if any(k in t_low for k in ["intakt", "normal", "unauffällig"]):
+                        obj_text += " | Sensibilität: intakt"
+                    else:
+                        obj_text += " | Sensibilität: n.d."
+            
+            # CRPS/Sudeck exclusion
+            if any(k in t_low for k in ["crps", "sudeck", "morbus sudeck"]):
+                if "crps" not in obj_text.lower() and "sudeck" not in obj_text.lower():
+                    obj_text += " | Keine Anzeichen für CRPS"
+            
+            # ✅ CRITICAL: Segment mapping for MT billing (21201)
+            if "behandeltes segment" not in obj_text.lower():
+                # Radiokarpalgelenk is the standard segment for wrist MT
+                obj_text += " | Behandeltes Segment: Articulatio radiocarpalis (Handgelenk)"
+                print(f"[ValidationFix] Added segment for Hand MT billing")
 
         # ── HWS / Zervikalsyndrom (EX_HWS): recover palpation, segment (ROM handled by universal formatter) ──────
         is_hws = (profile_id == "EX_HWS") or any(k in t_low for k in [

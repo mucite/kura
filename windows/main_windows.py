@@ -311,8 +311,8 @@ class KuraApp:
             remaining_label.pack(pady=(5, 0))
 
             # Scrollable content area
-            scroll_frame = ctk.CTkScrollableFrame(main_frame, height=350)
-            scroll_frame.pack(fill="both", expand=True, pady=(0, 20))
+            scroll_frame = ctk.CTkScrollableFrame(main_frame, height=300)
+            scroll_frame.pack(fill="both", pady=(0, 15))
 
             # Info message
             info_label = ctk.CTkLabel(
@@ -330,10 +330,10 @@ class KuraApp:
 
             # Upgrade CTA section
             cta_frame = ctk.CTkFrame(main_frame, fg_color="#1a472a", corner_radius=10)
-            cta_frame.pack(fill="x", pady=(0, 20))
+            cta_frame.pack(fill="x", pady=(0, 15))
 
             cta_content = ctk.CTkFrame(cta_frame, fg_color="transparent")
-            cta_content.pack(padx=20, pady=20)
+            cta_content.pack(padx=20, pady=15)
 
             price_label = ctk.CTkLabel(
                 cta_content,
@@ -353,7 +353,11 @@ class KuraApp:
 
             # Buttons
             button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-            button_frame.pack(fill="x")
+            button_frame.pack(fill="x", pady=(0, 0))
+            
+            # Configure grid columns to be equal width
+            button_frame.grid_columnconfigure(0, weight=1)
+            button_frame.grid_columnconfigure(1, weight=1)
 
             def open_upgrade():
                 webbrowser.open("https://kura-medical.de/#preis")
@@ -368,21 +372,22 @@ class KuraApp:
                 font=ctk.CTkFont(size=15, weight="bold"),
                 height=45
             )
-            upgrade_btn.pack(side="left", padx=(0, 10), fill="x", expand=True)
+            upgrade_btn.grid(row=0, column=0, padx=(0, 5), sticky="ew")
             
             continue_btn = ctk.CTkButton(
                 button_frame,
                 text="Testphase fortsetzen",
                 command=dialog.destroy,
-                fg_color="transparent",
-                hover_color="#2b2b2b",
+                fg_color="#3b3b3b",
+                hover_color="#4a4a4a",
                 border_width=2,
-                border_color="#3f3f3f",
+                border_color="#606060",
+                text_color="#ffffff",
                 font=ctk.CTkFont(size=15),
                 height=45
             )
-            continue_btn.pack(side="right", fill="x", expand=True)
-            
+            continue_btn.grid(row=0, column=1, padx=(5, 0), sticky="ew")
+
             # Center the dialog
             dialog.update_idletasks()
             x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)

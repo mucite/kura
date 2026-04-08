@@ -1757,6 +1757,67 @@ Transkript:
                     obj_text = re.sub(r'(?:LWS[^|]*?)?\b0-0-\d{2,3}\b[^|]*', '', obj_text).strip(' |')
                     break
 
+        # ── LWS ROM (NZM: Extension-0-Flexion) ────────────────────────────────────
+        # Recover LWS ROM from verbal pain/relief descriptions when explicit degrees
+        # are absent. Pattern: "massive pain during extension, relief in flexion" →
+        # document as qualitative NZM with pain direction noted.
+        if is_lws and not _is_hws_context:
+            _has_lws_rom = bool(re.search(
+                r'rom\s+lws|lws\s+rom|lws[^|]{0,20}\d+-0-\d+|flex/ext.*lws|lws.*flex/ext',
+                obj_text, re.I))
+            if not _has_lws_rom:
+                # Try to extract explicit degrees first
+                _ext_deg = re.search(
+                    r'extension[^.\n]{0,40}?(\d+)\s*(?:grad|°)|'
+                    r'(\d+)\s*(?:grad|°)[^.\n]{0,20}extension',
+                    transcript, re.I)
+                _flex_deg = re.search(
+                    r'flexion[^.\n]{0,40}?(\d+)\s*(?:grad|°)|'
+                    r'(\d+)\s*(?:grad|°)[^.\n]{0,20}flexion',
+                    transcript, re.I)
+                _ext_val = (_ext_deg.group(1) or _ext_deg.group(2)) if _ext_deg else None
+                _flex_val = (_flex_deg.group(1) or _flex_deg.group(2)) if _flex_deg else None
+
+                if _ext_val and _flex_val:
+                    obj_text += f" | ROM LWS (NZM): {_ext_val}-0-{_flex_val}"
+                    print(f"[ValidationFix] Added LWS ROM from degrees: Ext={_ext_val} Flex={_flex_val}")
+                else:
+                    # No explicit degrees — derive qualitative NZM from pain/relief direction
+                    _ext_painful = bool(re.search(
+                        r'(?:starke[rn]?|massive[rn]?|deutliche[rn]?|heftige[rn]?)?\s*schmerz\w*'
+                        r'[^.\n]{0,40}extension|'
+                        r'extension[^.\n]{0,40}(?:schmerz\w*|schmerzhaft|eingeschränkt|provoziert)',
+                        transcript, re.I))
+                    _flex_relief = bool(re.search(
+                        r'(?:entlastung|erleichterung|besserung|linderung|schmerzfrei\w*)'
+                        r'[^.\n]{0,40}flexion|'
+                        r'flexion[^.\n]{0,40}(?:entlastet|erleichtert|bessert|lindert|schmerzfrei)',
+                        transcript, re.I))
+                    _flex_painful = bool(re.search(
+                        r'schmerz\w*[^.\n]{0,40}flexion|'
+                        r'flexion[^.\n]{0,40}(?:schmerz\w*|schmerzhaft|eingeschränkt)',
+                        transcript, re.I))
+                    _ext_relief = bool(re.search(
+                        r'(?:entlastung|erleichterung|besserung|linderung|schmerzfrei\w*)'
+                        r'[^.\n]{0,40}extension|'
+                        r'extension[^.\n]{0,40}(?:entlastet|erleichtert|bessert|lindert|schmerzfrei)',
+                        transcript, re.I))
+
+                    if _ext_painful and _flex_relief:
+                        # Classic disc pattern: extension provokes, flexion relieves
+                        obj_text += " | ROM LWS (NZM): n.d.-0-n.d. (Extension schmerzhaft eingeschränkt, Flexion entlastend)"
+                        print("[ValidationFix] Added LWS ROM: Extension painful, Flexion relieving (qualitative NZM)")
+                    elif _flex_painful and _ext_relief:
+                        # Facet/extension-relief pattern
+                        obj_text += " | ROM LWS (NZM): n.d.-0-n.d. (Flexion schmerzhaft eingeschränkt, Extension entlastend)"
+                        print("[ValidationFix] Added LWS ROM: Flexion painful, Extension relieving (qualitative NZM)")
+                    elif _ext_painful:
+                        obj_text += " | ROM LWS (NZM): n.d.-0-n.d. (Extension schmerzhaft eingeschränkt)"
+                        print("[ValidationFix] Added LWS ROM: Extension painful (qualitative NZM)")
+                    elif _flex_painful:
+                        obj_text += " | ROM LWS (NZM): n.d.-0-n.d. (Flexion schmerzhaft eingeschränkt)"
+                        print("[ValidationFix] Added LWS ROM: Flexion painful (qualitative NZM)")
+
         # ✅ CRITICAL: Segment mapping for MT billing (21201) - EX_LWS and MT (spine)
         # This applies to BOTH EX_LWS and MT profiles
         if is_lws and not _is_hws_context:

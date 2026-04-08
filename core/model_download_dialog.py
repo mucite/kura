@@ -1,18 +1,47 @@
 """
 Model Download Dialog for Windows GUI
 Shows progress bar that fills up + download log for user curiosity
+
+Note: macOS uses rumps for menu bar GUI, not tkinter.
+      Tkinter is only used on Windows.
 """
-import tkinter as tk
-from tkinter import ttk, messagebox
 import threading
 import sys
 import os
+import platform
+
+# Disable tkinter on macOS - we use rumps for the menu bar GUI instead
+_is_macos = platform.system() == "Darwin"
+
+if _is_macos:
+    # macOS uses rumps, not tkinter
+    print(f"[model_download_dialog] macOS detected - tkinter disabled (using rumps for GUI)")
+    TKINTER_AVAILABLE = False
+    tk = None
+    ttk = None
+    messagebox = None
+else:
+    # Windows: Try to import tkinter for GUI dialogs
+    try:
+        import tkinter as tk
+        from tkinter import ttk, messagebox
+        TKINTER_AVAILABLE = True
+    except (ImportError, RuntimeError, Exception) as e:
+        # Tkinter not available - fall back to CLI-only mode
+        print(f"[model_download_dialog] tkinter unavailable: {e}")
+        TKINTER_AVAILABLE = False
+        tk = None
+        ttk = None
+        messagebox = None
 
 
 class ModelDownloadDialog:
     """Clean GUI dialog with filling progress bar and download log."""
 
     def __init__(self, parent=None):
+        if not TKINTER_AVAILABLE:
+            raise RuntimeError("Tkinter is not available - GUI dialog cannot be created")
+
         self.root = tk.Toplevel() if parent else tk.Tk()
         self.root.title("Kura - Setup")
         self.root.geometry("600x400")
@@ -292,6 +321,10 @@ def show_download_dialog_if_needed():
     Show download dialog if models are missing (Windows / GGUF).
     Returns True if models are ready, False if download failed.
     """
+    if not TKINTER_AVAILABLE:
+        print("[model_download_dialog] Tkinter not available, falling back to CLI download")
+        return False
+
     try:
         from core.model_downloader import check_model_exists
 
@@ -305,11 +338,14 @@ def show_download_dialog_if_needed():
         return dialog.run()
 
     except Exception as e:
-        messagebox.showerror(
-            "Kura Error",
-            f"Error checking models: {type(e).__name__}: {e}\n\n"
-            "Please ensure you have internet connection and restart Kura."
-        )
+        if TKINTER_AVAILABLE:
+            messagebox.showerror(
+                "Kura Error",
+                f"Error checking models: {type(e).__name__}: {e}\n\n"
+                "Please ensure you have internet connection and restart Kura."
+            )
+        else:
+            print(f"[model_download_dialog] Error: {e}")
         return False
 
 
@@ -322,6 +358,11 @@ class ModelDownloadDialogMacOS(ModelDownloadDialog):
     Same UI as the Windows dialog, but downloads MLX safetensors models
     (Llama 3.1-8B + Whisper large-v3-turbo) instead of GGUF.
     """
+
+    def __init__(self, parent=None):
+        if not TKINTER_AVAILABLE:
+            raise RuntimeError("Tkinter is not available - GUI dialog cannot be created")
+        super().__init__(parent)
 
     def _download_models(self):
         """Download MLX models (runs in background thread)."""
@@ -440,20 +481,38 @@ def show_download_dialog_if_needed_macos() -> bool:
         if all_present:
             return True
 
-        # Suppress output from fast-path checks above before showing GUI
-        dialog = ModelDownloadDialogMacOS()
-        # German UI labels
-        dialog.root.title("Kura – Ersteinrichtung")
-        return dialog.run()
+        # If tkinter is not available, fall back to CLI download
+        if not TKINTER_AVAILABLE:
+            print("[model_download_dialog] Tkinter not available on macOS, using CLI download...")
+            from core.model_downloader import ensure_models_available_macos
+            return ensure_models_available_macos()
+
+        # Try to create the GUI dialog - may fail due to tkinter compatibility issues
+        try:
+            # Suppress output from fast-path checks above before showing GUI
+            dialog = ModelDownloadDialogMacOS()
+            # German UI labels
+            dialog.root.title("Kura – Ersteinrichtung")
+            return dialog.run()
+        except (RuntimeError, Exception) as gui_err:
+            # GUI creation failed (e.g., Python 3.13 tkinter incompatibility on macOS)
+            # Fall back to CLI download
+            print(f"[model_download_dialog] GUI creation failed: {gui_err}")
+            print("[model_download_dialog] Falling back to CLI download...")
+            from core.model_downloader import ensure_models_available_macos
+            return ensure_models_available_macos()
 
     except Exception as e:
-        try:
-            messagebox.showerror(
-                "Kura Fehler",
-                f"Modell-Prüfung fehlgeschlagen:\n{type(e).__name__}: {e}\n\n"
-                "Bitte Internetverbindung prüfen und Kura neu starten."
-            )
-        except Exception:
+        if TKINTER_AVAILABLE:
+            try:
+                messagebox.showerror(
+                    "Kura Fehler",
+                    f"Modell-Prüfung fehlgeschlagen:\n{type(e).__name__}: {e}\n\n"
+                    "Bitte Internetverbindung prüfen und Kura neu starten."
+                )
+            except Exception:
+                print(f"[ERROR] Model check failed: {e}")
+        else:
             print(f"[ERROR] Model check failed: {e}")
         return False
 

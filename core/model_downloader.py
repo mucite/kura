@@ -49,8 +49,13 @@ def signal_handler(signum, frame):
     print("Please wait for cleanup to complete...")
     # Don't raise KeyboardInterrupt - just set flag
 
-# Register signal handler
-signal.signal(signal.SIGINT, signal_handler)
+# Register signal handler (only works in main thread)
+try:
+    signal.signal(signal.SIGINT, signal_handler)
+except ValueError:
+    # signal.signal() can only be called from the main thread
+    # This is OK - we'll just not have graceful Ctrl+C handling
+    pass
 
 def get_model_dir() -> Path:
     """Get the models directory path."""

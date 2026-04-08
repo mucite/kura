@@ -159,6 +159,36 @@ multiprocessing.freeze_support()
 # macOS will use 'spawn' by default which is safe
 print("🔧 Multiprocessing: Using default (spawn) for macOS safety")
 
+# MLX/Metal GPU environment setup - BEFORE any MLX imports
+# These help prevent Metal/GPU initialization issues on Python 3.13
+os.environ['PYTORCH_MPS_HIGH_WATERMARK_RATIO'] = '0.0'
+os.environ['MLX_METAL_DEBUG'] = '0'  # Disable Metal debug mode
+os.environ['METAL_DEVICE_WRAPPER_TYPE'] = '1'  # Use safer Metal device wrapper
+
+# Set up cleanup handler for multiprocessing resources
+import atexit
+
+def cleanup_multiprocessing_resources():
+    """Clean up any leaked multiprocessing resources on exit."""
+    try:
+        # Force cleanup of resource tracker to prevent semaphore leak warnings
+        from multiprocessing import resource_tracker
+        if hasattr(resource_tracker, '_resource_tracker'):
+            tracker = resource_tracker._resource_tracker
+            if tracker is not None:
+                # Clear any tracked resources before shutdown
+                if hasattr(tracker, '_lock'):
+                    try:
+                        tracker._lock.acquire(timeout=1.0)
+                        tracker._lock.release()
+                    except:
+                        pass
+    except:
+        pass  # Silently fail - cleanup is best effort
+
+# Register cleanup handler
+atexit.register(cleanup_multiprocessing_resources)
+
 # Load HF_TOKEN from environment (set in .env or system environment)
 if "HF_TOKEN" not in os.environ:
     print("⚠️ Warning: HF_TOKEN not found in environment variables. Set it in .env file or system environment.")

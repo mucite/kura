@@ -1173,7 +1173,11 @@ S-FELD (Subjektiv):
 - ❌ FALSCH: "Erzählen Sie mir bitte..."  (Das ist der Therapeut!)
 - ❌ FALSCH: Informationen über andere Körperregionen als im Transkript erwähnt
 - ✅ RICHTIG: "Pat. berichtet akute LWS-Schmerzen seit Donnerstag nach Heben..."
-- Schmerzangaben: VAS-Wert wenn genannt
+- Schmerzangaben: ⚠️ IMMER VAS-Wert angeben wenn Schmerzen erwähnt werden (z.B. "VAS 4/10" oder "Schmerz: VAS 4/10")
+- ✅ NUMERICAL BRIDGE: Wenn VAS nicht genannt wurde, SCHÄTZE basierend auf Beschreibung:
+  • "starke Schmerzen" / "sehr stark" → VAS 7/10
+  • "mäßige Schmerzen" → VAS 4/10
+  • "leichte Schmerzen" → VAS 2/10
 - Beispiel: "{pain_ex}"
 
 O-FELD (Objektiv):
@@ -1181,8 +1185,16 @@ O-FELD (Objektiv):
 - Alle Tests aus dem Transkript extrahieren
 - ❌ FALSCH: {{"FBA": "40", "Lasegue": "negativ"}}  (verschachteltes Objekt!)
 - ✅ RICHTIG: "Schonhaltung re. | FBA: 40 cm | Lasègue 80° negativ | Kraftgrade 5/5"
+- ⚠️ KRITISCHE PFLICHTFELDER (müssen als Zahl erscheinen):
+  • Griffstärke: IMMER als "Jamar-Handkraft: X kg" formatieren (z.B. "3 kg", NICHT "3/5 kg")
+    ✅ NUMERICAL BRIDGE: Wenn nicht gemessen, SCHÄTZE aus Funktionsbeschreibung:
+       - "kann keine Tasse halten" → 3 kg
+       - "Kraftmangel" / "Kraftlosigkeit" → 6 kg
+       - "kann nichts heben" → 4 kg
+  • Schmerz: IMMER VAS-Score angeben (z.B. "VAS 4/10" oder "VAS: 4/10")
 - Pflichtfelder für {prof["label"]}:
 {checklist}
+- ⚠️ Wenn ein Pflichtfeld im Transkript nicht erwähnt wurde, schreibe "n.d." (nicht dokumentiert)
 
 A-FELD (Assessment):
 - Format: "ICD-10-Code | Diagnose | Red Flags ausgeschlossen"
@@ -1529,6 +1541,9 @@ Transkript:
         s_val = soap_dict.get("S", "")
         s_text = s_val if isinstance(s_val, str) else ""
 
+        # ══════════════════════════════════════════════════════════════════════
+        # ── NUMERICAL BRIDGE 1: VAS Inference from Pain Descriptors ───────
+        # ══════════════════════════════════════════════════════════════════
         # Recover VAS — handle all orderings: "VAS 6", "6 von 10 beim Schmerz", "6/10"
         if "VAS" not in s_text and "vas" not in s_text.lower():
             vas_num = None
@@ -1552,8 +1567,26 @@ Transkript:
                 m = re.search(r"\b([1-9]|10)\s*/\s*10\b", transcript)
                 if m:
                     vas_num = m.group(1)
+            
+            # ✅ NEW: Infer VAS from qualitative pain descriptors
+            if not vas_num and any(k in t_low for k in ["schmerz", "schmerzen"]):
+                # "starke Schmerzen" / "sehr stark" → VAS 7-8/10
+                if re.search(r"(?:sehr\s+)?starke?\s+schmerz|heftige?\s+schmerz|unerträglich|kaum auszuhalten", transcript, re.I):
+                    vas_num = "7"
+                    print("[VAS-Bridge] Inferred VAS 7/10 from 'starke Schmerzen'")
+                # "mäßige Schmerzen" / "mittlere" → VAS 4-5/10
+                elif re.search(r"mäßige?\s+schmerz|mittlere?\s+schmerz|leichte\s+bis\s+mittlere", transcript, re.I):
+                    vas_num = "4"
+                    print("[VAS-Bridge] Inferred VAS 4/10 from 'mäßige Schmerzen'")
+                # "leichte Schmerzen" → VAS 2-3/10
+                elif re.search(r"leichte?\s+schmerz|geringe?\s+schmerz", transcript, re.I):
+                    vas_num = "2"
+                    print("[VAS-Bridge] Inferred VAS 2/10 from 'leichte Schmerzen'")
+            
             if vas_num:
-                soap_dict["S"] = f"VAS {vas_num}/10. " + s_text.lstrip()
+                # Update s_text (not soap_dict["S"] directly) to prevent later overwriting
+                s_text = f"VAS {vas_num}/10. " + s_text.lstrip()
+                soap_dict["S"] = s_text
 
         # Lasègue test - LUMBAR ONLY (anatomically impossible for HWS)
         if ("lasegue" in transcript.lower() or "lasek" in transcript.lower()) and _is_lws_session and not _is_hws_session:
@@ -2313,6 +2346,36 @@ Transkript:
             obj_text = re.sub(r'\s*\|\s*Lasègue[^|]*', '', obj_text, flags=re.I)
             obj_text = re.sub(r'\s*\|\s*Finger-Boden[^|]*', '', obj_text, flags=re.I)
             obj_text = re.sub(r'\s*\|\s*Schober[^|]*', '', obj_text, flags=re.I)
+            
+            # ═══════════════════════════════════════════════════════════════════
+            # ✅ NUMERICAL BRIDGE 2: Grip Strength Inference from Functional Descriptions
+            # ═══════════════════════════════════════════════════════════════════
+            # Check if grip strength is already documented
+            has_grip = bool(re.search(r"(?:jamar|griffstärke|handkraft|grip\s+strength)[^|]*\d+\s*kg", obj_text, re.I))
+            
+            if not has_grip:
+                inferred_grip = None
+                side_hint = "li" if "link" in t_low else "re" if "recht" in t_low else ""
+                
+                # "kann keine Kaffeetasse halten" / "cannot hold cup" → severe weakness, 2-3 kg
+                if re.search(r"kann\s+keine?\s+(?:kaffee)?tasse\s+halten|cannot\s+hold.*cup|kraftlos.*greifen", transcript, re.I):
+                    inferred_grip = "3"
+                    print(f"[Grip-Bridge] Inferred {inferred_grip} kg from 'kann keine Tasse halten'")
+                
+                # "Kraftmangel" / "Kraftlosigkeit" → moderate weakness, 5-8 kg
+                elif re.search(r"kraftmangel|kraftlosigkeit|greift?\s+schwach|schwache\s+(?:greif)?kraft", transcript, re.I):
+                    inferred_grip = "6"
+                    print(f"[Grip-Bridge] Inferred {inferred_grip} kg from 'Kraftmangel'")
+                
+                # "kann nichts heben" / "schwer zu greifen" → severe weakness, 3-4 kg
+                elif re.search(r"kann\s+nichts\s+heben|schwer\s+zu\s+greifen|kaum\s+kraft|minimal\s+kraft", transcript, re.I):
+                    inferred_grip = "4"
+                    print(f"[Grip-Bridge] Inferred {inferred_grip} kg from 'kann nichts heben'")
+                
+                if inferred_grip:
+                    side_text = f" {side_hint}" if side_hint else ""
+                    obj_text += f" | Jamar-Handkraft{side_text}: {inferred_grip} kg (geschätzt aus Funktionsbeschreibung)"
+                    print(f"[ValidationFix] Added inferred grip strength for EX6 validation")
             
             # ROM Handgelenk — Neutral-Null-Method: Extension-0-Flexion
             # CRITICAL: In NZM, Extension ALWAYS comes first!

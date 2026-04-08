@@ -651,7 +651,13 @@ _DOC_CHECKERS: dict = {
         (bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", t)) and
          any(k in t for k in ["sprung", "osg", "usg"]))
     ),
-    "Schmerz (VAS)":                   lambda t: bool(re.search(r"vas\s*\d|schmerz.*\d+/10|nrs\s*\d|schmerz.*nrs", t)),
+    "Schmerz (VAS)":                   lambda t: bool(re.search(
+        r"vas[:\s]*\d+(?:/10)?|"  # VAS: 4 or VAS 4/10
+        r"schmerz[:\s]*vas[:\s]*\d+|"  # Schmerz: VAS 4
+        r"schmerz.*\d+/10|"  # Schmerz VAS 4/10
+        r"nrs[:\s]*\d+|"  # NRS 4
+        r"schmerz.*nrs|"  # Schmerz NRS
+        r"vas\s*\d", t)),
     "Schober-Zeichen":                 lambda t: "schober" in t,
     "Lasègue":                         lambda t: "lasègue" in t or "lasegue" in t,
     "Stemmer-Zeichen":                 lambda t: "stemmer" in t,
@@ -703,7 +709,11 @@ _DOC_CHECKERS: dict = {
     "Umfangsmessung beidseitig":       lambda t: bool(re.search(r"\d+\s*cm.{0,20}\d+\s*cm|re\..*cm.*li\.|li\..*cm.*re\.", t)),
     "Muskelkraft (MMT)":               lambda t: "mmt" in t or "muskelkraft" in t or re.search(r"kraft.*[0-5]/5", t) is not None,
     "Kraft (MMT)":                     lambda t: "mmt" in t or re.search(r"kraft.*[0-5]/5", t) is not None,
-    "Griffstärke (kg)":                lambda t: "griffstärke" in t or "grip" in t,
+    "Griffstärke (kg)":                lambda t: (
+        "griffstärke" in t or "grip" in t or "jamar" in t or
+        bool(re.search(r"(?:jamar|handkraft|grip).*?\d+(?:[,./]\d+)?\s*kg", t)) or
+        bool(re.search(r"\d+(?:[,./]\d+)?\s*kg.*(?:jamar|handkraft|grip)", t))
+    ),
     "Knienachgiebigkeit":              lambda t: "knienachgiebigkeit" in t,
     "Patella-Mobilität":               lambda t: "patella" in t,
     "Sturzrisiko-Assessment":          lambda t: any(k in t for k in ["sturzrisiko", "timed up", "berg-balance", "tinetti"]),

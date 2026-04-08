@@ -1185,6 +1185,15 @@ O-FELD (Objektiv):
 - Alle Tests aus dem Transkript extrahieren
 - ❌ FALSCH: {{"FBA": "40", "Lasegue": "negativ"}}  (verschachteltes Objekt!)
 - ✅ RICHTIG: "Schonhaltung re. | FBA: 40 cm | Lasègue 80° negativ | Kraftgrade 5/5"
+- ⚠️ NEUROLOGICAL TESTS (MUST include if mentioned):
+  • Hoffmann-Tinel-Zeichen: positiv/negativ
+  • Phalen-Test: positiv/negativ
+  • Lasègue, Bragard, Spurling, etc.
+- ⚠️ CRPS/SUDECK SIGNS (MUST document if present - DO NOT write "Keine Anzeichen für CRPS" if these are present!):
+  • Hautveränderungen: "Haut glänzend", "rötlich-violette Verfärbung"
+  • Temperatur: "Hyperthermie", "lokale Überwärmung", "kühl"
+  • Ödem: "teigiges Ödem", "Schwellung"
+  • Schmerz: "Allodynie", "Brennen", "Hyperalgesie"
 - ⚠️ KRITISCHE PFLICHTFELDER (müssen als Zahl erscheinen):
   • Griffstärke: IMMER als "Jamar-Handkraft: X kg" formatieren (z.B. "3 kg", NICHT "3/5 kg")
     ✅ NUMERICAL BRIDGE: Wenn nicht gemessen, SCHÄTZE aus Funktionsbeschreibung:
@@ -1197,7 +1206,14 @@ O-FELD (Objektiv):
 - ⚠️ Wenn ein Pflichtfeld im Transkript nicht erwähnt wurde, schreibe "n.d." (nicht dokumentiert)
 
 A-FELD (Assessment):
-- Format: "ICD-10-Code | Diagnose | Red Flags ausgeschlossen"
+- Format: "ICD-10-Code | Diagnose | Red Flags"
+- ⚠️ SAFETY RULE - Red Flags Logic:
+  • If CRPS signs present (brennen, glänzende Haut, Verfärbung, Allodynie): 
+    ➜ Write "ACHTUNG: Verdacht auf CRPS (Sudeck) - Arztbericht erforderlich!"
+  • If positive neurological tests (Tinel, Phalen) or Parästhesien detected:
+    ➜ Write "ACHTUNG: Verdacht auf Nervenkompressionssyndrom - Arztbericht erforderlich!"
+  • ONLY if NO warning signs: Write "Red Flags klinisch ausgeschlossen"
+- ❌ NEVER write BOTH "Keine Anzeichen für CRPS" AND "Verdacht auf CRPS" - this is a LEGAL CONTRADICTION!
 - Beispiel: "{icd_hint} | {red_flag_ex}"
 
 P-FELD (Plan):
@@ -2426,10 +2442,48 @@ Transkript:
                     else:
                         obj_text += " | Sensibilität: n.d."
             
-            # CRPS/Sudeck exclusion
-            if any(k in t_low for k in ["crps", "sudeck", "morbus sudeck"]):
+            # ⚠️ NEUROLOGICAL TESTS: Tinel and Phalen for carpal tunnel syndrome
+            neuro_tests_found = []
+            if re.search(r"tinel|hoffmann-tinel", t_low):
+                if "tinel" not in obj_text.lower():
+                    # Check if positive or negative
+                    if re.search(r"tinel.*positiv|positiv.*tinel", t_low):
+                        neuro_tests_found.append("Hoffmann-Tinel-Zeichen: positiv")
+                    elif re.search(r"tinel.*negativ|negativ.*tinel", t_low):
+                        neuro_tests_found.append("Hoffmann-Tinel-Zeichen: negativ")
+                    else:
+                        neuro_tests_found.append("Hoffmann-Tinel-Zeichen: positiv")  # Default if mentioned
+            
+            if re.search(r"phalen", t_low):
+                if "phalen" not in obj_text.lower():
+                    if re.search(r"phalen.*positiv|positiv.*phalen", t_low):
+                        neuro_tests_found.append("Phalen-Test: positiv")
+                    elif re.search(r"phalen.*negativ|negativ.*phalen", t_low):
+                        neuro_tests_found.append("Phalen-Test: negativ")
+                    else:
+                        neuro_tests_found.append("Phalen-Test: positiv")  # Default if mentioned
+            
+            if neuro_tests_found:
+                obj_text += " | " + " | ".join(neuro_tests_found)
+                print(f"[SafetyFix] Added neurological tests: {neuro_tests_found}")
+            
+            # ⚠️ SAFETY LOGIC: CRPS/Sudeck detection (DO NOT auto-exclude if signs present!)
+            # Detect CRPS trigger words: burning, shiny skin, color changes, hyperalgesia, etc.
+            crps_triggers = [
+                "brennen", "brennnesseln", "glänzt", "glänzend", "rötlich", "violett", 
+                "bläulich", "verfärb", "allodynie", "hyperthermie", "überwärm", "kalt",
+                "teigig", "ödem", "schwellung", "dystrophie"
+            ]
+            has_crps_signs = any(trigger in t_low for trigger in crps_triggers)
+            
+            # If CRPS explicitly mentioned OR signs present, DO NOT add exclusion
+            if any(k in t_low for k in ["crps", "sudeck", "morbus sudeck"]) and not has_crps_signs:
                 if "crps" not in obj_text.lower() and "sudeck" not in obj_text.lower():
                     obj_text += " | Keine Anzeichen für CRPS"
+            elif has_crps_signs:
+                # CRPS signs detected - ensure they are documented, not excluded
+                if "crps" not in obj_text.lower() and "sudeck" not in obj_text.lower():
+                    print(f"[SafetyWarning] CRPS signs detected - NOT adding exclusion statement")
             
             # ✅ CRITICAL: Segment mapping for MT billing (21201)
             if "behandeltes segment" not in obj_text.lower():
@@ -2580,12 +2634,31 @@ Transkript:
         soap_dict["O"] = obj_text
         
         # ══════════════════════════════════════════════════════════════════════
-        # CRITICAL FIX: Red-Flag-Ausschluss with EXACT magic phrase for validator
-        # §106b SGB V requires "Red Flags klinisch ausgeschlossen" verbatim
+        # CRITICAL SAFETY FIX: Red-Flag Detection - DO NOT auto-exclude if present!
+        # §106b SGB V requires "Red Flags klinisch ausgeschlossen" only when SAFE
         # ══════════════════════════════════════════════════════════════════════
         a_val = soap_dict.get("A", "")
         a_text = a_val if isinstance(a_val, str) else ""
 
+        # ⚠️ SAFETY DETECTION: Check for CRPS and neurological red flags
+        t_low = transcript.lower()
+        
+        # CRPS trigger words
+        crps_triggers = [
+            "brennen", "brennnesseln", "glänzt", "glänzend", "rötlich", "violett",
+            "bläulich", "verfärb", "allodynie", "hyperthermie", "überwärm",
+            "teigig", "ödem", "schwellung", "dystrophie", "sudeck", "crps"
+        ]
+        has_crps_signs = any(trigger in t_low for trigger in crps_triggers)
+        
+        # Neurological red flag words (nerve compression, paresthesia, positive tests)
+        neuro_red_flags = [
+            "tinel.*positiv", "positiv.*tinel", "phalen.*positiv", "positiv.*phalen",
+            "parästhesien", "kribbeln", "taubheit", "lähmung", "kraftgrad.*[0-3]/5",
+            "medianus", "radialis", "ulnaris", "nervenkompression", "nervenleitgeschwindigkeit"
+        ]
+        has_neuro_red_flags = any(re.search(pattern, t_low) for pattern in neuro_red_flags)
+        
         # Define profile-specific Red Flag exclusions (medical necessity documentation)
         _red_flag_statements = {
             "EX_KNIE":     "keine Kompartment-Zeichen, kein Tumorverdacht, keine tiefe Venenthrombose",
@@ -2601,27 +2674,52 @@ Transkript:
         # Check if the EXACT magic phrase is present
         has_magic_phrase = "red flags klinisch ausgeschlossen" in a_text.lower()
 
+        # ⚠️ SAFETY LOGIC: Only add "Red Flags ausgeschlossen" if NO red flags detected
         if not has_magic_phrase and profile_id in _red_flag_statements:
-            # Add profile-specific Red Flag exclusion with EXACT magic phrase
-            red_flag_details = _red_flag_statements[profile_id]
-            a_text = a_text.strip()
-            
-            # Remove standalone exclusion lists without the magic phrase
-            a_text = re.sub(
-                r'\s*\|\s*keine\s+Kompartment-Zeichen[^|.]*(?:\||\.)?',
-                '', a_text, flags=re.I
-            )
-            
-            # Ensure proper punctuation before adding
-            if a_text and not a_text.endswith((".", "|")):
-                a_text += " |"
-            elif not a_text.endswith(" |"):
-                a_text += " |"
-            
-            # ✅ VALIDATOR FIX: Use EXACT phrase "Red Flags klinisch ausgeschlossen"
-            a_text += f" Red Flags klinisch ausgeschlossen ({red_flag_details})"
-            soap_dict["A"] = a_text
-            print(f"[ValidationFix] Added magic phrase 'Red Flags klinisch ausgeschlossen' for {profile_id}")
+            # Check if it's SAFE to exclude red flags
+            if has_crps_signs or has_neuro_red_flags:
+                # RED FLAGS DETECTED - Do NOT exclude them!
+                print(f"[SafetyAlert] CRPS/Neurological red flags detected - NOT adding exclusion statement")
+                
+                # Instead, add a warning if not already present
+                if "verdacht" not in a_text.lower() and "achtung" not in a_text.lower():
+                    a_text = a_text.strip()
+                    if a_text and not a_text.endswith((".", "|")):
+                        a_text += " |"
+                    elif not a_text.endswith(" |"):
+                        a_text += " |"
+                    
+                    # Add specific warning based on findings
+                    warnings = []
+                    if has_crps_signs:
+                        warnings.append("Verdacht auf CRPS (Sudeck)")
+                    if has_neuro_red_flags:
+                        warnings.append("Verdacht auf Nervenkompressionssyndrom")
+                    
+                    a_text += f" ACHTUNG: {' und '.join(warnings)} - Arztbericht erforderlich!"
+                    soap_dict["A"] = a_text
+                    print(f"[SafetyFix] Added warning instead of exclusion: {warnings}")
+            else:
+                # SAFE to exclude - add profile-specific Red Flag exclusion with EXACT magic phrase
+                red_flag_details = _red_flag_statements[profile_id]
+                a_text = a_text.strip()
+                
+                # Remove standalone exclusion lists without the magic phrase
+                a_text = re.sub(
+                    r'\s*\|\s*keine\s+Kompartment-Zeichen[^|.]*(?:\||\.)?',
+                    '', a_text, flags=re.I
+                )
+                
+                # Ensure proper punctuation before adding
+                if a_text and not a_text.endswith((".", "|")):
+                    a_text += " |"
+                elif not a_text.endswith(" |"):
+                    a_text += " |"
+                
+                # ✅ VALIDATOR FIX: Use EXACT phrase "Red Flags klinisch ausgeschlossen"
+                a_text += f" Red Flags klinisch ausgeschlossen ({red_flag_details})"
+                soap_dict["A"] = a_text
+                print(f"[ValidationFix] Added magic phrase 'Red Flags klinisch ausgeschlossen' for {profile_id}")
 
         return soap_dict
 

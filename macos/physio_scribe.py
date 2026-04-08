@@ -1394,7 +1394,8 @@ class KuraEngine:
                 "atlas-übergang", "atlasgelenk", "atlaskompression",
                 "kopfgelenk", "kopfgelenksreihe",
                 "geier-hals", "vorköpfige haltung",
-                "doppelkinn",        # deep neck flexor rehab — exclusively HWS
+                # NOTE: "doppelkinn" removed — it appears in LWS Brügger-Sitz posture
+                # training too and must NOT be treated as anatomically exclusive to HWS.
                 "hinterkopfschmerz", "okzipitaler kopfschmerz",
                 "zervikogener kopfschmerz",
             ],
@@ -1406,12 +1407,19 @@ class KuraEngine:
                 "schober-zeichen", "vorlaufphänomen", "vorlauf-test",
                 "lumbalgie", "lumboischialgie", "kreuzschmerz",
                 "bandscheibenvorfall lumbal", "bandscheibenprotrusion lws",
+                "brügger", "brügger-sitz",   # LWS posture rehab technique
             ],
         }
+        # Collect ALL definitive matches — if multiple profiles fire, pick the one
+        # with the most hits. This prevents a single postural cue (e.g. "doppelkinn"
+        # in a Brügger-Sitz session) from hijacking a clear structural LWS diagnosis.
+        _def_hits: dict = {}
         for def_pid, def_terms in _DEFINITIVE.items():
-            if any(term in t for term in def_terms):
-                if def_pid in self._PROFILES:
-                    return def_pid
+            hits = sum(1 for term in def_terms if term in t)
+            if hits > 0 and def_pid in self._PROFILES:
+                _def_hits[def_pid] = hits
+        if _def_hits:
+            return max(_def_hits, key=_def_hits.__getitem__)
 
         # Age extraction — "4 Jahre alt", "4-jaehrig", "4 J."
         age = None
@@ -1756,6 +1764,13 @@ Transkript:
                     # Strip any hallucinated Neutral-Null ROM for LWS flexion from O
                     obj_text = re.sub(r'(?:LWS[^|]*?)?\b0-0-\d{2,3}\b[^|]*', '', obj_text).strip(' |')
                     break
+
+        # ── CRITICAL: Strip HWS-specific tests hallucinated for LWS sessions ────
+        # Spurling is a cervical nerve-root compression test — has no clinical
+        # relevance for a lumbar session and will confuse the billing audit.
+        if is_lws and not _is_hws_context:
+            obj_text = re.sub(r'\s*\|\s*Spurling-Test[^|]*', '', obj_text, flags=re.I)
+            obj_text = re.sub(r'\s*\|\s*Sensibilität/Kraft\s*\(C5-Th1\)[^|]*', '', obj_text, flags=re.I)
 
         # ── LWS ROM (NZM: Extension-0-Flexion) ────────────────────────────────────
         # Recover LWS ROM from verbal pain/relief descriptions when explicit degrees
@@ -3692,9 +3707,18 @@ Transkript:
 
         # SPINE PRIORITY: Profile or keywords indicate spine case - override wrong ICD
         if is_spine_profile or _spine:
-            if any(k in full_text for k in ["hws", "nacken", "atlasübergang", "zervikal", "c0/c1", "c1/c2", "zervikalsyndrom"]):
+            # LWS structural diagnosis takes precedence over generic HWS keyword match.
+            # A Brügger-Sitz session mentions "hws" incidentally (posture cue) but the
+            # primary diagnosis is lumbar disc — M51.1 must win over M54.2.
+            _lws_disc = any(k in full_text for k in [
+                "bandscheibenvorfall", "bandscheibenprotrusion", "diskushernie",
+                "lendenwirbelsäule", "lumbalgie", "lumboischialgie", "lws-syndrom",
+            ])
+            if _lws_disc:
+                res_icd = "M51.1"
+            elif any(k in full_text for k in ["hws", "nacken", "atlasübergang", "zervikal", "c0/c1", "c1/c2", "zervikalsyndrom"]):
                 res_icd = "M54.2"
-            elif any(k in full_text for k in ["bandscheibenvorfall", "radikulär", "ausstrahlung"]):
+            elif any(k in full_text for k in ["radikulär", "ausstrahlung"]):
                 res_icd = "M51.1"
             else:
                 res_icd = "M54.5"

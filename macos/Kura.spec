@@ -2,7 +2,7 @@
 import shutil
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('../models', 'models'), ('../shared', 'shared'), ('../.env.example', '.'), ('physio_scribe.py', '.'), ('Info.plist', '.'), ('assets', 'assets')]
+datas = [('../models', 'models'), ('../shared', 'shared'), ('../.env.dist', '.'), ('../.env.example', '.'), ('physio_scribe.py', '.'), ('Info.plist', '.'), ('assets', 'assets')]
 
 # Bundle ffmpeg so customers don't need it installed
 _ffmpeg = shutil.which('ffmpeg')

@@ -1773,6 +1773,11 @@ Transkript: {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
                 transcript, re.I)
             if kontraktion and "kontraktion" not in obj_text.lower():
                 obj_text += f" | Kontraktion: {kontraktion.group(1)} s"
+            
+            # ✅ Add anatomical segment for pelvic floor therapy documentation
+            if "behandeltes segment" not in obj_text.lower() and "segment" not in obj_text.lower():
+                obj_text += " | Behandeltes Segment: Beckenboden (Levator ani, M. transversus perinei)"
+                print(f"[ValidationFix] Added segment for Pelvic Floor therapy")
 
         # ── Elektrotherapie: recover modality, Hz, mA, electrode placement ───
         is_elektro = any(k in t_low for k in [

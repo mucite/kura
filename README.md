@@ -110,7 +110,9 @@ cp .env.template .env
 Create `~/Documents/Kura/.env` (or set in your shell):
 
 ```bash
-# Required: HuggingFace token for model downloads
+# RECOMMENDED: HuggingFace token for faster model downloads (FREE)
+# Without this, downloads will be 10x slower with lower rate limits
+# Get yours at: https://huggingface.co/settings/tokens
 HF_TOKEN=hf_your_token_here
 
 # Required for Pro license: Digistore24 credentials
@@ -123,6 +125,20 @@ KURA_CERT_PASSWORD=your_cert_password
 # Optional: logging verbosity
 KURA_LOG_LEVEL=INFO     # DEBUG | INFO | WARNING | ERROR
 ```
+
+**⚡ Quick HF_TOKEN Setup:**
+
+```bash
+# Interactive setup (recommended)
+python setup_hf_token.py
+
+# Or direct setup
+python setup_hf_token.py hf_your_token_here
+```
+
+For detailed instructions, see: **[HF_TOKEN_SETUP.md](HF_TOKEN_SETUP.md)**
+
+> **Why set HF_TOKEN?** Model downloads will be **10x faster** with higher rate limits and better reliability. It's completely FREE and takes 2 minutes. Without it, you'll see warnings and slower downloads.
 
 ### Practice Configuration
 

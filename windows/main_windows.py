@@ -3,6 +3,7 @@ Kura v2026 — Windows
 CustomTkinter GUI (FREE, MIT License) - Modern, professional medical interface
 """
 import json
+import multiprocessing
 import os
 import re
 import shutil
@@ -16,6 +17,7 @@ import webbrowser
 from datetime import datetime
 from tkinter import messagebox
 import tkinter as tk
+
 
 # ── Fix Windows encoding issues ────────────────────────────────────────────────
 # Windows console uses cp1252 by default which can't handle Unicode/emojis
@@ -102,10 +104,21 @@ if not os.path.exists(user_env_file):
         base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     else:
         base = os.path.join(os.path.dirname(__file__), "..")
+
+    # Try to copy bundled .env.dist first (contains pre-configured HF_TOKEN)
+    dist_env = os.path.join(base, ".env.dist")
     example = os.path.join(base, ".env.example")
-    if os.path.exists(example):
+
+    if os.path.exists(dist_env):
+        try:
+            shutil.copy(dist_env, user_env_file)
+            print("✅ Copied bundled .env configuration (includes HF_TOKEN for fast downloads)")
+        except Exception as copy_err:
+            print(f"Error copying .env.dist: {copy_err}")
+    elif os.path.exists(example):
         try:
             shutil.copy(example, user_env_file)
+            print("⚠️  Copied .env.example - you may need to configure HF_TOKEN manually")
         except Exception as copy_err:
             print(f"Error copying .env.example: {copy_err}")
     else:
@@ -113,9 +126,11 @@ if not os.path.exists(user_env_file):
             with open(user_env_file, "w", encoding="utf-8") as f:
                 if f is not None:
                     f.write("# Kura Configuration\n")
+                    f.write("# HF_TOKEN not bundled - downloads will be slower\n")
                     f.write("HF_TOKEN=your_token_here\n")
                     f.write("DS24_API_KEY=\n")
                     f.write("DS24_PRODUCT_ID=\n")
+            print("⚠️  Created default .env - configure HF_TOKEN for faster downloads")
         except Exception as env_err:
             print(f"Error creating .env file: {env_err}")
 
@@ -1504,6 +1519,12 @@ class KuraApp:
 
 
 if __name__ == "__main__":
+    # ══════════════════════════════════════════════════════════════════════
+    # CRITICAL: Enable multiprocessing support for PyInstaller frozen exe
+    # Must be called before any multiprocessing operations
+    # ══════════════════════════════════════════════════════════════════════
+    multiprocessing.freeze_support()
+    
     # ══════════════════════════════════════════════════════════════════════
     # CRITICAL: Check for models BEFORE starting the main app
     # If models are missing, show download dialog (GUI)

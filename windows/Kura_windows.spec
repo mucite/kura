@@ -10,6 +10,7 @@ datas = [
     ('../core', 'core'),  # Include core (with model_downloader.py)
     ('../shared', 'shared'),
     ('../data', 'data'),  # GKV prices
+    ('../.env.dist', '.'),  # Bundled .env with pre-configured HF_TOKEN
     ('../.env.example', '.'),
     ('physio_scribe_crossplatform.py', '.'),
 ]

@@ -15,10 +15,41 @@ Benefits:
 - Users always get latest model version
 - Bandwidth: Only download once
 - Updates: Can update models independently
+
+Authentication:
+- Set HF_TOKEN environment variable for faster downloads
+- Get free token from https://huggingface.co/settings/tokens
 """
 import os
 import sys
+import signal
+import threading
 from pathlib import Path
+
+# Import huggingface_hub at module level to avoid threading issues
+try:
+    from huggingface_hub import hf_hub_download
+    HF_HUB_AVAILABLE = True
+except ImportError:
+    HF_HUB_AVAILABLE = False
+    hf_hub_download = None
+
+# Thread lock for download operations
+_download_lock = threading.Lock()
+
+# Global flag for graceful shutdown
+_shutdown_requested = False
+
+def signal_handler(signum, frame):
+    """Handle Ctrl+C gracefully without triggering import errors."""
+    global _shutdown_requested
+    _shutdown_requested = True
+    print("\n\n⚠️  Download cancelled by user - cleaning up...")
+    print("Please wait for cleanup to complete...")
+    # Don't raise KeyboardInterrupt - just set flag
+
+# Register signal handler
+signal.signal(signal.SIGINT, signal_handler)
 
 def get_model_dir() -> Path:
     """Get the models directory path."""
@@ -73,45 +104,80 @@ def check_model_exists(model_name: str) -> bool:
     return False
 
 def download_model_with_progress(repo_id: str, filename: str, local_dir: Path) -> bool:
-    """Download model with progress bar."""
-    try:
-        from huggingface_hub import hf_hub_download
-        import requests
+    """Download model with progress bar. Thread-safe with lock."""
+    # Use lock to prevent concurrent downloads causing import state conflicts
+    with _download_lock:
+        try:
+            # Check if huggingface_hub is available
+            if not HF_HUB_AVAILABLE or hf_hub_download is None:
+                print("❌ ERROR: huggingface_hub not installed")
+                print("   Install with: pip install huggingface_hub")
+                return False
 
-        print(f"\n📥 Downloading {filename}...")
-        print(f"Source: {repo_id}")
-        print(f"Target: {local_dir}")
+            print(f"\n📥 Downloading {filename}...")
+            print(f"Source: {repo_id}")
+            print(f"Target: {local_dir}")
 
-        # Create directory
-        local_dir.mkdir(parents=True, exist_ok=True)
+            # ══════════════════════════════════════════════════════════════
+            # CRITICAL FIX: Disable huggingface_hub parallel downloads
+            # Parallel downloads use multiprocessing which causes
+            # "global import state already initialized" error on Windows
+            # ══════════════════════════════════════════════════════════════
+            os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '0'  # Keep progress bars
+            os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = '0'     # Disable hf_transfer (uses multiprocessing)
 
-        # Get HF_TOKEN from environment (if available)
-        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
+            # Create directory
+            local_dir.mkdir(parents=True, exist_ok=True)
 
-        if hf_token and hf_token != "your_token_here":
-            print("✅ Using HF_TOKEN for authenticated download (faster)")
-        else:
-            print("⚠️  No HF_TOKEN - using anonymous download (slower)")
-            print("   To speed up: Get free token from https://huggingface.co/settings/tokens")
-            hf_token = None  # Use anonymous
+            # Get HF_TOKEN from environment (if available)
+            hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
 
-        # Download with resume capability
-        model_path = hf_hub_download(
-            repo_id=repo_id,
-            filename=filename,
-            local_dir=str(local_dir),
-            local_dir_use_symlinks=False,
-            resume_download=True,
-            token=hf_token,  # ✅ Use token if available
-        )
+            if hf_token and hf_token != "your_token_here":
+                print("✅ Using HF_TOKEN for authenticated download (faster, higher rate limits)")
+            else:
+                print("\n" + "="*70)
+                print("⚠️  WARNING: Unauthenticated HF Hub Request")
+                print("="*70)
+                print("You are downloading without authentication.")
+                print("This will result in:")
+                print("  • Slower download speeds")
+                print("  • Lower rate limits")
+                print("  • Potential download failures during peak times")
+                print("\nTo enable faster, authenticated downloads:")
+                print("  1. Create free account: https://huggingface.co/join")
+                print("  2. Get token: https://huggingface.co/settings/tokens")
+                print("  3. Add to .env file in your user directory:")
+                if sys.platform == "win32":
+                    env_path = Path.home() / "AppData" / "Roaming" / "Kura" / ".env"
+                else:
+                    env_path = Path.home() / "Library" / "Application Support" / "Kura" / ".env"
+                print(f"     {env_path}")
+                print("  4. Add line: HF_TOKEN=your_token_here")
+                print("="*70 + "\n")
+                hf_token = None  # Use anonymous
 
-        file_size = Path(model_path).stat().st_size / (1024**3)
-        print(f"✅ Downloaded: {filename} ({file_size:.2f} GB)")
-        return True
+            # Download with resume capability
+            model_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                local_dir=str(local_dir),
+                local_dir_use_symlinks=False,
+                resume_download=True,
+                token=hf_token,  # ✅ Use token if available
+            )
 
-    except Exception as e:
-        print(f"❌ Download failed: {e}")
-        return False
+            file_size = Path(model_path).stat().st_size / (1024**3)
+            print(f"✅ Downloaded: {filename} ({file_size:.2f} GB)")
+            return True
+
+        except KeyboardInterrupt:
+            print("\n⚠️  Download cancelled by user")
+            return False
+        except Exception as e:
+            print(f"❌ Download failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
 def download_llm_model() -> bool:
     """Download Llama-3.1-8B-Instruct model."""
@@ -175,84 +241,110 @@ def ensure_models_available() -> bool:
     Downloads them if missing. Called on first app launch.
 
     Returns:
-        True if all models available, False if download failed
+        True if all models available, False if download failed or cancelled
     """
-    print("\n" + "="*70)
-    print("🔍 CHECKING MODEL AVAILABILITY")
-    print("="*70)
+    global _shutdown_requested
 
-    model_dir = get_model_dir()
-    print(f"Model directory: {model_dir}")
-    print(f"Directory exists: {model_dir.exists()}")
-
-    llm_exists = check_model_exists("llm")
-    whisper_exists = check_model_exists("whisper")
-
-    print(f"LLM model found: {llm_exists}")
-    print(f"Whisper model found: {whisper_exists}")
-
-    if llm_exists and whisper_exists:
-        print("✅ All models already installed")
-        print("="*70 + "\n")
-        return True
-
-    print("\n" + "="*70)
-    print("🩺 KURA MEDICAL - FIRST TIME SETUP")
-    print("="*70)
-    print("Kura needs to download AI models for local processing.")
-    print("This is a ONE-TIME download (~6 GB total).")
-    print("All patient data stays on your computer - 100% DSGVO compliant.")
-    print("="*70)
-
-    # Check internet connection
-    print("\n🌐 Checking internet connection...")
     try:
-        import socket
-        socket.create_connection(("huggingface.co", 443), timeout=5)
-        print("✅ Internet connection OK")
-    except Exception as e:
-        print(f"\n❌ ERROR: No internet connection detected: {e}")
-        print("Please connect to the internet and restart Kura.")
+        print("\n" + "="*70)
+        print("🔍 CHECKING MODEL AVAILABILITY")
+        print("="*70)
+
+        model_dir = get_model_dir()
+        print(f"Model directory: {model_dir}")
+        print(f"Directory exists: {model_dir.exists()}")
+
+        llm_exists = check_model_exists("llm")
+        whisper_exists = check_model_exists("whisper")
+
+        print(f"LLM model found: {llm_exists}")
+        print(f"Whisper model found: {whisper_exists}")
+
+        if llm_exists and whisper_exists:
+            print("✅ All models already installed")
+            print("="*70 + "\n")
+            return True
+
+        print("\n" + "="*70)
+        print("🩺 KURA MEDICAL - FIRST TIME SETUP")
+        print("="*70)
+        print("Kura needs to download AI models for local processing.")
+        print("This is a ONE-TIME download (~6 GB total).")
+        print("All patient data stays on your computer - 100% DSGVO compliant.")
+        print("="*70)
+
+        # Check internet connection
+        print("\n🌐 Checking internet connection...")
+        try:
+            import socket
+            socket.create_connection(("huggingface.co", 443), timeout=5)
+            print("✅ Internet connection OK")
+        except Exception as e:
+            print(f"\n❌ ERROR: No internet connection detected: {e}")
+            print("Please connect to the internet and restart Kura.")
+            return False
+
+        success = True
+
+        # Download LLM if missing
+        if not llm_exists and not _shutdown_requested:
+            print("\n📥 LLM model not found - starting download...")
+            if not download_llm_model():
+                if _shutdown_requested:
+                    print("⚠️  LLM download cancelled - will resume next time")
+                else:
+                    print("❌ LLM download failed!")
+                success = False
+            else:
+                print("✅ LLM download successful!")
+        else:
+            print("\n✅ LLM model already installed")
+
+        # Download Whisper if missing
+        if not whisper_exists and not _shutdown_requested:
+            print("\n📥 Whisper model not found - starting download...")
+            if not download_whisper_model():
+                if _shutdown_requested:
+                    print("⚠️  Whisper download cancelled - will resume next time")
+                else:
+                    print("❌ Whisper download failed!")
+                success = False
+            else:
+                print("✅ Whisper download successful!")
+        else:
+            print("\n✅ Whisper model already installed")
+
+        if _shutdown_requested:
+            print("\n" + "="*70)
+            print("⚠️  SETUP CANCELLED")
+            print("="*70)
+            print("\nDownload cancelled by user.")
+            print("Partial downloads will resume next time you start Kura.\n")
+            return False
+
+        if success:
+            print("\n" + "="*70)
+            print("✅ SETUP COMPLETE - KURA IS READY!")
+            print("="*70)
+            print("\nAll models installed successfully.")
+            print("Kura will now start. Future launches will be instant.\n")
+        else:
+            print("\n" + "="*70)
+            print("❌ SETUP INCOMPLETE")
+            print("="*70)
+            print("\nSome models failed to download.")
+            print("Please check your internet connection and try again.\n")
+
+        return success
+
+    except (KeyboardInterrupt, SystemExit):
+        # Final catch-all for any cancellation
+        print("\n\n" + "="*70)
+        print("⚠️  SETUP CANCELLED - CLEANUP COMPLETE")
+        print("="*70)
+        print("\nDownload cancelled. Partial files saved for next time.")
+        print("="*70 + "\n")
         return False
-
-    success = True
-
-    # Download LLM if missing
-    if not llm_exists:
-        print("\n📥 LLM model not found - starting download...")
-        if not download_llm_model():
-            success = False
-            print("❌ LLM download failed!")
-        else:
-            print("✅ LLM download successful!")
-    else:
-        print("\n✅ LLM model already installed")
-
-    # Download Whisper if missing
-    if not whisper_exists:
-        print("\n📥 Whisper model not found - starting download...")
-        if not download_whisper_model():
-            success = False
-            print("❌ Whisper download failed!")
-        else:
-            print("✅ Whisper download successful!")
-    else:
-        print("\n✅ Whisper model already installed")
-
-    if success:
-        print("\n" + "="*70)
-        print("✅ SETUP COMPLETE - KURA IS READY!")
-        print("="*70)
-        print("\nAll models installed successfully.")
-        print("Kura will now start. Future launches will be instant.\n")
-    else:
-        print("\n" + "="*70)
-        print("❌ SETUP INCOMPLETE")
-        print("="*70)
-        print("\nSome models failed to download.")
-        print("Please check your internet connection and try again.\n")
-
-    return success
 
 if __name__ == "__main__":
     success = ensure_models_available()

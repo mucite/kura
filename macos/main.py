@@ -94,23 +94,34 @@ os.makedirs(user_env_dir, exist_ok=True)
 
 # If user .env doesn't exist, create it from bundled example or template
 if not os.path.exists(user_env_file):
-    # Try to find bundled .env.example
+    # Try to find bundled .env.dist first, then .env.example
     if getattr(sys, 'frozen', False):
         if hasattr(sys, '_MEIPASS'):
             base_path = sys._MEIPASS
         else:
             exe_dir = os.path.dirname(sys.executable)
             base_path = os.path.join(exe_dir, '..', 'Resources')
+        dist_env = os.path.join(base_path, '.env.dist')
         example_file = os.path.join(base_path, '.env.example')
     else:
-        example_file = os.path.join(os.path.dirname(__file__), '..', '.env.example')
-    
-    # Copy example if it exists, otherwise create template
-    if os.path.exists(example_file):
+        base_path = os.path.join(os.path.dirname(__file__), '..')
+        dist_env = os.path.join(base_path, '.env.dist')
+        example_file = os.path.join(base_path, '.env.example')
+
+    # Priority: .env.dist (bundled config) > .env.example > create template
+    if os.path.exists(dist_env):
+        try:
+            import shutil
+            shutil.copy(dist_env, user_env_file)
+            print(f"✅ Copied bundled .env configuration (includes HF_TOKEN for fast downloads)")
+        except Exception as copy_err:
+            print(f"Error copying .env.dist: {copy_err}")
+    elif os.path.exists(example_file):
         try:
             import shutil
             shutil.copy(example_file, user_env_file)
             print(f"📝 Created user .env from example: {user_env_file}")
+            print(f"⚠️  Configure HF_TOKEN for faster downloads")
         except Exception as copy_err:
             print(f"Error copying .env.example: {copy_err}")
     else:
@@ -125,6 +136,7 @@ if not os.path.exists(user_env_file):
                     f.write("DS24_API_KEY=\n")
                     f.write("DS24_PRODUCT_ID=\n")
             print(f"📝 Created template .env: {user_env_file}")
+            print(f"⚠️  Configure HF_TOKEN for faster downloads")
         except Exception as env_err:
             print(f"Error creating .env file: {env_err}")
 

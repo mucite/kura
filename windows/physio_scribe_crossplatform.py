@@ -1,4 +1,4 @@
-nnon"""
+"""
 Kura Engine — Windows
 Inference: llama-cpp-python (GGUF) + openai-whisper (local CPU)
 Clinical logic: identical to macOS (LearningManager, post-processing pipeline, compliance checks)

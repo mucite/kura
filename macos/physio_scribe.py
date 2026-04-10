@@ -757,7 +757,7 @@ class KuraEngine:
             r"Lenertschroth|Schrot-Therapie": "Lehnert-Schroth",
             r"ischio-choraler|ischo-cural": "ischiocrurale",
             r"autochtoner": "autochthoner",
-            r"Lasek|Lasegge|Laseque": "Lasègue",
+            r"Lasek|Lasegge|Laseque|Lassegg|Lasègg|Lasseg|Lassègue|LASSEC|Lassec|Lasseck|Lasec": "Lasègue",
             r"Psoasdehnung": "Psoas-Dehnung",
             r"Stufenlagerung": "Stufenlagerung",
             r"Finger-Bodenabstand|FBA": "Finger-Boden-Abstand (FBA)",
@@ -1024,7 +1024,7 @@ class KuraEngine:
                 # "wirbelsäule" excluded — too broad, matches HWS sessions too
                 # "rücken" excluded — matches "Rückenlage" (patient position)
             ],
-            "icd_prefix": ["M54.4", "M54.5", "M51"],
+            "icd_prefix": ["M54.5", "M54.4", "M51"],
             "checklist": [
                 "Behandeltes Segment: L__/L__ oder L__/S__ (MT-Pflichtangabe fuer 21201)",
                 "FBA (Finger-Boden-Abstand): X cm",
@@ -1876,11 +1876,16 @@ Transkript:
         # ✅ CRITICAL: Segment mapping for MT billing (21201) - EX_LWS and MT (spine)
         # This applies to BOTH EX_LWS and MT profiles
         if is_lws and not _is_hws_context:
-            if "behandeltes segment" not in obj_text.lower() and "segment" not in obj_text.lower():
-                # Try to extract specific segment from transcript
-                seg_m = re.search(r'\b(l[1-5]/l[1-5]|l[1-5]/s1)\b', transcript, re.I)
+            _has_billing_segment = bool(re.search(
+                r'\bbehandeltes\s+segment\b|'
+                r'\b[Ll]\d/[Ll]\d\b|\b[Ll]\d/[Ss]\d\b|'
+                r'\bISG\b|\bIliosakral\b',
+                obj_text, re.I))
+            if not _has_billing_segment:
+                # Try to extract specific segment from transcript (slash or space separator)
+                seg_m = re.search(r'\b(l[1-5])[/\s](l[1-5]|s1)\b', transcript, re.I)
                 if seg_m:
-                    seg_text = seg_m.group(1).upper()
+                    seg_text = f"{seg_m.group(1).upper()}/{seg_m.group(2).upper()}"
                     obj_text += f" | Behandeltes Segment: {seg_text}"
                     print(f"[ValidationFix] Added LWS segment from transcript: {seg_text}")
                 # Check for ISG/SI joint (sacroiliac)

@@ -469,7 +469,7 @@ class KuraEngine:
         "EX_KNIE": {
             "label":    "Extremitaeten Knie (EX3)",
             "billing":  "21201",
-            "priority": 44,   # unique
+            "priority": 56,   # above MT(50): knee anatomy always beats generic MT profile
             "triggers": [
                 "knie", "kniegelenk", "knieschmerz", "kniebeschwerden",
                 "gonarthrose", "kniearthrose",
@@ -529,7 +529,7 @@ class KuraEngine:
         "EX_LWS": {
             "label":    "LWS / Lumbalgie",
             "billing":  "21201",
-            "priority": 42,   # unique
+            "priority": 53,   # above MT(50): LWS beats generic MT-WS profile
             "triggers": [
                 "lws", "lendenwirbelsäule", "lendenwirbel", "lumbosakral",
                 "lumbalgie", "lumboischialgie", "ischiasschmerz", "ischialgie",
@@ -556,7 +556,7 @@ class KuraEngine:
         "EX_HUefte": {
             "label":    "Extremitaeten Huefte (EX4)",
             "billing":  "21201",
-            "priority": 43,   # unique; above EX_LWS(42)
+            "priority": 55,   # above MT(50): hip anatomy beats generic MT profile
             "triggers": [
                 "hüfte", "huefte", "hüftgelenk", "hüftbeschwerden",
                 "coxarthrose", "hüftarthrose", "cox",
@@ -2942,12 +2942,34 @@ Transkript:
                 "soap": {"S": "n.d.", "O": "n.d.", "A": "n.d.", "P": "n.d."}
             }
 
+        # Structural O-field fixes before ICD correction
+        obj = parsed["soap"].get("O", "")
+        obj = re.sub(r'(\d+),(\d+)-(\d+)', r'\1-\2-\3', obj)          # 0,5-90 → 0-5-90
+        obj = re.sub(r'\[Segment aus Befund angeben[^\]]*\]', '', obj)  # remove placeholder
+        obj = re.sub(r'\|\s*\|', '|', obj)
+        parsed["soap"]["O"] = obj.strip()
+
         # ICD correction (if suggest_billing method exists)
         if hasattr(self, 'suggest_billing'):
             icd, _ = self.suggest_billing(parsed["icd10"], parsed["soap"], transcript, profile_id=profile_id)
             parsed["icd10"] = icd
         else:
             icd = parsed["icd10"]
+
+        # ICD-profile consistency guard
+        _PROFILE_VALID_PREFIXES = {
+            "EX_KNIE":    (("M17", "M22", "M23", "M24", "S82", "S83", "Z96.6"), "M23.51"),
+            "EX_HUefte":  (("M16", "M17", "S72", "Z96.6", "M24"),               "M16.9"),
+            "EX_SCHULTER":(("M75", "S43", "M24"),                                "M75.1"),
+            "EX_FUSS":    (("M19", "M77", "S93", "S92", "M79.6"),                "M19.07"),
+            "EX_HAND":    (("M19", "M65", "G56", "M77", "S52", "S62", "T92"),    "M19.04"),
+        }
+        if profile_id in _PROFILE_VALID_PREFIXES:
+            valid_prefixes, fallback_icd = _PROFILE_VALID_PREFIXES[profile_id]
+            if not any(icd.startswith(p) for p in valid_prefixes):
+                print(f"[ICD-Fix] Profile {profile_id} incompatible with ICD {icd} → {fallback_icd}")
+                icd = fallback_icd
+                parsed["icd10"] = icd
 
         # Apply all post-processing corrections (only if methods exist)
         if hasattr(self, 'apply_medical_corrections'):

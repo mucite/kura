@@ -938,7 +938,7 @@ class KuraEngine:
         "EX_KNIE": {
             "label":    "Extremitaeten Knie (EX3)",
             "billing":  "21201",
-            "priority": 44,   # unique
+            "priority": 56,   # above MT(50): knee anatomy always beats generic MT profile
             "triggers": [
                 "knie", "kniegelenk", "knieschmerz", "kniebeschwerden",
                 "gonarthrose", "kniearthrose",
@@ -1012,7 +1012,7 @@ class KuraEngine:
         "EX_LWS": {
             "label":    "LWS / Lumbalgie",
             "billing":  "21201",
-            "priority": 42,   # unique
+            "priority": 53,   # above MT(50): LWS beats generic MT-WS profile
             "triggers": [
                 "lws", "lendenwirbelsäule", "lendenwirbel", "lumbosakral",
                 "lumbalgie", "lumboischialgie", "ischiasschmerz", "ischialgie",
@@ -1034,7 +1034,7 @@ class KuraEngine:
         "EX_HUefte": {
             "label":    "Extremitaeten Huefte (EX4)",
             "billing":  "21201",
-            "priority": 43,   # unique; above EX_LWS(42)
+            "priority": 55,   # above MT(50): hip anatomy beats generic MT profile
             "triggers": [
                 "hüfte", "huefte", "hüftgelenk", "hüftbeschwerden",
                 "coxarthrose", "hüftarthrose", "cox",
@@ -3169,6 +3169,19 @@ Transkript:
         """
         import re
 
+        # 0. Structural fixes applied before all other corrections
+        obj = soap_dict.get("O", "")
+        # NZM comma-to-dash: Whisper transcribes "null-fünf-neunzig" as "0,5-90"
+        # In NZM context a comma between two digits followed by a dash is always a
+        # mis-split dash:  X,Y-Z  →  X-Y-Z
+        obj = re.sub(r'(\d+),(\d+)-(\d+)', r'\1-\2-\3', obj)
+        # Remove unfilled segment placeholder left by AI template copying
+        obj = re.sub(r'\[Segment aus Befund angeben[^\]]*\]', '', obj)
+        # Collapse multiple pipes/whitespace left after removal
+        obj = re.sub(r'\|\s*\|', '|', obj)
+        obj = re.sub(r'^\s*\|\s*', '', obj).strip()
+        soap_dict["O"] = obj
+
         # 1. Simple string replacements (case-insensitive exact match)
         simple_fixes = {
             # ── Whisper mishearings / compound splits ─────────────────────────
@@ -3673,6 +3686,22 @@ Transkript:
         # ICD correction (domain detection + keyword-based upgrade)
         icd, _ = self.suggest_billing(parsed["icd10"], parsed["soap"], transcript, profile_id=profile_id)
         parsed["icd10"] = icd
+
+        # ICD-profile consistency guard: if the AI output an anatomically wrong ICD
+        # (e.g. M54.5 Low Back Pain for a knee patient), override with a safe fallback.
+        _PROFILE_VALID_PREFIXES = {
+            "EX_KNIE":    (("M17", "M22", "M23", "M24", "S82", "S83", "Z96.6"), "M23.51"),
+            "EX_HUefte":  (("M16", "M17", "S72", "Z96.6", "M24"),               "M16.9"),
+            "EX_SCHULTER":(("M75", "S43", "M24"),                                "M75.1"),
+            "EX_FUSS":    (("M19", "M77", "S93", "S92", "M79.6"),                "M19.07"),
+            "EX_HAND":    (("M19", "M65", "G56", "M77", "S52", "S62", "T92"),    "M19.04"),
+        }
+        if profile_id in _PROFILE_VALID_PREFIXES:
+            valid_prefixes, fallback_icd = _PROFILE_VALID_PREFIXES[profile_id]
+            if not any(icd.startswith(p) for p in valid_prefixes):
+                _log.warning("ICD-profile mismatch: profile=%s icd=%s → override %s", profile_id, icd, fallback_icd)
+                icd = fallback_icd
+                parsed["icd10"] = icd
 
         parsed["soap"] = self.apply_medical_corrections(parsed["soap"])
         parsed["soap"] = self.recover_hard_metrics(transcript, parsed["soap"], profile_id=profile_id)

@@ -23,7 +23,14 @@ if ! command -v create-dmg &>/dev/null; then
     echo "❌ create-dmg not found. Install with: brew install create-dmg"
     exit 1
 fi
-if ! command -v pyinstaller &>/dev/null; then
+# pyinstaller may live in the project venv
+VENV="$(dirname "$0")/../.venv"
+if command -v pyinstaller &>/dev/null; then
+    : # found on PATH — fine
+elif [ -x "$VENV/bin/pyinstaller" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV/bin/activate"
+else
     echo "❌ pyinstaller not found. Install with: pip install pyinstaller"
     exit 1
 fi
@@ -54,12 +61,24 @@ mv "dist/${INSTALLER_INTERMEDIATE}" "dist/${DMG_NAME}"
 DMG_SIZE=$(du -sh "dist/${DMG_NAME}" | cut -f1)
 echo "   ✅ DMG: ${DMG_NAME} (${DMG_SIZE})"
 
-# ── 3. Checksum ───────────────────────────────────────────────────────────────
+# ── 3. Create ZIP ─────────────────────────────────────────────────────────────
+ZIP_NAME="Kura_macOS_${VERSION}.zip"
 echo ""
-echo "🔐 Step 3/3 — SHA-256 checksum..."
+echo "📦 Step 3/4 — Creating ZIP..."
+cd dist
+zip -r --quiet "${ZIP_NAME}" Kura.app
+ZIP_SIZE=$(du -sh "${ZIP_NAME}" | cut -f1)
+echo "   ✅ ZIP: ${ZIP_NAME} (${ZIP_SIZE})"
+cd ..
+
+# ── 4. Checksums ──────────────────────────────────────────────────────────────
+echo ""
+echo "🔐 Step 4/4 — SHA-256 checksums..."
 cd dist
 shasum -a 256 "${DMG_NAME}" > "${DMG_NAME}.sha256"
+shasum -a 256 "${ZIP_NAME}" > "${ZIP_NAME}.sha256"
 echo "   ✅ $(cat "${DMG_NAME}.sha256")"
+echo "   ✅ $(cat "${ZIP_NAME}.sha256")"
 cd ..
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -71,15 +90,16 @@ echo ""
 echo "Output:"
 echo "  📦 dist/${DMG_NAME}  (${DMG_SIZE})"
 echo "  🔐 dist/${DMG_NAME}.sha256"
+echo "  📦 dist/${ZIP_NAME}  (${ZIP_SIZE})"
+echo "  🔐 dist/${ZIP_NAME}.sha256"
 echo ""
 echo "What customers do:"
-echo "  1. Download ${DMG_NAME}"
-echo "  2. Open the DMG"
-echo "  3. Double-click 'Install Kura' — done, no warnings"
+echo "  DMG: Open → Double-click 'Install Kura' — done, no warnings"
+echo "  ZIP: Extract → drag Kura.app to /Applications"
 echo ""
 echo "Upload checklist:"
-echo "  • Host the DMG on Google Drive / S3 / DigitalOcean"
-echo "    (exceeds GitHub's 2 GB limit)"
-echo "  • Upload the .sha256 file to the GitHub release"
-echo "  • Paste the external download URL in release notes"
+echo "  • Host DMG and ZIP on Google Drive / S3 / DigitalOcean"
+echo "    (both likely exceed GitHub's 2 GB limit)"
+echo "  • Upload the .sha256 files to the GitHub release"
+echo "  • Paste the external download URLs in release notes"
 echo ""

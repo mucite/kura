@@ -14,13 +14,13 @@ datas = [
     ('assets', 'assets'),
 ]
 
-# Only include models if they exist (for development builds)
-# Production builds download models on first launch to keep installer small
-if os.path.exists('../models') and os.path.isdir('../models'):
-    print("📦 Including models directory in bundle (development build)")
+# Models are never bundled — they are downloaded on first launch.
+# Set BUNDLE_MODELS=1 only for internal dev builds that need offline testing.
+if os.environ.get('BUNDLE_MODELS') == '1' and os.path.exists('../models') and os.path.isdir('../models'):
+    print("📦 Including models directory in bundle (BUNDLE_MODELS=1)")
     datas.append(('../models', 'models'))
 else:
-    print("⚠️  Models directory not found - will be downloaded on first launch (production build)")
+    print("ℹ️  Models excluded from bundle — will be downloaded on first launch (production build)")
 
 # Bundle ffmpeg so customers don't need it installed
 _ffmpeg = shutil.which('ffmpeg')

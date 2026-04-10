@@ -6,7 +6,7 @@ Update APP_VERSION here before each release.
 
 _VERSION_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/version.json"
 
-APP_VERSION = "2026.4.0"
+APP_VERSION = "2026.4.1"
 VERSION_URL = _VERSION_URL
 
 

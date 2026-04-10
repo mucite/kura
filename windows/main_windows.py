@@ -1,5 +1,5 @@
 """
-Kura v2026 — Windows
+Kura v2026.4.1 — Windows
 CustomTkinter GUI (FREE, MIT License) - Modern, professional medical interface
 """
 import json
@@ -61,7 +61,7 @@ from shared.license_manager import LicenseManager
 
 # ── Version — single source of truth: version.json at project root ────────────
 from shared.version import APP_VERSION, VERSION_URL as _VERSION_URL
-_DOWNLOAD_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/Kura_Windows_v2026.exe"
+_DOWNLOAD_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/Kura_Windows_v2026.4.1.zip"
 
 # ── CustomTkinter theme ────────────────────────────────────────────────────────
 

@@ -199,7 +199,7 @@ if "HF_TOKEN" not in os.environ:
 
 # --- App version — single source of truth: version.json at project root ---
 from shared.version import APP_VERSION, VERSION_URL as _VERSION_URL
-_DOWNLOAD_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/Kura_macOS_v2026.dmg"
+_DOWNLOAD_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/Kura_macOS_v2026.4.1.dmg"
 
 
 # --- Main App ---
@@ -1757,7 +1757,7 @@ class KuraApp(rumps.App):
             pdf.set_font("Helvetica", "I", 7)
             pdf.set_text_color(*LIGHT)
             pdf.cell(W, 5,
-                     s(f"Kura v2026 | Lokale KI-Verarbeitung | DSGVO-konform | {date_str}"),
+                     s(f"Kura v2026.4.1 | Lokale KI-Verarbeitung | DSGVO-konform | {date_str}"),
                      align="C")
 
             pdf.output(pdf_path)

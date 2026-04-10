@@ -247,6 +247,10 @@ class KuraApp(rumps.App):
         self._item_deact  = rumps.MenuItem("🔓  Lizenz deaktivieren", callback=self.deactivate_license)
         self._item_update = rumps.MenuItem("🔄  Nach Updates suchen", callback=self.check_for_update)
 
+        _is_dev = not getattr(sys, "frozen", False)
+        if _is_dev:
+            self._item_dev_reset = rumps.MenuItem("[DEV] Reset Trial", callback=self._dev_reset_trial)
+
         self.menu = [
             self.status_item,
             None,
@@ -262,6 +266,7 @@ class KuraApp(rumps.App):
             self._item_deact,
             None,
             self._item_update,
+            *([self._item_dev_reset] if _is_dev else []),
             rumps.MenuItem("⏻  Beenden", callback=self._quit),
         ]
         self._refresh_menu_state(status)
@@ -1484,6 +1489,12 @@ class KuraApp(rumps.App):
             rumps.alert("Erledigt" if ok else "Fehler", msg)
             self.update_license_display()
         _app_deactivate()
+
+    def _dev_reset_trial(self, _):
+        """DEV ONLY — reset trial count and license so the app starts fresh."""
+        self.license_mgr.dev_reset_trial()
+        self._refresh_menu_state()
+        rumps.notification("Dev", "Trial reset", "Trial and license data cleared.")
 
     def save_pdf(self, _):
         if not self.last_report:

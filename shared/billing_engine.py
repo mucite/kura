@@ -632,11 +632,11 @@ _RED_FLAGS: dict[str, str] = {
 # ── Domain-specific required doc checkers ─────────────────────────────────────
 
 _DOC_CHECKERS: dict = {
-    "ROM (Neutral-Null)":              lambda t: bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", t)),
+    "ROM (Neutral-Null)":              lambda t: bool(re.search(r"\d+\s*-\s*0\s*-\s*\d+", t)),
     "ROM Schulter (Abd/Flex/AR/IR)":   lambda t: "schulter" in t and bool(re.search(
-        r"(?:flex|abd|aro|iro|nzm).*\d+|"
-        r"\d+\s*[-/]\s*0\s*[-/]\s*\d+|"
-        r"\d+ - \d+ - \d+", t, re.I)),
+        r"\d+\s*-\s*0\s*-\s*\d+|"                  # valid NZM: X-0-X (80-120-60 rejected)
+        r"(?:flex|ext|abd|add|aro|iro):\s*\d+",     # labeled measurement with actual number
+        t, re.I)),
     "ROM Knie (Flex/Ext)":             lambda t: bool(re.search(r"\d+ - \d+ - \d+", t)) and "knie" in t,
     "ROM Hüfte (Flex/Abd/AR)":         lambda t: "hüfte" in t and bool(re.search(
         r"(?:flexion|abd|aro|iro|ext|rom hüfte|nzm).*\d+|"   # any named value with a number
@@ -841,7 +841,13 @@ class _GKVEngine:
         plan = soap.get("P", "")
         assess = soap.get("A", "")
 
-        # SOAP field checks — only A-field is billing-critical (no diagnosis = invalid claim)
+        # SOAP field checks
+        if len(subj) <= 10:
+            audit.append(AuditItem("SOAP_S", "S-Feld (Subjektiv/Anamnese)", "FAIL",
+                                   "Patientenanamnese fehlt — §106b erfordert dokumentierte "
+                                   "Beschwerdeschilderung des Patienten (Hauptbeschwerde, Schmerz, Ziel)"))
+            risk = "WARN"
+
         if len(assess) <= 10:
             audit.append(AuditItem("SOAP_A", "A-Feld (Assessment/Diagnose)", "FAIL",
                                    "Diagnose fehlt"))
@@ -853,13 +859,59 @@ class _GKVEngine:
             risk = "WARN"
 
         # ── 6. Neutral-Null ROM format — FAIL only for MT (21201), not a WARN elsewhere ─
+        # Valid NZM requires 0 in the middle: X-0-X.  80-120-60 is NOT valid NZM.
         if position == "21201" and bool(re.search(r"°|\bgrad\b", obj, re.I)):
-            has_nn = bool(re.search(r"\d+ - \d+ - \d+|\d+-\d+-\d+", obj))
+            has_nn = bool(re.search(r"\d+\s*-\s*0\s*-\s*\d+", obj))
             if not has_nn:
                 audit.append(AuditItem("ROM_FORMAT", "ROM Neutral-Null-Methode",
                                        "FAIL",
                                        "Grad (°) dokumentiert aber kein [Ext]-[0]-[Flex] Format — "
-                                       "Pflicht fuer MT-Abrechnung (21201)"))
+                                       "Pflicht fuer MT-Abrechnung (21201). "
+                                       "Beispiel: Abd/Add: 90-0-30 (nicht 80-120-60)"))
+                risk = "WARN"
+
+        # ── 6a. Anatomy mismatch — LWS-specific tests in extremity/shoulder profile ──
+        _LWS_TESTS = {"fba": "FBA (Finger-Boden-Abstand)", "finger-boden": "FBA",
+                      "lasègue": "Lasègue-Test", "lasegue": "Lasègue-Test"}
+        _EXTREMITY_DGS = {"EX1", "EX2", "EX3", "EX4", "EX5", "EX6"}
+        if dg in _EXTREMITY_DGS:
+            obj_lower = obj.lower()
+            wrong_tests = [label for kw, label in _LWS_TESTS.items() if kw in obj_lower]
+            # deduplicate labels
+            wrong_tests = list(dict.fromkeys(wrong_tests))
+            if wrong_tests:
+                audit.append(AuditItem(
+                    "ANATOMY_MISMATCH", "Anatomie-Konflikt: LWS-Tests im Extremitäten-Profil",
+                    "WARN",
+                    f"{', '.join(wrong_tests)} sind LWS/ISG-Diagnostik (Diagnosegruppe WS1b) "
+                    f"und haben im {dg}-Schulter/Extremitäten-Bericht keinen klinischen Wert. "
+                    "Ein Prüfer wird den Bericht als inkonsistent zurückweisen."
+                ))
+
+        # ── 6b. n.d. ROM fields — required measurements must not be 'no data' ────
+        # For MT positions: if the therapist wrote ROM fields but filled them with n.d.,
+        # the insurance cannot verify the starting point for the therapy goal.
+        if position == "21201":
+            nd_fields = [
+                name for name, pattern in [
+                    ("Flexion",   r"flex(?:ion)?[^|.]{0,25}n\.d\."),
+                    ("Extension", r"ext(?:ension)?[^|.]{0,25}n\.d\."),
+                    ("Abduktion", r"abd(?:uktion)?[^|.]{0,25}n\.d\."),
+                    ("ARO/IRO",   r"(?:aro|iro)[^|.]{0,25}n\.d\."),
+                    ("Endgefühl", r"endgef[üu]hl[^|.]{0,25}n\.d\."),
+                    ("Painful Arc", r"painful arc[^|.]{0,25}n\.d\."),
+                ]
+                if re.search(pattern, obj, re.I)
+            ]
+            if nd_fields:
+                audit.append(AuditItem(
+                    "ROM_ND", "ROM-Pflichtfelder mit 'n.d.' (keine Daten)",
+                    "FAIL",
+                    f"Keine Messwerte für: {', '.join(nd_fields)}. "
+                    "Die Krankenkasse muss den Ausgangsbefund kennen, "
+                    "um das Therapieziel (z.B. Abd 120°) zu bewilligen. "
+                    "Fehlende Messung = kein nachvollziehbarer Behandlungsfortschritt."
+                ))
                 risk = "WARN"
 
         # ── 7. Required documentation per Diagnosegruppe — emit only on FAIL ────

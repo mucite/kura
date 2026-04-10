@@ -1545,7 +1545,43 @@ class KuraEngine:
             if profile_id in _lower_limb_profiles else ""
         )
 
+        # Profile-specific O-field correct example (prevents LWS template bleed into EX profiles)
+        _extremity_profiles = {"EX_SCHULTER", "EX_HUefte", "EX_HUFTE", "EX_KNIE", "EX_FUSS", "EX_HAND"}
+        _obj_examples = {
+            "EX_SCHULTER": "ROM Schulter (re) NZM: Abd/Add: 90-0-30 | Flex/Ext: 140-0-40 | IRO/ARO: 40-0-50 | Hawkins-Test: positiv | Jobe-Test: negativ | Painful Arc: positiv (60°-120°) | Endgefühl: elastisch-stoppend | Behandeltes Segment: Art. glenohumeralis",
+            "EX_LWS":      "Schonhaltung re. | FBA: 40 cm | Lasègue 80° negativ | Kraftgrade 5/5 | ROM LWS NZM: Flex/Ext: 80-0-20 | Behandeltes Segment: L4/L5",
+            "EX_HWS":      "Kopfhaltung in Vorneigung | Spurling re.: negativ | ROM HWS NZM: Flex/Ext: 40-0-40 | LatFlex: 30-0-30 | Rotation: 50-0-50 | Behandeltes Segment: C5/C6",
+            "EX_KNIE":     "Schwellung med. Gelenkspalt | Lachman: negativ | ROM Knie NZM: Flex/Ext: 120-0-0 | Kraft Quadrizeps: 4/5 | VAS 4/10",
+            "EX_HUefte":   "Trendelenburg re.: positiv | ROM Hüfte NZM: Flex/Ext: 100-0-10 | Abd/Add: 30-0-20 | VAS 5/10 | Gangbild: Schonhinken re.",
+            "EX_HUFTE":    "Trendelenburg re.: positiv | ROM Hüfte NZM: Flex/Ext: 100-0-10 | Abd/Add: 30-0-20 | VAS 5/10 | Gangbild: Schonhinken re.",
+            "EX_FUSS":     "Schwellung Außenknöchel | ROM OSG NZM: DF/PF: 15-0-40 | Schubladentest: negativ | VAS 4/10 | Einbeinstand: 8 Sek.",
+        }
+        obj_ex = _obj_examples.get(profile_id, "Schonhaltung | Test: Ergebnis | ROM NZM: X-0-X | VAS: X/10")
+
+        # Hard block against LWS tests appearing in extremity reports
+        lws_exclusion = (
+            "\n- ❌ STRENG VERBOTEN für dieses Profil: FBA, Lasègue, Bragard — NUR LWS-Tests!\n"
+            "  Schulterberichte mit FBA/Lasègue werden von Prüfern sofort abgelehnt."
+            if profile_id in _extremity_profiles else ""
+        )
+
+        # NZM format reminder — only for profiles requiring angular measurement
+        _nzm_profiles = {"EX_SCHULTER", "EX_HUefte", "EX_HUFTE", "EX_KNIE", "EX_FUSS", "EX_HWS", "EX_LWS", "EX_HAND", "MT"}
+        nzm_reminder = (
+            "\n- ⚠️ ROM-FORMAT PFLICHT: Neutral-Null-Methode X-0-X (Ext-0-Flex)\n"
+            "  ✅ RICHTIG: 'Abd/Add: 90-0-30'  ❌ FALSCH: '80-120-60' (kein 0 in der Mitte!)"
+            if profile_id in _nzm_profiles else ""
+        )
+
+        # Neurological tests list — exclude LWS-specific tests for extremity profiles
+        neuro_tests = (
+            "  • Schulter: Spurling-Test, Hoffmann-Tinel, Phalen (für Hände)"
+            if profile_id in _extremity_profiles else
+            "  • Hoffmann-Tinel-Zeichen: positiv/negativ\n  • Phalen-Test: positiv/negativ\n  • Lasègue, Bragard, Spurling, etc."
+        )
+
         return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
 Du bist ein klinischer Dokumentationsexperte für deutsche Physiotherapie (§106b SGB V).
 Erstelle aus dem Transkript einen SOAP-Befund als JSON.
 
@@ -1581,11 +1617,9 @@ O-FELD (Objektiv):
 - Format: "Inspektion... | Test1: Wert | Test2: Wert | ..."
 - Alle Tests aus dem Transkript extrahieren
 - ❌ FALSCH: {{"FBA": "40", "Lasegue": "negativ"}}  (verschachteltes Objekt!)
-- ✅ RICHTIG: "Schonhaltung re. | FBA: 40 cm | Lasègue 80° negativ | Kraftgrade 5/5"
+- ✅ RICHTIG für dieses Profil: "{obj_ex}"{lws_exclusion}{nzm_reminder}
 - ⚠️ NEUROLOGICAL TESTS (MUST include if mentioned):
-  • Hoffmann-Tinel-Zeichen: positiv/negativ
-  • Phalen-Test: positiv/negativ
-  • Lasègue, Bragard, Spurling, etc.
+{neuro_tests}
 - ⚠️ CRPS/SUDECK SIGNS (MUST document if present - DO NOT write "Keine Anzeichen für CRPS" if these are present!):
   • Hautveränderungen: "Haut glänzend", "rötlich-violette Verfärbung"
   • Temperatur: "Hyperthermie", "lokale Überwärmung", "kühl"
@@ -1624,9 +1658,11 @@ AUSGABEFORMAT (NUR EIN JSON-Objekt, KEINE Wiederholungen):
 {{"icd10": "{icd_hint}", "soap": {{"S": "Patientengeschichte als String", "O": "Test1 | Test2 | Test3", "A": "Diagnose | Red Flags", "P": "Behandlung | Ziel"}}}}
 
 <|eot_id|><|start_header_id|>user<|end_header_id|>
+
 Transkript:
 {transcript}
 <|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
 {{"""
 
     def _generate_soap_note(self, transcript: str, profile_id: str = "KG") -> str:

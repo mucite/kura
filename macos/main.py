@@ -484,6 +484,18 @@ class KuraApp(rumps.App):
                 f"{footer}"
             )
 
+            # Count trial before the review window opens — the note is fully readable from here.
+            status = self.license_mgr.verify_locally()
+            if status == "TRIAL":
+                current_usage = self.license_mgr.get_trial_count()
+                remaining = self.license_mgr.max_trials - (current_usage + 1)
+                self.license_mgr.increment_trial()
+                rumps.notification(
+                    title="Kura Testphase",
+                    subtitle=f"Bericht {current_usage + 1} von {self.license_mgr.max_trials}",
+                    message=f"Noch {remaining} kostenlose Berichte verbleibend."
+                )
+
             _app_activate()
             try:
                 window = rumps.Window(
@@ -512,17 +524,6 @@ class KuraApp(rumps.App):
             rumps.alert(title=title, message=msg, ok="Lizenz aktivieren")
             self.activate_license(None)
             return
-
-        # 2. IF IN TRIAL: Handle metadata
-        if status == "TRIAL":
-            current_usage = self.license_mgr.get_trial_count()
-            remaining = self.license_mgr.max_trials - (current_usage + 1)
-            self.license_mgr.increment_trial()
-            rumps.notification(
-                title="Kura Testphase",
-                subtitle=f"Bericht {current_usage + 1} von {self.license_mgr.max_trials}",
-                message=f"Noch {remaining} kostenlose Berichte verbleibend."
-            )
 
         # 3. PROCEED WITH THE ACTUAL WORK
         try:
@@ -571,32 +572,10 @@ class KuraApp(rumps.App):
             process = subprocess.Popen('pbcopy', stdin=subprocess.PIPE)
             process.communicate(soap_only.encode('utf-8'))
 
-            # --- C. STATE & PDF & ARCHIVE ---
+            # --- C. STATE & PDF ---
             self.last_report = edited_text
             self.last_billing_result = res.get('billing_result') if res else None
             self.save_pdf(None)
-
-            # Save JSON to date-based folder: archive/YYYY-MM-DD/HHMMSS_PatientName.json
-            now = datetime.now()
-            date_folder = now.strftime("%Y-%m-%d")
-            time_str = now.strftime("%H%M%S")  # Include seconds for collision-proof naming
-            day_folder = os.path.join(self.report_dir, date_folder)
-            os.makedirs(day_folder, exist_ok=True)
-
-            # Save full data for future "Reflective Learning"
-            json_path = os.path.join(day_folder, f"{time_str}_{self.patient_name}.json")
-            try:
-                with open(json_path, 'w', encoding='utf-8') as f:
-                    if f is not None:
-                        json.dump({
-                            "text": edited_text,
-                            "patient": self.patient_name,
-                            "icd10": user_icd if icd_match else "Unknown",
-                            "timestamp": now.strftime("%Y%m%d-%H%M"),
-                            "date": date_folder,
-                        }, f, ensure_ascii=False, indent=4)
-            except Exception as json_err:
-                print(f"JSON archive save error: {json_err}")
 
             self.update_license_display()
 
@@ -1277,10 +1256,11 @@ class KuraApp(rumps.App):
     # --- Session Delta Tracking ---
     def _inject_session_delta(self, res: dict) -> dict:
         """
-        Load the most recent archived session for this patient and inject a VAS
-        delta comparison into S so auditors see measurable progress per session.
+        Load the most recent archived session for this patient and inject
+        progress deltas into S (VAS) and O (ROM) fields.
 
-        Example injection: "VAS 5/10" → "VAS 5/10 (Vorsitzung: 8/10, Δ: ↓3)"
+        Example VAS: "VAS 5/10" → "VAS 5/10 (Vorsitzung: 8/10, Δ: ↓3)"
+        Example ROM: "Flexion/Extension 45-0-40" → "45-0-40 (VS: 30-0-20)"
         """
         import re as _re
         import glob as _glob
@@ -1308,34 +1288,51 @@ class KuraApp(rumps.App):
         if not prev_soap:
             return res
 
-        prev_s = prev_soap.get("S", "")
-        prev_match = _re.search(r"VAS\s*(\d+(?:[.,]\d+)?)/10", prev_s)
-        if not prev_match:
-            return res
-        prev_val = float(prev_match.group(1).replace(",", "."))
-
         curr_soap = res.get("soap", {})
+
+        # ── VAS delta → S-field ───────────────────────────────────────────────
+        prev_s = prev_soap.get("S", "")
         curr_s = curr_soap.get("S", "")
-        curr_match = _re.search(r"VAS\s*(\d+(?:[.,]\d+)?)/10", curr_s)
-        if not curr_match:
-            return res
-        curr_val = float(curr_match.group(1).replace(",", "."))
+        prev_vas = _re.search(r"VAS\s*(\d+(?:[.,]\d+)?)/10", prev_s)
+        curr_vas = _re.search(r"VAS\s*(\d+(?:[.,]\d+)?)/10", curr_s)
+        if prev_vas and curr_vas:
+            pv = float(prev_vas.group(1).replace(",", "."))
+            cv = float(curr_vas.group(1).replace(",", "."))
+            if cv != pv:
+                delta = cv - pv
+                arrow = "↓" if delta < 0 else "↑"
+                abs_d = abs(delta)
+                delta_str = f"{arrow}{abs_d:.0f}" if abs_d == int(abs_d) else f"{arrow}{abs_d:.1f}"
+                delta_note = f"(Vorsitzung: {pv:.0f}/10, Δ: {delta_str})"
+                res["soap"]["S"] = _re.sub(
+                    r"(VAS\s*\d+(?:[.,]\d+)?/10)",
+                    rf"\1 {delta_note}",
+                    curr_s, count=1
+                )
 
-        if curr_val == prev_val:
-            return res
+        # ── ROM delta → O-field ───────────────────────────────────────────────
+        prev_o = prev_soap.get("O", "")
+        curr_o = curr_soap.get("O", "")
+        if prev_o and curr_o:
+            prev_roms: dict = {}
+            for seg in _re.split(r'\s*\|\s*', prev_o):
+                m = _re.search(r'(\d+-0-\d+)', seg)
+                if m:
+                    label = _re.sub(r'\s+', ' ', seg[:m.start()].strip().lower().rstrip(':').strip())
+                    if label:
+                        prev_roms[label] = m.group(1)
 
-        delta = curr_val - prev_val
-        arrow = "↓" if delta < 0 else "↑"
-        abs_d = abs(delta)
-        delta_str = f"{arrow}{abs_d:.0f}" if abs_d == int(abs_d) else f"{arrow}{abs_d:.1f}"
-        delta_note = f"(Vorsitzung: {prev_val:.0f}/10, Δ: {delta_str})"
+            if prev_roms:
+                new_segs = []
+                for seg in _re.split(r'\s*\|\s*', curr_o):
+                    m = _re.search(r'(\d+-0-\d+)', seg)
+                    if m:
+                        label = _re.sub(r'\s+', ' ', seg[:m.start()].strip().lower().rstrip(':').strip())
+                        if label in prev_roms and prev_roms[label] != m.group(1):
+                            seg = seg[:m.end()] + f" (VS: {prev_roms[label]})" + seg[m.end():]
+                    new_segs.append(seg)
+                res["soap"]["O"] = " | ".join(new_segs)
 
-        new_s = _re.sub(
-            r"(VAS\s*\d+(?:[.,]\d+)?/10)",
-            rf"\1 {delta_note}",
-            curr_s, count=1
-        )
-        res["soap"]["S"] = new_s
         return res
 
     # --- AI Engine Workflow ---

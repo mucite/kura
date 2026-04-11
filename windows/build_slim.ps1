@@ -1,7 +1,7 @@
-param([string]$Version = "2026.4.0")
+param([string]$Version = "2026.4.1")
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Kura - SLIM Build (300 MB)" -ForegroundColor Green
+Write-Host "  Kura - Slim Build (300 MB)" -ForegroundColor Green
 Write-Host "  Models download on first launch" -ForegroundColor Yellow
 Write-Host "  Version: $Version" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
@@ -54,7 +54,7 @@ Write-Host ""
 
 # Create ZIP
 Write-Host "[5/5] Creating ZIP..." -ForegroundColor Yellow
-$zipPath = Join-Path $outputDir "Kura_Setup_v${Version}_SLIM.zip"
+$zipPath = Join-Path $outputDir "Kura_Windows_v${Version}.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -79,9 +79,14 @@ if (Test-Path $zipPath) {
         Write-Host "Size: $sizeMB MB" -ForegroundColor Green
     }
     Write-Host ""
-    Write-Host "Build Type: SLIM (models auto-download)" -ForegroundColor Cyan
-    Write-Host "On first launch, users will see download dialog" -ForegroundColor Yellow
+    # SHA-256 checksum
+    $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
+    "$hash  Kura_Windows_v${Version}.zip" | Out-File "$zipPath.sha256" -Encoding ASCII -NoNewline
     Write-Host ""
+    Write-Host "SHA-256: $hash" -ForegroundColor Cyan
+    Write-Host "Checksum: $zipPath.sha256" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Models auto-download on first launch" -ForegroundColor Yellow
     Write-Host "Ready to share with users!" -ForegroundColor Green
     Write-Host ""
 } else {

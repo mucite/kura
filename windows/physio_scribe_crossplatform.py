@@ -288,6 +288,10 @@ class KuraEngine:
                 "dyskinetisch", "athetose", "vojta-kind", "bobath-kind",
                 "entwicklungsverzoegerung", "fruehgeburt", "perinatale schaedigung",
                 "fazio-oral", "schluckstoerung kind",
+                # Infant / early childhood therapy
+                "säugling", "säuglingstherapie", "bobath-säugling",
+                "stützreaktion", "greifreaktion", "moro-reflex",
+                "frühförderung", "ndt-säugling",
             ],
             "icd_prefix": ["G80", "P91", "Q"],
             "checklist": [
@@ -334,6 +338,13 @@ class KuraEngine:
                 "fußheber", "fussheberparese", "fußheberparese",
                 "ganganalyse", "gangschulung",
                 "zns-patient", "neurologischer patient",
+                # Vestibular / balance rehabilitation
+                "schwindel", "vestibuläres", "vestibuläre rehabilitation",
+                "gleichgewichtsstörung", "gleichgewichtsschulung",
+                "romberg", "nystagmus", "lagerungsschwindel", "bppv",
+                # Parkinson-specific programs
+                "lsvt", "lsvt-big", "lee silverman",
+                "freezing", "festination", "hoehn-yahr",
             ],
             "icd_prefix": ["G20", "G35", "I69", "G81", "G82", "S06"],
             "checklist": [
@@ -418,6 +429,9 @@ class KuraEngine:
                 "gicht", "gichtarthritis", "hyperurikämie arthritis",
                 "entzündliche gelenkerkrankung", "arthritis entzündlich",
                 "sjögren", "polymyalgia rheumatica",
+                # Chronic pain syndromes
+                "fibromyalgie", "fibromyalgia", "fibromyalgie-syndrom",
+                "chronisches schmerzsyndrom",
             ],
             "icd_prefix": ["M05", "M06", "M45", "M07", "L40.5"],
             "checklist": [
@@ -666,11 +680,13 @@ class KuraEngine:
         "GER": {
             "label":    "Geriatrie / Sturzpraevention",
             "billing":  "20501",
-            "priority": 35,
-            "age_min":  65,
+            "priority": 55,   # raised above EX_HUefte (50) — "sturzprophylaxe" is unambiguous
+            "age_min":  60,
             "triggers": [
-                "geriatrie", "sturz", "sturzrisiko", "demenz", "osteoporose",
-                "gebrechlichkeit", "frailty", "sarkopenie", "gangstörung alter",
+                "geriatrie", "sturz", "sturzrisiko", "sturzprophylaxe", "sturzprävention",
+                "demenz", "osteoporose", "gebrechlichkeit", "frailty", "sarkopenie",
+                "gangstörung alter", "tinetti", "chair-rise", "chair rise",
+                "berg balance", "stürze im letzten", "stürze in den letzten",
             ],
             "icd_prefix": ["M81", "Z74", "F00", "F01", "R26"],
             "checklist": [
@@ -917,6 +933,10 @@ class KuraEngine:
                 "status post schlaganfall",
                 "fazilitation", "inhibition spastik",
             ],
+            "RHEUM": [
+                "fibromyalgie", "fibromyalgia", "fibromyalgie-syndrom",
+                "fibromyalgie-patientin", "fibromyalgie-patient",
+            ],
         }
         for def_pid, def_terms in _DEFINITIVE.items():
             if any(term in t for term in def_terms):
@@ -925,7 +945,7 @@ class KuraEngine:
 
         # Age extraction — "4 Jahre alt", "4-jaehrig", "4 J."
         age = None
-        m = re.search(r'(\d{1,2})\s*(?:jahre?\s*alt|j\b|-jaehrig)', t)
+        m = re.search(r'(\d{1,2})\s*(?:jahre?\s*alt|j\b|-jaehrig|monat\w*\s*alt)', t)
         if m:
             age = int(m.group(1))
 
@@ -1581,15 +1601,16 @@ Transkript:
             k in t_low for k in ["lws", "lumbal", "isg", "iliosakral", "kreuzschmerz", "bandscheib"])
 
         # Schober test - LUMBAR ONLY (anatomically impossible for HWS)
-        schober = re.search(r"Schober.*?(\d+)\s*(?:zu|bis|-)\s*(\d+)", transcript, re.I)
+        # Separators: "zu", "bis", "-", "/" (e.g. "10/14" from Whisper)
+        schober = re.search(r"Schober[^0-9]*(\d+)\s*(?:zu|bis|[-/])\s*(\d+)", transcript, re.I)
         if schober and "Schober" not in obj_text and _is_lws_session and not _is_hws_session:
-            obj_text += f" | Schober-Zeichen: {schober.group(1)} - {schober.group(2)}"
+            obj_text += f" | Schober-Zeichen: {schober.group(1)}/{schober.group(2)} cm"
 
         # FBA (Finger-Boden-Abstand) — LUMBAR ONLY
         # Injecting FBA into extremity sessions (EX_FUSS, EX_KNIE, etc.) causes the LLM
         # to confuse "FBA" with ankle abbreviations ("Fuß-Band-Außen") in the S-field.
         _is_spine_session = _is_lws_session or _is_hws_session
-        fba = re.search(r"(?:finger.boden|fba)[^\d]*(\d+)\s*cm", transcript, re.I)
+        fba = re.search(r"(?:finger.boden|fba)[^\d]*(\d+)\s*(?:cm|zentimeter)", transcript, re.I)
         # FBA is LUMBAR-only (not for HWS!)
         if _is_lws_session and not _is_hws_session and fba and "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
             obj_text += f" | FBA: {fba.group(1)} cm"
@@ -1695,12 +1716,14 @@ Transkript:
                 soap_dict["S"] = s_text
 
         # Lasègue test - LUMBAR ONLY (anatomically impossible for HWS)
-        if ("lasegue" in transcript.lower() or "lasek" in transcript.lower()) and _is_lws_session and not _is_hws_session:
+        # Pattern covers both accented (Lasègue) and unaccented (Lasegue) variants from Whisper STT
+        _has_lasegue = re.search(r"las[eèê][gq][uü]e?|lasek", transcript, re.I)
+        if _has_lasegue and _is_lws_session and not _is_hws_session:
             if "lasègue" not in obj_text.lower():
-                deg = re.search(r"(?:lasegue|lasek).*?(\d+)\s*(?:grad|°)", transcript, re.I)
-                result_match = re.search(r"(?:lasegue|lasek).*?(positiv|negativ)", transcript, re.I)
+                deg = re.search(r"las[eèê][gq][uü]e?.*?(\d+)\s*(?:grad|°)", transcript, re.I)
+                result_match = re.search(r"las[eèê][gq][uü]e?.*?(positiv|negativ)", transcript, re.I)
                 deg_val = deg.group(1) if deg else "n.d."
-                result_val = result_match.group(1) if result_match else "positiv"
+                result_val = result_match.group(1) if result_match else "n.d."
                 obj_text += f" | Lasègue-Test: {deg_val}° {result_val}"
         
         # Vorlaufphänomen (LWS-specific test)
@@ -1949,6 +1972,25 @@ Transkript:
         barthel = re.search(r"barthel.*?(\d+)", transcript, re.I)
         if barthel and "barthel" not in obj_text.lower():
             obj_text += f" | Barthel-Index: {barthel.group(1)}/100"
+
+        # Romberg test — vestibular / ZNS balance assessment
+        romberg_m = re.search(
+            r"romberg[^\n.]*?(unsicher|sicher|positiv|negativ|fallneigung\s+nach\s+\w+)", transcript, re.I
+        )
+        if romberg_m and "romberg" not in obj_text.lower():
+            obj_text += f" | Romberg-Test: {romberg_m.group(1).strip()}"
+
+        # Nystagmus — vestibular sign
+        nystagmus_m = re.search(
+            r"nystagmus[^\n.]*?(vorhanden|positiv|beim\s+blick\s+\w+|links|rechts)", transcript, re.I
+        )
+        if nystagmus_m and "nystagmus" not in obj_text.lower():
+            obj_text += f" | Nystagmus: {nystagmus_m.group(1).strip()}"
+
+        # Parkinson-specific gait (Freezing / festinating gait)
+        if any(k in t_low for k in ["freezing", "festination", "kleinschrittig", "propulsion"]):
+            if "gangbild" not in obj_text.lower():
+                obj_text += " | Gangbild: kleinschrittig, Freezing-Episoden dokumentiert"
 
         # House-Brackmann (Fazialisparese)
         hb = re.search(r"house.brackmann[^\d]*(grad\s*[IVX]+|\d)", transcript, re.I)
@@ -2366,6 +2408,18 @@ Transkript:
                 elif profile_id == "EX_KNIE":
                     obj_text += " | Gangbild: unauffällig"
             
+            # Lachman-Test recovery (anterior cruciate ligament)
+            if re.search(r"lachman", transcript, re.I) and "lachman" not in obj_text.lower():
+                lachman_res = re.search(r"lachman[^.]*?(positiv|negativ)", transcript, re.I)
+                val = lachman_res.group(1) if lachman_res else "n.d."
+                obj_text += f" | Lachman-Test: {val}"
+
+            # McMurray-Test recovery (meniscus)
+            if re.search(r"mcmurray|meniskus.?test", transcript, re.I) and "mcmurray" not in obj_text.lower():
+                mcm_res = re.search(r"(?:mcmurray|meniskus.?test)[^.]*?(positiv|negativ)", transcript, re.I)
+                val = mcm_res.group(1) if mcm_res else "n.d."
+                obj_text += f" | McMurray-Test: {val}"
+
             # ✅ CRITICAL: Segment mapping for MT billing (21201) - EX_KNIE
             if "behandeltes segment" not in obj_text.lower() and "segment" not in obj_text.lower():
                 # Detect which compartment based on context
@@ -2611,11 +2665,14 @@ Transkript:
         if is_hand:
             # ═══════════════════════════════════════════════════════════════════
             # CRITICAL FIX: Remove spine contamination (FBA, Lasègue)
+            # Only strip when NOT in a spine session — "finger" in t_low can
+            # fire from "Finger-Boden-Abstand" in LWS transcripts!
             # ═══════════════════════════════════════════════════════════════════
-            obj_text = re.sub(r'\s*\|\s*FBA[^|]*', '', obj_text, flags=re.I)
-            obj_text = re.sub(r'\s*\|\s*Lasègue[^|]*', '', obj_text, flags=re.I)
-            obj_text = re.sub(r'\s*\|\s*Finger-Boden[^|]*', '', obj_text, flags=re.I)
-            obj_text = re.sub(r'\s*\|\s*Schober[^|]*', '', obj_text, flags=re.I)
+            if not _is_lws_session and not _is_hws_session:
+                obj_text = re.sub(r'\s*\|\s*FBA[^|]*', '', obj_text, flags=re.I)
+                obj_text = re.sub(r'\s*\|\s*Lasègue[^|]*', '', obj_text, flags=re.I)
+                obj_text = re.sub(r'\s*\|\s*Finger-Boden[^|]*', '', obj_text, flags=re.I)
+                obj_text = re.sub(r'\s*\|\s*Schober[^|]*', '', obj_text, flags=re.I)
             
             # ═══════════════════════════════════════════════════════════════════
             # ✅ NUMERICAL BRIDGE 2: Grip Strength Inference from Functional Descriptions
@@ -2975,6 +3032,60 @@ Transkript:
                 soap_dict["A"] = a_text
                 print(f"[ValidationFix] Added magic phrase 'Red Flags klinisch ausgeschlossen' for {profile_id}")
 
+        # ── AT (Atemtherapie) — FEV1, FVC, SpO2, Atemfrequenz recovery ─────────
+        if profile_id == "AT" or any(k in t_low for k in ["copd", "atemtherapie", "spirometrie", "fev1"]):
+            fev1 = re.search(r"fev1[^\d]*(\d+(?:[.,]\d+)?)\s*%?\s*(?:soll|%)", transcript, re.I)
+            if fev1 and "fev" not in obj_text.lower():
+                fvc_m = re.search(r"fvc[^\d]*(\d+(?:[.,]\d+)?)\s*%?\s*(?:soll|%)", transcript, re.I)
+                fvc_str = f" | FVC: {fvc_m.group(1)}% Soll" if fvc_m else ""
+                obj_text += f" | FEV1: {fev1.group(1)}% Soll{fvc_str}"
+            spo2 = re.search(r"spo2[^\d]*(\d+)\s*%", transcript, re.I)
+            if spo2 and "spo2" not in obj_text.lower():
+                obj_text += f" | SpO2: {spo2.group(1)}%"
+            af = re.search(r"atemfrequenz[^\d]*(\d+)\s*(?:/min|pro\s*min)", transcript, re.I)
+            if af and "atemfrequenz" not in obj_text.lower():
+                obj_text += f" | Atemfrequenz: {af.group(1)}/min"
+
+        # ── LY (Lymphologie) — Umfangsmessung recovery ────────────────────────
+        if profile_id in ("LY", "LY_ARM", "LY_BEIN") or "lymphödem" in t_low or "lymphoedem" in t_low:
+            if "umfang" not in obj_text.lower():
+                umfang_m = re.search(
+                    r"umfangsmessung[^.]*?(\d+)\s*cm[^.]*?(?:rechts?|links?|re\.|li\.)",
+                    transcript, re.I
+                )
+                if umfang_m:
+                    obj_text += f" | Umfangsmessung: dokumentiert (s. Befund)"
+                elif re.search(r"(\d+)\s*cm[^\n.]*(?:rechts?|links?)[^\n.]*(\d+)\s*cm", transcript, re.I):
+                    obj_text += " | Umfangsmessung: beidseitig dokumentiert"
+
+        # ── ONKO — Karnofsky, Fatigue, Kraft recovery ─────────────────────────
+        if profile_id == "ONKO" or any(k in t_low for k in ["karnofsky", "ecog", "onkologie", "chemotherapie"]):
+            karnofsky = re.search(r"karnofsky[^\d]*(\d+)\s*%?", transcript, re.I)
+            if karnofsky and "karnofsky" not in obj_text.lower():
+                obj_text += f" | Karnofsky-Index: {karnofsky.group(1)}%"
+            ecog = re.search(r"ecog[^\d]*(\d)", transcript, re.I)
+            if ecog and "ecog" not in obj_text.lower():
+                obj_text += f" | ECOG-Score: {ecog.group(1)}"
+            fatigue_score = re.search(r"fatigue[^\d]*(\d+)\s*/\s*10", transcript, re.I)
+            if fatigue_score and "fatigue" not in obj_text.lower():
+                obj_text += f" | Fatigue: {fatigue_score.group(1)}/10"
+
+        # ── GER (Geriatrie) — TUG, Berg, Barthel, Chair-Rise recovery ─────────
+        if profile_id == "GER" or any(k in t_low for k in ["geriatrie", "sturzprophylaxe", "sturzrisiko hoch", "osteoporose"]):
+            if "timed up" not in obj_text.lower():
+                tug_ger = re.search(r"timed\s+up\s+and\s+go[^\d]*(\d+)\s*sek", transcript, re.I)
+                if tug_ger:
+                    obj_text += f" | TUG-Test: {tug_ger.group(1)} Sek."
+            if "berg" not in obj_text.lower():
+                berg_ger = re.search(r"berg\s+balance[^\d]*(\d+)\s*(?:/\s*56|von\s*56)", transcript, re.I)
+                if berg_ger:
+                    obj_text += f" | Berg Balance Scale: {berg_ger.group(1)}/56"
+            if "barthel" not in obj_text.lower():
+                barthel_ger = re.search(r"barthel[^\d]*(\d+)\s*/\s*100", transcript, re.I)
+                if barthel_ger:
+                    obj_text += f" | Barthel-Index: {barthel_ger.group(1)}/100"
+
+        soap_dict["O"] = obj_text.strip(" |")
         return soap_dict
 
     def run_full_flow(self, audio_path: str, status_callback=None, insurance_type=None):

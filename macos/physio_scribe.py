@@ -832,6 +832,9 @@ class KuraEngine:
                 "dyskinetisch", "athetose", "vojta-kind", "bobath-kind",
                 "entwicklungsverzoegerung", "fruehgeburt", "perinatale schaedigung",
                 "fazio-oral", "schluckstoerung kind",
+                "säugling", "säuglingstherapie", "bobath-säugling",
+                "stützreaktion", "greifreaktion", "moro-reflex",
+                "frühförderung", "ndt-säugling",
             ],
             "icd_prefix": ["G80", "P91", "Q"],
             "checklist": [
@@ -871,6 +874,11 @@ class KuraEngine:
                 "fußheber", "fussheberparese", "fußheberparese",
                 "ganganalyse", "gangschulung",
                 "zns-patient", "neurologischer patient",
+                "schwindel", "vestibuläres", "vestibuläre rehabilitation",
+                "gleichgewichtsstörung", "gleichgewichtsschulung",
+                "romberg", "nystagmus", "lagerungsschwindel", "bppv",
+                "lsvt", "lsvt-big", "lee silverman",
+                "freezing", "festination", "hoehn-yahr",
             ],
             "icd_prefix": ["G20", "G35", "I69", "G81", "G82", "S06"],
             "checklist": [
@@ -1142,6 +1150,8 @@ class KuraEngine:
                 "gicht", "gichtarthritis", "hyperurikämie arthritis",
                 "entzündliche gelenkerkrankung", "arthritis entzündlich",
                 "sjögren", "polymyalgia rheumatica",
+                "fibromyalgie", "fibromyalgia", "fibromyalgie-syndrom",
+                "chronisches schmerzsyndrom",
             ],
             "icd_prefix": ["M05", "M06", "M45", "M07", "L40.5"],
             "checklist": [
@@ -1428,6 +1438,10 @@ class KuraEngine:
                 "status post schlaganfall",
                 "fazilitation", "inhibition spastik",
             ],
+            "RHEUM": [
+                "fibromyalgie", "fibromyalgia", "fibromyalgie-syndrom",
+                "fibromyalgie-patientin", "fibromyalgie-patient",
+            ],
         }
         # Collect ALL definitive matches — if multiple profiles fire, pick the one
         # with the most hits. This prevents a single postural cue (e.g. "doppelkinn"
@@ -1442,7 +1456,7 @@ class KuraEngine:
 
         # Age extraction — "4 Jahre alt", "4-jaehrig", "4 J."
         age = None
-        m = _re.search(r'(\d{1,2})\s*(?:jahre?\s*alt|j\b|-jaehrig)', t)
+        m = _re.search(r'(\d{1,2})\s*(?:jahre?\s*alt|j\b|-jaehrig|monat\w*\s*alt)', t)
         if m:
             age = int(m.group(1))
 
@@ -1808,7 +1822,7 @@ Transkript:
         obj_text = re.sub(r'\b(\d)\s+von\s+5\s+(?:nach\s+Janda|Janda)', r'\1/5', obj_text, flags=re.I)
         obj_text = re.sub(r'Kraftgrade[n]?\s+(?:für\s+[\w\s]+)?\b(\d)\s+von\s+5\b', r'Kraftgrade \1/5', obj_text, flags=re.I)
 
-        fba = re.search(r"(?:fingerbodenabstand|finger.?boden|fba)[^\d]*(\d+)\s*cm", transcript, re.I)
+        fba = re.search(r"(?:fingerbodenabstand|finger.?boden|fba)[^\d]*(\d+)\s*(?:cm|zentimeter)", transcript, re.I)
         if _is_spine_session and fba and "fba" not in obj_text.lower() and "finger-boden" not in obj_text.lower():
             obj_text += f" | FBA: {fba.group(1)} cm"
         elif _is_spine_session and re.search(r"fingerbodenabstand|finger.?boden|fba", transcript, re.I):
@@ -2091,6 +2105,25 @@ Transkript:
         barthel = re.search(r"barthel.*?(\d+)", transcript, re.I)
         if barthel and "barthel" not in obj_text.lower():
             obj_text += f" | Barthel-Index: {barthel.group(1)}/100"
+
+        # Romberg test — vestibular / ZNS balance assessment
+        romberg_m = re.search(
+            r"romberg[^\n.]*?(unsicher|sicher|positiv|negativ|fallneigung\s+nach\s+\w+)", transcript, re.I
+        )
+        if romberg_m and "romberg" not in obj_text.lower():
+            obj_text += f" | Romberg-Test: {romberg_m.group(1).strip()}"
+
+        # Nystagmus — vestibular sign
+        nystagmus_m = re.search(
+            r"nystagmus[^\n.]*?(vorhanden|positiv|beim\s+blick\s+\w+|links|rechts)", transcript, re.I
+        )
+        if nystagmus_m and "nystagmus" not in obj_text.lower():
+            obj_text += f" | Nystagmus: {nystagmus_m.group(1).strip()}"
+
+        # Parkinson-specific gait (Freezing / festinating gait)
+        if any(k in t_low for k in ["freezing", "festination", "kleinschrittig", "propulsion"]):
+            if "gangbild" not in obj_text.lower():
+                obj_text += " | Gangbild: kleinschrittig, Freezing-Episoden dokumentiert"
 
         # Recover House-Brackmann (Fazialisparese)
         hb = re.search(r"house.brackmann[^\d]*(grad\s*[IVX]+|\d)", transcript, re.I)

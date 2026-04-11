@@ -873,7 +873,8 @@ class _GKVEngine:
         #   Therapist explicitly mentions MLD treatment → MLD position.
         #   Otherwise leave at 21110 (KPE prescription assumed).
         _mld_indicators = ["mld-", "mld ", "mld:", "mld,", "mld.", "der mld",
-                           "lymphdrainage", "manuelle lymphdrainage"]
+                           "lymphdrainage", "manuelle lymphdrainage",
+                           "lymphabflusswege"]  # "an den Lymphabflusswegen" = MLD treatment
         if dg == "LY2" and position == "21110":
             if _ly2_via_transcript:
                 # Case A: always MLD when secondary etiology came from transcript

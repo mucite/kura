@@ -861,10 +861,16 @@ class KuraEngine:
             "priority": 80,
             "age_min":  18,
             "triggers": [
-                "schlaganfall", "apoplex", "hemiplegie", "hemiparese",
+                "schlaganfall", "apoplex", "apoplexie", "hirninfark", "hirninfarkt",
+                "hemiplegie", "hemiparese", "hemiparetisch",
                 "parkinson", "morbus parkinson", "multiple sklerose", "ms-erkrankung",
                 "querschnitt", "sht", "schaedel-hirn-trauma", "hirnverletzung",
-                "ataxie", "spastik",
+                "ataxie", "spastik", "spastizität", "spastizitat",
+                "bobath", "vojta",
+                "ashworth", "modified ashworth",
+                "fußheber", "fussheberparese", "fußheberparese",
+                "ganganalyse", "gangschulung",
+                "zns-patient", "neurologischer patient",
             ],
             "icd_prefix": ["G20", "G35", "I69", "G81", "G82", "S06"],
             "checklist": [
@@ -1413,6 +1419,15 @@ class KuraEngine:
                 "bandscheibenvorfall lumbal", "bandscheibenprotrusion lws",
                 "brügger", "brügger-sitz",   # LWS posture rehab technique
             ],
+            "ZNS_ADULT": [
+                "bobath-konzept", "bobath konzept", "nach bobath",
+                "ashworth-skala", "ashworth skala", "modified ashworth",
+                "fußheberparese", "fußheber-parese", "fußheberschwäche",
+                "kg-zns", "kgzns", "zns-behandlung",
+                "post-apoplex", "post apoplex", "status post apoplex",
+                "status post schlaganfall",
+                "fazilitation", "inhibition spastik",
+            ],
         }
         # Collect ALL definitive matches — if multiple profiles fire, pick the one
         # with the most hits. This prevents a single postural cue (e.g. "doppelkinn"
@@ -1499,6 +1514,8 @@ class KuraEngine:
             "EX_HUFTE":    "rechte Hüfte mit Ausstrahlung in den Oberschenkel",
             "EX_KNIE":     "linkes Knie, Schmerz bei Treppensteigen",
             "EX_FUSS":     "linkes Sprunggelenk, Schmerz beim Abrollen",
+            "ZNS_ADULT":   "keine Schmerzen, VAS 0/10 — Hauptproblem: Spastik re. Arm, Fußheberparese re.",
+            "ZNS_PAD":     "keine Schmerzen — Hauptproblem: Tonusregulation, Bewegungsqualität",
         }
         _red_flag_examples = {
             "EX_SCHULTER": "keine Parästhesien in Hand/Fingern, kein Kraftverlust im Arm, kein Verdacht auf vollständige RM-Ruptur",
@@ -1507,6 +1524,8 @@ class KuraEngine:
             "EX_HUefte":   "keine Femurhalsfraktur, keine AVN-Zeichen, kein Tumorverdacht",
             "EX_HUFTE":    "keine Femurhalsfraktur, keine AVN-Zeichen, kein Tumorverdacht",
             "EX_KNIE":     "keine Kompartment-Zeichen, kein Tumorverdacht, keine tief. Venenthrombose",
+            "ZNS_ADULT":   "kein Schwindel, Blutdruck stabil — ACHTUNG: Sturzrisiko hoch dokumentiert",
+            "ZNS_PAD":     "keine epileptischen Zeichen, keine respiratorische Dekompensation",
         }
         pain_ex    = _pain_examples.get(profile_id, "lokaler Schmerz, ggf. Ausstrahlung")
         red_flag_ex = _red_flag_examples.get(profile_id, "Red Flags klinisch ausgeschlossen")
@@ -1535,6 +1554,8 @@ class KuraEngine:
             "GEB":         "Ziel: Beckenbodenkraft Oxford 3/5 in 6 EH",
             "KGG":         "Ziel: 10 Wiederholungen Beinpresse 40 kg ohne Schmerz in 4 EH",
             "GER":         "Ziel: 10m Tandemgang ohne Hilfsmittel in 6 EH",
+            "ZNS_ADULT":   "Ziel: Sicheres Gehen 10m ohne Vorfußschleifen in 6 EH | Tonusreduktion Ashworth 1 in 4 EH",
+            "ZNS_PAD":     "Ziel: Verbesserung GMFCS um 1 Stufe in 10 EH",
         }
         smart_goal_ex = _smart_goal_examples.get(profile_id, "Ziel: [Funktion] auf [Messwert] in [N] EH")
 
@@ -1555,6 +1576,8 @@ class KuraEngine:
             "EX_HUefte":   "Trendelenburg re.: positiv | ROM Hüfte NZM: Flex/Ext: 100-0-10 | Abd/Add: 30-0-20 | VAS 5/10 | Gangbild: Schonhinken re.",
             "EX_HUFTE":    "Trendelenburg re.: positiv | ROM Hüfte NZM: Flex/Ext: 100-0-10 | Abd/Add: 30-0-20 | VAS 5/10 | Gangbild: Schonhinken re.",
             "EX_FUSS":     "Schwellung Außenknöchel | ROM OSG NZM: DF/PF: 15-0-40 | Schubladentest: negativ | VAS 4/10 | Einbeinstand: 8 Sek.",
+            "ZNS_ADULT":   "Tonus: Ashworth-Skala 2 (re. Ellenbeuge/Hand) | Kraft (MGT): 2/5 M. tibialis anterior (re.) | Gangbild: Vorfußschleifen re. Schwungphase, Sturzrisiko hoch | RR: 130/85 mmHg | Hilfsmittel: Rollator | Behandeltes Segment: ZNS / Hemi-Seite re.",
+            "ZNS_PAD":     "Tonusregulation: Ashworth 2 (re. Arm) | GMFCS-Level: III | Kopfkontrolle: eingeschränkt | Gangbild: Scherengang bds.",
         }
         obj_ex = _obj_examples.get(profile_id, "Schonhaltung | Test: Ergebnis | ROM NZM: X-0-X | VAS: X/10")
 
@@ -1573,12 +1596,24 @@ class KuraEngine:
             if profile_id in _nzm_profiles else ""
         )
 
-        # Neurological tests list — exclude LWS-specific tests for extremity profiles
-        neuro_tests = (
-            "  • Schulter: Spurling-Test, Hoffmann-Tinel, Phalen (für Hände)"
-            if profile_id in _extremity_profiles else
-            "  • Hoffmann-Tinel-Zeichen: positiv/negativ\n  • Phalen-Test: positiv/negativ\n  • Lasègue, Bragard, Spurling, etc."
-        )
+        # Neurological tests list — ZNS profiles get a dedicated neuro block
+        _zns_profiles = {"ZNS_ADULT", "ZNS_PAD", "ZNS_FAZ"}
+        if profile_id in _zns_profiles:
+            neuro_tests = (
+                "  • Ashworth-Skala (0–4) je Extremität — z.B. 'Ashworth-Skala: 2 (re. Ellenbeuge)'\n"
+                "  • Kraft (MGT 0/5) je Muskelgruppe — z.B. 'Kraft (MGT): 2/5 M. tibialis anterior (re.)'\n"
+                "  • Gangbild: Hilfsmittel, Auffälligkeiten, Sturzrisiko (hoch/mittel/niedrig)\n"
+                "  • Vitalparameter: RR, Puls, Schwindel wenn dokumentiert\n"
+                "  • ❌ KEIN FBA, KEIN Lasègue, KEIN Spurling — das sind KEINE ZNS-Tests!"
+            )
+        elif profile_id in _extremity_profiles:
+            neuro_tests = "  • Schulter: Spurling-Test, Hoffmann-Tinel, Phalen (für Hände)"
+        else:
+            neuro_tests = (
+                "  • Hoffmann-Tinel-Zeichen: positiv/negativ\n"
+                "  • Phalen-Test: positiv/negativ\n"
+                "  • Lasègue, Bragard, Spurling, etc."
+            )
 
         return f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
@@ -1999,10 +2034,53 @@ Transkript:
                 deg_val = deg.group(1) if deg else "positiv"
                 obj_text += f" | Lasègue-Test: {deg_val}° positiv."
 
-        # Recover Ashworth Scale
-        ashworth = re.search(r"Ashworth.*?(\d+)", transcript, re.I)
+        # Recover Ashworth Scale (with region extraction)
+        ashworth = re.search(r"Ashworth[^0-9]*(?:Stufe\s*|Grad\s*|:\s*)?(\d)", transcript, re.I)
         if ashworth and "Ashworth" not in obj_text:
-            obj_text += f" | Ashworth-Skala: {ashworth.group(1)}"
+            ashworth_region = ""
+            region_match = re.search(
+                r"(\w+(?:beuge|gelenk|arm|hand|bein|fuß|knie|schulter|ellbogen))\b[^.]{0,60}Ashworth"
+                r"|Ashworth[^.]{0,60}(\w+(?:beuge|gelenk|arm|hand|bein|fuß|knie|schulter|ellbogen))\b",
+                transcript, re.I
+            )
+            if region_match:
+                ashworth_region = f" ({(region_match.group(1) or region_match.group(2)).strip()})"
+            obj_text += f" | Ashworth-Skala: {ashworth.group(1)}{ashworth_region}"
+
+        # Recover MMT / Kraftgrad
+        mmt = re.search(r"(?:kraft|mmt|kraftgrad|mrc)[^\d]{0,20}(\d)\s*(?:/\s*5|von\s*5)", transcript, re.I)
+        if mmt and "MGT" not in obj_text and "Kraft" not in obj_text:
+            mmt_muscle = ""
+            muscle_match = re.search(
+                r"(M\.\s*\w+|tibialis|peroneus|quadrizeps|gastrocnemius|deltoideus|bizeps|trizeps)[^.]{0,60}"
+                r"(?:kraft|mmt|stufe|kraftgrad)",
+                transcript, re.I
+            )
+            if muscle_match:
+                mmt_muscle = f" {muscle_match.group(1).strip()}"
+            obj_text += f" | Kraft (MGT): {mmt.group(1)}/5{mmt_muscle}"
+
+        # Recover fall risk (near-fall events)
+        fall_risk_match = re.search(
+            r"(beinahe.?sturz|fast gestürzt|wäre.*gestürzt|fast gefallen|hohes sturzrisiko|sturzgefahr)",
+            transcript, re.I
+        )
+        if fall_risk_match and "sturzrisiko" not in obj_text.lower():
+            obj_text += " | Sturzrisiko: hoch (Beinahe-Sturz dokumentiert)"
+
+        # Recover ZNS-specific gait (foot drop)
+        gait_match = re.search(
+            r"(vorfuß schleift|schleifender vorfuß|hängt mit.*zehen?|zehen? hängen|schleifen.*vorfuß"
+            r"|hängenbleiben.*teppich|teppich.*hängen|schleppt.*fuß|fuß.*schleppt)",
+            transcript, re.I
+        )
+        if gait_match and "vorfuß" not in obj_text.lower() and "Gangbild" not in obj_text:
+            obj_text += " | Gangbild: Vorfußschleifen re. Schwungphase"
+
+        # Recover vital signs (RR)
+        rr_match = re.search(r"(\d{2,3})\s*(?:zu|/)\s*(\d{2,3})\s*(?:mmhg|blutdruck)?", transcript, re.I)
+        if rr_match and "RR" not in obj_text and "blutdruck" not in obj_text.lower():
+            obj_text += f" | RR: {rr_match.group(1)}/{rr_match.group(2)} mmHg"
 
         # Recover Timed Up and Go
         tug = re.search(r"Timed Up and Go.*?(\d+)\s*Sekunden", transcript, re.I)

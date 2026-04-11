@@ -113,9 +113,16 @@
       "note": "Standard manual lymphatic drainage"
     },
     "20202": {
+      "name": "MLD Ganzbehandlung 60 Min (alt)",
+      "price_eur": 71.94,
+      "duration_min": 60,
+      "note": "Legacy position — use 20203 per HMK 2026"
+    },
+    "20203": {
       "name": "MLD Ganzbehandlung 60 Min",
       "price_eur": 71.94,
-      "duration_min": 60
+      "duration_min": 60,
+      "note": "Heilmittelkatalog §125 SGB V: correct 60-min MLD position"
     },
     "20205": {
       "name": "MLD Teilbehandlung 30 Min",
@@ -251,4 +258,3 @@
     "backup": "Keep previous year's file as gkv_prices_YYYY.json for audit trail"
   }
 }
-

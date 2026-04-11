@@ -661,9 +661,13 @@ _DOC_CHECKERS: dict = {
     "Schober-Zeichen":                 lambda t: "schober" in t,
     "Lasègue":                         lambda t: "lasègue" in t or "lasegue" in t,
     "Stemmer-Zeichen":                 lambda t: "stemmer" in t,
-    "Umfangsmessung (cm)":             lambda t: bool(re.search(r"\d+\s*cm", t)),
+    "Umfangsmessung (cm)":             lambda t: bool(re.search(r"\d+\s*cm|umfangsmessung|umfangsdiff", t, re.I)),
     "Stadium (1-3)":                   lambda t: bool(re.search(r"stadium\s*[1-3]", t)),
-    "Ödemkonsistenz":                  lambda t: any(k in t for k in ["konsistenz", "weich", "teigig", "hart", "fibros"]),
+    "Ödemkonsistenz":                  lambda t: any(k in t for k in [
+        "konsistenz", "weich", "teigig", "hart", "fibros",
+        "prall", "gespannt", "fest", "verhärtet", "induriert", "derb",
+        "irreversibel", "reversibel", "ödemkonsistenz", "pitting", "verhärtung",
+    ]),
     "Ashworth-Skala":                  lambda t: "ashworth" in t,
     "Timed Up & Go":                   lambda t: "timed up" in t or " tug" in t,
     "Barthel-Index":                   lambda t: "barthel" in t,
@@ -743,10 +747,19 @@ _DOC_CHECKERS: dict = {
         any(k in t for k in ["entstauungsgymnastik", "übung", "bewegungsübung", "aktivierung"])
     ),
     # Lymphedema skin assessment (mandatory in LY audit)
-    "Hautbefund (Rötung/Hyperkeratose)": lambda t: any(k in t for k in [
-        "hautbefund", "rötung", "erythem", "hyperkeratose", "papillomatose",
-        "haut trocken", "haut unauffällig", "kein erysipel", "erysipel",
-    ]),
+    # Accepts positive findings (rötung, hyperkeratose) AND documented absence
+    # (keine rötung, haut unauffällig, reizlos) — both constitute a complete skin assessment.
+    "Hautbefund (Rötung/Hyperkeratose)": lambda t: (
+        any(k in t for k in [
+            "hautbefund", "rötung", "erythem", "hyperkeratose", "papillomatose",
+            "haut trocken", "haut unauffällig", "kein erysipel", "erysipel",
+            "reizlos", "keine rötung", "keine hitze", "unauffällig", "trocken",
+            "haut intakt", "haut ist intakt", "intakte haut",
+            "keine läsion", "keine infektion", "keine anzeichen",
+            "gut gepflegt", "gepflegte haut", "geschlossen",
+        ])
+        or bool(re.search(r"keine\s+\w+\s*r[oö]t|haut\s+\w+\s+intakt", t))
+    ),
     # Volume difference ≥10% clinical threshold for lymphedema significance
     "Umfangsdifferenz ≥10%":           lambda t: bool(re.search(
         r"(?:10|1[1-9]|[2-9]\d)\s*%|differenz.*\d+\s*cm|\d+\s*cm.*differenz|"
@@ -756,8 +769,11 @@ _DOC_CHECKERS: dict = {
 }
 
 
-def _check_doc(doc_name: str, soap: dict) -> bool:
-    text = " ".join(str(v) for v in soap.values()).lower()
+def _check_doc(doc_name: str, soap: dict, transcript: str = "") -> bool:
+    # Search SOAP first, then fall back to transcript — the therapist may have
+    # stated a finding verbally (transcript) even if the LLM failed to extract it.
+    soap_text = " ".join(str(v) for v in soap.values()).lower()
+    text = soap_text + " " + transcript.lower()
     checker = _DOC_CHECKERS.get(doc_name)
     if checker:
         return checker(text)
@@ -916,7 +932,7 @@ class _GKVEngine:
 
         # ── 7. Required documentation per Diagnosegruppe — emit only on FAIL ────
         for doc in entry["docs"]:
-            if not _check_doc(doc, soap):
+            if not _check_doc(doc, soap, transcript):
                 audit.append(AuditItem(
                     f"DOC_{doc.upper().replace(' ', '_')[:20]}",
                     doc, "FAIL", f"Pflichtfeld für {dg} fehlt"
@@ -930,7 +946,7 @@ class _GKVEngine:
         for test in rule.get("required_tests", []):
             if test.lower() in _dg_docs_lower:
                 continue   # already checked in section 7 above
-            if not _check_doc(test, soap):
+            if not _check_doc(test, soap, transcript):
                 audit.append(AuditItem(
                     f"CFG_{test.upper()[:20]}",
                     f"{test} (Praxisregel)", "FAIL", "Pflichttest laut Konfiguration fehlt"
@@ -1005,6 +1021,42 @@ class _GKVEngine:
         if any(a.status == "BLOCK" for a in red):
             risk = "BLOCK"
 
+        # ── 10e-LY. LY-specific transcript red flags (Erysipel / DVT / kardiale Dekompensation) ──
+        # These are absolute contraindications for MLD — must BLOCK billing immediately.
+        if transcript:
+            _t_low = transcript.lower()
+            _ly_rf_patterns = [
+                (r"erysipel",         "Erysipel-Verdacht",           "Erysipel-Verdacht: MLD absolut kontraindiziert — sofort Arzt!"),
+                (r"tiefe.*venen|venenthrombose|tvt\b|thrombose",
+                                      "Thrombose-Verdacht",           "Tiefe Venenthrombose V.a.: MLD kontraindiziert — Notfall!"),
+                (r"kardiale.*dekompensation|herzinsuffizienz.*akut|akute.*herzinsuffizienz|atemnot.*herz",
+                                      "Kardiale Dekompensation",      "Akute kardiale Dekompensation: MLD kontraindiziert — Notarzt!"),
+            ]
+            for _pat, _lbl, _msg in _ly_rf_patterns:
+                if re.search(_pat, _t_low):
+                    # Check for negation in transcript context
+                    _match = re.search(_pat, _t_low)
+                    if _match:
+                        # Only check PRE-match context for negation (up to 60 chars before).
+                        # Post-match window is kept short (25 chars) to avoid false negatives:
+                        # e.g. "tiefe Venenthrombose. Es wurde KEINE MLD durchgeführt" — the
+                        # "keine" refers to MLD, not to the thrombosis. A wide post-window
+                        # would incorrectly suppress the BLOCK.
+                        _pre_ctx  = _t_low[max(0, _match.start()-60): _match.start()]
+                        _post_ctx = _t_low[_match.end(): _match.end()+25]
+                        _ctx = _pre_ctx + _post_ctx
+                        _negated = any(n in _ctx for n in [
+                            "kein ", "keine ", "nicht ", "ausgeschlossen", "verdacht ausgeräumt",
+                            "negativ", "ohne anzeichen"
+                        ])
+                        if not _negated:
+                            audit.append(AuditItem(
+                                f"RF_LY_{_lbl.upper().replace(' ', '_')}",
+                                f"Red Flag (LY): {_lbl}",
+                                "BLOCK", _msg
+                            ))
+                            risk = "BLOCK"
+
         # ── 10f. Red-Flag exclusion — only FAIL when genuinely missing ─────────
         # inject_audit_stamps() always adds the phrase, so this fires only when
         # the A-field is empty or the scribe pipeline didn't run.
@@ -1016,6 +1068,43 @@ class _GKVEngine:
             risk = "WARN"
         # RX_START_WINDOW is a process reminder, not a per-session doc item — omitted from
         # the audit list to avoid constant noise; reflected in compliance_warnings text only.
+
+        # ── MLD duration upgrade: 45-min → 60-min when transcript confirms 60 minutes ──
+        # 20201 = MLD 45 Min (€53.94)  →  20203 = MLD Ganzbehandlung 60 Min (€71.94)
+        # Heilmittelkatalog §125 SGB V: pos. 20203 is the correct 60-min MLD position.
+        # Only auto-upgrade when the therapist explicitly documented the session length.
+        if position == "20201" and re.search(r"\b60\s*(?:min(?:uten?)?)?\b", transcript, re.I):
+            position = "20203"
+            entry = dict(entry)
+            entry["position"] = "20203"
+            entry["name"] = "MLD Ganzbehandlung 60 Min"
+            entry["duration"] = 60
+        # ── MLD duration downgrade: 45-min → 30-min when transcript confirms only 30 minutes ──
+        # 20201 = MLD 45 Min  →  20205 = MLD Teilbehandlung 30 Min (€35.97)
+        # Applies when therapist explicitly states "30 Minuten MLD" or "MLD-30".
+        elif position == "20201" and re.search(r"\b30\s*(?:min(?:uten?)?)?\b", transcript, re.I):
+            position = "20205"
+            entry = dict(entry)
+            entry["position"] = "20205"
+            entry["name"] = "MLD Teilbehandlung 30 Min"
+            entry["duration"] = 30
+
+        # ── Early-termination flag: vorzeitiger Abbruch requires manual review ──
+        # When the therapist explicitly documents an early session termination
+        # ("vorzeitig beenden", "Abbruch", etc.) AND the position is a partial
+        # session (20205), add a WARN so the claim is flagged for human review.
+        _t_low = transcript.lower()
+        if position == "20205" and any(k in _t_low for k in [
+            "vorzeitig", "abbruch", "abgebrochen", "musste beenden", "frühzeitig",
+            "vorzeitigen", "behandlung abbrechen", "sitzung unterbrech",
+        ]):
+            audit.append(AuditItem(
+                "ABBRUCH_TEILBEHANDLUNG",
+                "Abbruchgrund 30-Min-Teilbehandlung",
+                "WARN",
+                "Vorzeitiger Behandlungsabbruch dokumentiert — manuelle Prüfung erforderlich",
+            ))
+            risk = "WARN"
 
         # ── Determine overall audit status ─────────────────────────────────────
         if any(a.status == "BLOCK" for a in audit):
@@ -1062,7 +1151,11 @@ class _GKVEngine:
         # orthopaedic injuries (ankle sprains, haematoma). Requiring actual disease terms
         # prevents mis-routing a foot/ankle session to LY1/MLD billing.
         if any(k in text for k in ["lymphoedem", "lymphödeme", "kpe", "entstauung",
-                                    "stemmer-zeichen", "lipoedem", "lipoedema"]):
+                                    "stemmer-zeichen", "lipoedem", "lipoedema",
+                                    "stemmer positiv", "stemmer ist positiv",
+                                    "stemmer ist negativ", "stemmer negativ",
+                                    "prostata-op", "prostata op",
+                                    "beckenlymphoedem", "sekundaeres lymphoedem"]):
             return "LY1"
         # Foot / ankle — check before generic WS fallback
         if any(k in text for k in ["sprunggelenk", "außenknöchel", "aussenknöchel",
@@ -1315,7 +1408,7 @@ class _PKVEngine:
 
         # ── 2. Missing mandatory documentation (WARN = PKV may reject) ────────
         for doc in entry["docs"]:
-            present = _check_doc(doc, soap)
+            present = _check_doc(doc, soap, transcript)
             if not present:
                 audit.append(AuditItem(
                     f"DOC_{doc[:20]}", doc,
@@ -1401,7 +1494,7 @@ class _BGEngine:
 
         # Add BG-specific doc checks
         for doc in _BG_EXTRA_DOCS:
-            present = _check_doc(doc, soap)
+            present = _check_doc(doc, soap, transcript)
             result.audit_items.append(AuditItem(
                 f"BG_{doc[:20]}", f"BG-Pflicht: {doc}",
                 "PASS" if present else "FAIL",

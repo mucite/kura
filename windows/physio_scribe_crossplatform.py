@@ -945,6 +945,15 @@ class KuraEngine:
                 "fibromyalgie", "fibromyalgia", "fibromyalgie-syndrom",
                 "fibromyalgie-patientin", "fibromyalgie-patient",
             ],
+            "LY": [
+                # MLD and Stemmer are clinically exclusive to lymphology —
+                # they override ZNS/KG/other profiles when present in transcript.
+                "manuelle lymphdrainage",
+                "mld ",    # "30 Minuten MLD an", "MLD durchgeführt"
+                "mld-",    # "MLD-45", "MLD-60"
+                "stemmer-zeichen",   # lymphology-exclusive test
+                "komplexe physikalische entstauung",
+            ],
         }
         for def_pid, def_terms in _DEFINITIVE.items():
             if any(term in t for term in def_terms):

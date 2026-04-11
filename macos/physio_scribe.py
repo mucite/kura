@@ -893,6 +893,15 @@ class KuraEngine:
                 "fibromyalgie", "fibromyalgia", "fibromyalgie-syndrom",
                 "fibromyalgie-patientin", "fibromyalgie-patient",
             ],
+            "LY": [
+                # MLD and Stemmer are clinically exclusive to lymphology —
+                # they override ZNS/KG/other profiles when present in transcript.
+                "manuelle lymphdrainage",
+                "mld ",    # "30 Minuten MLD an", "MLD durchgeführt"
+                "mld-",    # "MLD-45", "MLD-60"
+                "stemmer-zeichen",   # lymphology-exclusive test
+                "komplexe physikalische entstauung",
+            ],
         }
         # Collect ALL definitive matches — if multiple profiles fire, pick the one
         # with the most hits. This prevents a single postural cue (e.g. "doppelkinn"

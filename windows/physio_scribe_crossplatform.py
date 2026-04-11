@@ -2840,10 +2840,15 @@ Transkript:
         # ══════════════════════════════════════════════════════════════════════
         # ── Hand / Handgelenk (EX_HAND): ROM, FHA, Segment, Red Flag ──────────
         # ══════════════════════════════════════════════════════════════════════
-        is_hand = (profile_id == "EX_HAND") or any(k in t_low for k in [
+        # LY sessions must never enter the hand block: "finger" appears in lymphedema
+        # transcripts ("bis in die Finger") and would wrongly inject wrist segment + CRPS.
+        _is_ly_session = profile_id in ("LY", "LY_ARM", "LY_BEIN")
+        _hand_kw_strict = any(k in t_low for k in [
             "handgelenk", "radiokarpal", "radiusfraktur", "speichenbruch",
-            "handwurzel", "karpaltunnel", "finger", "daumen", "faustschluss",
+            "handwurzel", "karpaltunnel", "daumen", "faustschluss",
         ])
+        _finger_kw = "finger" in t_low and not _is_lws_session and not _is_hws_session and not _is_ly_session
+        is_hand = (profile_id == "EX_HAND") or (_hand_kw_strict and not _is_ly_session) or _finger_kw
         if is_hand:
             # ═══════════════════════════════════════════════════════════════════
             # CRITICAL FIX: Remove spine contamination (FBA, Lasègue)
@@ -3104,6 +3109,14 @@ Transkript:
                     print(f"⚠️ CONTAMINATION: Removing SPINE mention from {profile_id} session")
                     s_text = re.sub(r'[^.!?]*' + pattern + r'[^.!?]*[.!?]', '', s_text, flags=re.IGNORECASE)
         
+        # ── Rule 1b: LY profiles remove SPINE contamination from S-field ──
+        # LWS/HWS pain has no place in a lymphology session complaint field.
+        elif _is_ly_session:
+            for pattern in all_spine:
+                if re.search(pattern, s_text, re.IGNORECASE):
+                    print(f"⚠️ CONTAMINATION: Removing SPINE mention from LY session S-field")
+                    s_text = re.sub(r'[^.!?|]*' + pattern + r'[^.!?|]*[.!?|]?', '', s_text, flags=re.IGNORECASE)
+
         # ── Rule 2: SPINE profiles ONLY remove EXTREMITY contamination ──
         # (Spine sessions shouldn't discuss knee/shoulder unless it's compensatory finding in O-field)
         elif any(sp in profile_normalized for sp in ["LWS", "HWS", "BWS"]):
@@ -3249,6 +3262,33 @@ Transkript:
                 a_text += f" Red Flags klinisch ausgeschlossen ({red_flag_details})"
                 soap_dict["A"] = a_text
                 print(f"[ValidationFix] Added magic phrase 'Red Flags klinisch ausgeschlossen' for {profile_id}")
+
+        # ── LY: strip CRPS/Sudeck and spinal diagnoses from A-field ────────────
+        # Burning and swelling in lymphedema are vascular symptoms, not CRPS signs.
+        # LWS/HWS pain has no diagnostic relevance in a lymphology session.
+        if _is_ly_session:
+            a_val = soap_dict.get("A", "")
+            if isinstance(a_val, str) and a_val:
+                _a_cleaned = re.sub(
+                    r'\s*\|?\s*(?:ACHTUNG[:\s]*)?(?:Verdacht\s+auf\s+)?CRPS[^|.]*(?:Sudeck)?[^|.]*(?:\||\.)?',
+                    '', a_val, flags=re.I
+                )
+                _a_cleaned = re.sub(
+                    r'\s*\|?\s*(?:ACHTUNG[:\s]*)?(?:Verdacht\s+auf\s+)?(?:Morbus\s+)?Sudeck[^|.]*(?:\||\.)?',
+                    '', _a_cleaned, flags=re.I
+                )
+                _a_cleaned = re.sub(
+                    r'\s*\|?\s*(?:akute\s+)?LWS-?Schmerzen?[^|.]*(?:\||\.)?',
+                    '', _a_cleaned, flags=re.I
+                )
+                _a_cleaned = re.sub(
+                    r'\s*\|?\s*HWS-?Schmerzen?[^|.]*(?:\||\.)?',
+                    '', _a_cleaned, flags=re.I
+                )
+                _a_cleaned = _a_cleaned.strip().strip('|').strip()
+                if _a_cleaned != a_val:
+                    soap_dict["A"] = _a_cleaned
+                    print(f"[LY-Cleanup] Removed CRPS/spine contamination from A-field")
 
         # ── AT (Atemtherapie) — FEV1, FVC, SpO2, Atemfrequenz recovery ─────────
         if profile_id == "AT" or any(k in t_low for k in ["copd", "atemtherapie", "spirometrie", "fev1"]):

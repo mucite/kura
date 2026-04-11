@@ -1155,6 +1155,29 @@ class _GKVEngine:
             entry["name"] = "MLD Teilbehandlung 30 Min"
             entry["duration"] = 30
 
+        # ── Sub-minimum duration BLOCK (< 30 min) ────────────────────────────────
+        # §125 SGB V: shortest billable MLD position is 20205 = 30 min.
+        # If the therapist explicitly documents < 30 minutes, no MLD position is
+        # billable — billing would constitute fraud under German law.
+        # Pattern: isolated 1-2 digit number immediately before "min" / "minuten"
+        # to avoid false matches on position numbers (20201 etc.).
+        _sub30_m = re.search(
+            r"\b([1-2][0-9]|[1-9])\s+[Mm]in(?:uten?)?(?:\b|\.)",
+            transcript
+        )
+        if _sub30_m:
+            _doc_min = int(_sub30_m.group(1))
+            if _doc_min < 30:
+                audit.append(AuditItem(
+                    "DAUER_UNTERSCHREITUNG",
+                    f"Behandlungsdauer {_doc_min} Min < Minimum 30 Min",
+                    "BLOCK",
+                    f"Dokumentierte Dauer {_doc_min} Min unterschreitet die Mindest-Behandlungszeit "
+                    f"von 30 Min (§125 SGB V, Pos. 20205). Keine MLD-Position abrechenbar — "
+                    f"Retaxierungsrisiko.",
+                ))
+                risk = "BLOCK"
+
         # ── Early-termination flag: vorzeitiger Abbruch requires manual review ──
         # When the therapist explicitly documents an early session termination
         # ("vorzeitig beenden", "Abbruch", etc.) AND the position is a partial

@@ -2216,10 +2216,12 @@ Transkript:
             "handgelenk", "radiokarpal", "radiusfraktur", "speichenbruch",
             "handwurzel", "karpaltunnel", "daumen", "faustschluss",
         ])
-        # "finger" alone must NOT trigger hand block in LWS sessions
-        # (Whisper writes "fingerbodenabstand" → "finger" appears in transcript)
-        _finger_trigger = "finger" in t_low and not is_lws
-        is_hand = (profile_id == "EX_HAND") or _hand_keywords or _finger_trigger
+        # "finger" alone must NOT trigger hand block in LWS or LY sessions.
+        # LWS: "Fingerbodenabstand" → "finger" appears; LY: patient mentions fingers
+        # as lymphedema symptom ("bis in die Finger") — both are false positives.
+        _is_ly = profile_id in ("LY", "LY_ARM", "LY_BEIN")
+        _finger_trigger = "finger" in t_low and not is_lws and not _is_ly
+        is_hand = (profile_id == "EX_HAND") or (_hand_keywords and not _is_ly) or _finger_trigger
         if is_hand:
             # ═══════════════════════════════════════════════════════════════════
             # CRITICAL FIX: Remove spine contamination (FBA, Lasègue)
@@ -3793,6 +3795,11 @@ Transkript:
         "LY": [
             r"gonarthrose", r"omarthrose", r"impingementsyndrom",
             r"bandscheibenvorfall", r"copd",
+            # CRPS/Sudeck: burning/swelling in LY are lymphedema symptoms, not CRPS
+            r"crps", r"sudeck", r"morbus\s+sudeck",
+            # Spine diagnoses have no place in a lymphology report
+            r"lws.schmerz(?:en)?", r"hws.schmerz(?:en)?", r"kreuzschmerz(?:en)?",
+            r"bandscheibenprotrusion", r"radikulopathie",
         ],
         "AT": [
             r"gonarthrose", r"omarthrose", r"impingementsyndrom",
@@ -3851,6 +3858,13 @@ Transkript:
             # ankle abbreviations ("Fuß-Band-Außen") when it appears in the O-field context.
             r"\bFBA\b", r"finger-boden",
             r"\bschulter\b", r"\bhws\b", r"\bhalswirbel\b",
+        ],
+        "LY": [
+            # Lymphology has no relation to spinal pain complaints.
+            # "brennen" in lymphedema = vascular symptom, not radiculopathy.
+            r"\blws[-\s]?schmerz(?:en)?\b", r"\blumbal(?:schmerz)?(?:en)?\b",
+            r"\bhws[-\s]?schmerz(?:en)?\b", r"\bkreuzschmerz(?:en)?\b",
+            r"\blws\b", r"\blendenwirbels[äa]ule\b",
         ],
     }
 

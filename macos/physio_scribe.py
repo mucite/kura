@@ -331,7 +331,7 @@ class KuraEngine:
                 "chronisches ödem", "phlebolymphoedema",
                 # Treatment terms specific to lymphology (not used in standard KG)
                 "lymphdrainage", "manuelle lymphdrainage",
-                "mld-", "mld ",                 # "MLD-45", "MLD 30 Min" etc.
+                "mld-", "mld ", "mld:", "mld,", "mld.", "der mld",  # "MLD-45", "MLD 30 Min", "vor der MLD:" etc.
                 "kompressionsstrumpf", "kompressionsstrümpfe",
                 # Stemmer variants (including "Stemmer-Test" wording used by some therapists)
                 "stemmer positiv", "stemmer ist positiv", "stemmer ist negativ",

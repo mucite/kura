@@ -818,14 +818,72 @@ class _GKVEngine:
         # content, not ICD codes. Without this override M54.5 would route to WS1b/MT
         # even when the actual session is KG am Gerät (20507).
         if profile_id and profile_id in _PROFILE_TO_DG:
-            dg = _PROFILE_TO_DG[profile_id]
+            # Guard: do NOT downgrade a specific LY subtype (LY2, LY3) that _match_dg()
+            # already resolved correctly (e.g. I97.21 → LY2) back to LY1 via the generic
+            # "LY" → "LY1" mapping.  Only apply the override when _match_dg() was
+            # inconclusive (dg == "LY1" from default) or a non-LY profile is being set.
+            _would_override_to = _PROFILE_TO_DG[profile_id]
+            _skip = profile_id == "LY" and dg in ("LY2", "LY3")
+            if not _skip:
+                dg = _would_override_to
             # Remove DG_LOOKUP warning that may have been emitted above — the profile
             # override resolves the ICD ambiguity; no manual check needed.
             audit = [a for a in audit if a.code != "DG_LOOKUP"]
             risk = "OK"
 
+        # ── 1c. Transcript-based LY1 → LY2 upgrade ───────────────────────────
+        # ICD I89.x covers both primary and secondary lymphedema (same code space).
+        # When the transcript explicitly names a secondary etiology, upgrade the
+        # Diagnosegruppe label to LY2 (Sekundäres Lymphödem) for correct display.
+        # Important: the therapist holds an MLD prescription, not a KPE prescription.
+        # We therefore keep the MLD billing position (20201 base, upgraded by duration
+        # logic below) and only use LY2's description/docs — NOT its KPE position 21110.
+        _ly2_via_transcript = False
+        if dg == "LY1" and transcript:
+            _t = transcript.lower()
+            _secondary_triggers = [
+                "mamma-ablation", "mastektomie", "mastectomy",
+                "prostatektomie", "prostata-op", "prostata op", "nach der prostata",
+                "neck-dissection", "neck dissection", "nach neck",
+                "axillaer", "sentinel", "axillary",
+                "nach bestrahlung", "nach strahlentherapie", "nach chemotherapie",
+                "zervix-karzinom", "zervixkarzinom", "cervix-ca", "cervix ca",
+                "sekundäres lymphödem", "sekundaeres lymphoedem",
+                "nach tumorektomie", "nach tumor-op",
+                "nach rektum-op", "nach darm-op", "nach gynäkolog",
+                "beckenlymphödem", "beckenlymphoedem",
+                "nach op lymph", "lymphknotenentfernung",
+            ]
+            if any(trig in _t for trig in _secondary_triggers):
+                dg = "LY2"
+                _ly2_via_transcript = True
+
         entry = _HMK[dg]
         position = entry["position"]
+
+        # ── LY2 + MLD prescription guard ─────────────────────────────────────
+        # LY2 can be billed as KPE (21110) or MLD (20201/20203/20205) depending
+        # on the prescription.
+        #
+        # Case A — transcript-based upgrade (secondary etiology detected):
+        #   The therapist is performing MLD (that's why they're dictating a
+        #   lymphology session). Always keep MLD base position.
+        #
+        # Case B — ICD-based LY2 (I97.x / C77 etc.) but transcript shows MLD:
+        #   Therapist explicitly mentions MLD treatment → MLD position.
+        #   Otherwise leave at 21110 (KPE prescription assumed).
+        _mld_indicators = ["mld-", "mld ", "mld:", "mld,", "mld.", "der mld",
+                           "lymphdrainage", "manuelle lymphdrainage"]
+        if dg == "LY2" and position == "21110":
+            if _ly2_via_transcript:
+                # Case A: always MLD when secondary etiology came from transcript
+                position = _HMK["LY1"]["position"]  # "20201" — MLD base
+            elif transcript:
+                # Case B: MLD only when explicitly mentioned
+                _t_low = transcript.lower()
+                if any(ind in _t_low for ind in _mld_indicators):
+                    position = _HMK["LY1"]["position"]  # "20201" — MLD base
+                    _ly2_via_transcript = True  # suppress KPE_4COMP (MLD session)
 
         # ── 2. Config-level override ───────────────────────────────────────────
         config_pos = self._config_position(icd10, config_rules)
@@ -931,7 +989,12 @@ class _GKVEngine:
                 risk = "WARN"
 
         # ── 7. Required documentation per Diagnosegruppe — emit only on FAIL ────
-        for doc in entry["docs"]:
+        # When LY2 was reached via transcript secondary-etiology detection but the
+        # prescription is MLD (not KPE), use LY1's doc requirements so that
+        # KPE-specific fields (KPE-Komponenten, Onkolog. Vordiagnose) are not
+        # flagged as missing in what is legitimately an MLD session.
+        _docs_to_check = _HMK["LY1"]["docs"] if _ly2_via_transcript else entry["docs"]
+        for doc in _docs_to_check:
             if not _check_doc(doc, soap, transcript):
                 audit.append(AuditItem(
                     f"DOC_{doc.upper().replace(' ', '_')[:20]}",
@@ -993,7 +1056,9 @@ class _GKVEngine:
             ))
 
         # ── 10c. KPE 4-component documentation (LY2/LY3) ─────────────────────
-        if dg in ("LY2", "LY3"):
+        # Skip for transcript-based LY2 upgrades: the prescription is MLD, not KPE.
+        # KPE requirements only apply when LY2 was resolved from the ICD (I97.x / C77).
+        if dg in ("LY2", "LY3") and not _ly2_via_transcript:
             kpe_checker = _DOC_CHECKERS["KPE-Komponenten"]
             has_kpe = kpe_checker((obj + plan).lower())
             audit.append(AuditItem(

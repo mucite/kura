@@ -1650,7 +1650,7 @@ Transkript:
             "geschwollen", "schwellung", "ödem", "ödematös", "anschwellen",
             "prall", "gespannt", "dick", "aufgetrieben",
             "hämatom", "lymphödem", "lymphdrainage", "entstauung",
-            " mld ", "mld-", "kpe", "schwellungszust",
+            " mld ", "mld-", "mld:", "mld,", "mld.", "der mld", "kpe", "schwellungszust",
         ])
         if not swelling:
             # LY profile confirmed — inject fallback staging so the mandatory

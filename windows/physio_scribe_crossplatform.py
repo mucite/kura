@@ -59,13 +59,23 @@ class KuraEngine:
 
     def _setup_paths(self):
         if getattr(sys, "frozen", False):
-            base = os.path.dirname(sys.executable)
+            if sys.platform == "win32":
+                # Use the same persistent user directory as model_downloader.get_model_dir()
+                # Models are downloaded to %APPDATA%\Kura\models, not next to the exe
+                appdata = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+                base = os.path.join(appdata, "Kura")
+                # Fallback: fat build — models bundled next to the exe
+                exe_models = os.path.join(os.path.dirname(sys.executable), "models")
+                if not os.path.exists(os.path.join(base, "models")) and os.path.exists(exe_models):
+                    base = os.path.dirname(sys.executable)
+            else:
+                base = os.path.dirname(sys.executable)
             print(f"🔍 Running as bundled app, looking for models at: {base}\\models")
         else:
             base = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
         self.model_dir = os.path.join(base, "models")
         self.whisper_model_dir = os.path.join(self.model_dir, "whisper")
-        
+
         # Verify model directory exists
         if not os.path.exists(self.model_dir):
             print(f"⚠️ WARNING: Model directory not found at: {self.model_dir}")

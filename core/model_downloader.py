@@ -62,7 +62,11 @@ def get_model_dir() -> Path:
     if getattr(sys, "frozen", False):
         # Running as PyInstaller bundle - use persistent user directory
         # NOT the app bundle (which gets replaced on updates and is read-only)
-        user_app_support = Path(os.path.expanduser("~/Library/Application Support/Kura"))
+        if sys.platform == "win32":
+            appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+            user_app_support = Path(appdata) / "Kura"
+        else:
+            user_app_support = Path(os.path.expanduser("~/Library/Application Support/Kura"))
         user_app_support.mkdir(parents=True, exist_ok=True)
         model_dir = user_app_support / "models"
         print(f"[Bundle mode] Model directory: {model_dir}")

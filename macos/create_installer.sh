@@ -32,6 +32,10 @@ rm -f "dist/${DMG_NAME}"
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
 
+echo "🎨 Generating DMG background..."
+python3 "$(dirname "$0")/create_dmg_background.py"
+echo ""
+
 echo "📋 Staging files..."
 cp -R dist/Kura.app "$STAGING/"
 cp install.command "$STAGING/Install Kura.command"
@@ -52,6 +56,7 @@ while true; do
     create-dmg \
       --volname "Kura Medical ${VERSION}" \
       --volicon "../assets/stethoscope.icns" \
+      --background "assets/dmg_background.png" \
       --window-pos 200 120 \
       --window-size 660 420 \
       --icon-size 100 \

@@ -41,7 +41,9 @@ cp -R dist/Kura.app "$STAGING/"
 cp install.command "$STAGING/Install Kura.command"
 chmod +x "$STAGING/Install Kura.command"
 xattr -rd com.apple.quarantine "$STAGING/Install Kura.command" 2>/dev/null || true
-codesign --force --sign - "$STAGING/Install Kura.command" 2>/dev/null || true
+# Do NOT codesign the .command file — ad-hoc signing triggers the "Apple could not
+# verify … malware" dialog. Unsigned + quarantine shows only the softer
+# "downloaded from internet, are you sure?" prompt with a single [Open] click.
 echo "   ✅ Kura.app"
 echo "   ✅ Install Kura.command"
 

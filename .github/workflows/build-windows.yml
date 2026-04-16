@@ -1,0 +1,65 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. v2026.4.1)'
+        required: true
+        default: 'v2026.4.1'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements-windows.txt
+
+      - name: Build with PyInstaller
+        working-directory: windows
+        run: pyinstaller Kura_windows.spec -y
+
+      - name: Package ZIP
+        working-directory: windows
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.version }}"
+          $dist    = "dist\Kura"
+          $zipName = "Kura_Windows_${version}.zip"
+
+          # Copy installer scripts into the dist folder
+          Copy-Item "Kura_Installer.ps1"   $dist -Force
+          Copy-Item "Kura_Uninstaller.ps1" $dist -Force
+          "@echo off`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0Kura_Installer.ps1`"" `
+            | Out-File "$dist\Install.bat" -Encoding ASCII -Force
+
+          # Create ZIP
+          Compress-Archive -Path "$dist\*" -DestinationPath "dist\$zipName" -CompressionLevel Optimal
+
+          # SHA-256 checksum
+          $hash = (Get-FileHash "dist\$zipName" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zipName" | Out-File "dist\$zipName.sha256" -Encoding ASCII -NoNewline
+
+          Write-Host "Built: dist\$zipName"
+          Write-Host "SHA-256: $hash"
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+          echo "SHA256=$hash"      >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kura-Windows-${{ github.event.inputs.version }}
+          path: |
+            windows/dist/Kura_Windows_*.zip
+            windows/dist/Kura_Windows_*.sha256
+          retention-days: 30

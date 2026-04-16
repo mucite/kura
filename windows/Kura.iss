@@ -104,8 +104,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [CustomMessages]
 
 ; Welcome page body
-german.AppWelcomeBody=Kura Medical installiert KI-gestützte Dokumentation auf Ihrem PC.%n%n%n  • 100 %% lokale Verarbeitung%n  • Keine Cloud-Verbindung erforderlich%n  • DSGVO-konform nach § 125 SGB V%n%n%nBitte schließen Sie alle anderen Programme, bevor Sie fortfahren.
-english.AppWelcomeBody=Kura Medical installs AI-powered physiotherapy documentation on your PC.%n%n%n  • 100 %% local processing%n  • No cloud connection required%n  • GDPR-compliant (§ 125 SGB V)%n%n%nPlease close all other programs before continuing.
+german.AppWelcomeBody=Kura Medical installiert KI-gestützte Dokumentation auf Ihrem PC.%n%n  • 100 %% lokale Verarbeitung%n  • Keine Cloud-Verbindung erforderlich%n  • DSGVO-konform nach § 125 SGB V%n%nFalls Windows eine Sicherheitswarnung gezeigt hat:%n  → „Weitere Informationen" → „Trotzdem ausführen"%n  Das liegt daran, dass Kura keine kostenpflichtige%n  Microsoft-Signatur besitzt. Die Software ist sicher.%n%nBitte schließen Sie alle anderen Programme, bevor Sie fortfahren.
+english.AppWelcomeBody=Kura Medical installs AI-powered physiotherapy documentation on your PC.%n%n  • 100 %% local processing%n  • No cloud connection required%n  • GDPR-compliant (§ 125 SGB V)%n%nIf Windows showed a security warning:%n  → Click "More info" → "Run anyway"%n  This appears because Kura lacks a paid Microsoft%n  certificate. The software is safe.%n%nPlease close all other programs before continuing.
 
 ; Finish page
 german.AppFinishedBody=Kura Medical wurde erfolgreich installiert.%n%nBeim ersten Start fragt Windows nach dem Mikrofon-Zugriff. Klicken Sie auf "Zulassen".%n%nIhre Berichte werden in Dokumente\Kura\ gespeichert.

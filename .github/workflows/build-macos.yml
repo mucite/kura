@@ -1,0 +1,41 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. v2026.4.1)'
+        required: true
+        default: 'v2026.4.1'
+
+jobs:
+  build:
+    runs-on: macos-14  # Apple Silicon (M1) — required for mlx-lm / mlx-whisper
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build release DMG
+        run: bash macos/build_release.sh ${{ github.event.inputs.version }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kura-macOS-${{ github.event.inputs.version }}
+          path: |
+            macos/dist/Kura_macOS_*.dmg
+            macos/dist/Kura_macOS_*.dmg.sha256
+          retention-days: 30

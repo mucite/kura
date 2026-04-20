@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Kura Medical — MSIX Manifest (Desktop Bridge / Full Trust)
+  ============================================================
+  Before submitting to the Microsoft Store, update:
+    1. Identity Publisher   → your Partner Center publisher CN
+                              (e.g. "CN=XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX")
+    2. Identity Name        → must match your Partner Center reservation
+    3. PhoneIdentity        → set PhoneProductId to a new random GUID
+    4. All Assets/*         → replace placeholder PNGs with real artwork
+                              (see windows/msix/Assets/README.txt)
+
+  To find your Publisher CN:
+    Partner Center → Account settings → Organization profile → Publisher ID
+    then format as "CN=<value>"
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  IgnorableNamespaces="uap mp rescap desktop">
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       IDENTITY  — must exactly match your Partner Center app reservation
+       ═══════════════════════════════════════════════════════════════════ -->
+  <Identity
+    Name="KuraMedical.KuraPro"
+    Publisher="CN=PLACEHOLDER-UPDATE-BEFORE-STORE-SUBMISSION"
+    Version="2026.4.1.0"
+    ProcessorArchitecture="x64" />
+
+  <mp:PhoneIdentity
+    PhoneProductId="00000000-0000-0000-0000-000000000000"
+    PhonePublisherId="00000000-0000-0000-0000-000000000000" />
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       PROPERTIES
+       ═══════════════════════════════════════════════════════════════════ -->
+  <Properties>
+    <DisplayName>Kura Pro</DisplayName>
+    <PublisherDisplayName>Kura Medical</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>KI-Dokumentation für Physiotherapie — 100 % lokal, DSGVO-konform</Description>
+  </Properties>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       DEPENDENCIES  — Windows 10 Anniversary Update (1607) minimum,
+       which is the earliest Desktop Bridge host
+       ═══════════════════════════════════════════════════════════════════ -->
+  <Dependencies>
+    <TargetDeviceFamily
+      Name="Windows.Desktop"
+      MinVersion="10.0.14393.0"
+      MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       RESOURCES
+       ═══════════════════════════════════════════════════════════════════ -->
+  <Resources>
+    <Resource Language="de-DE" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       APPLICATION ENTRY POINT
+       ═══════════════════════════════════════════════════════════════════ -->
+  <Applications>
+    <Application
+      Id="Kura"
+      Executable="Kura.exe"
+      EntryPoint="Windows.FullTrustApplication">
+
+      <uap:VisualElements
+        DisplayName="Kura Pro"
+        Description="KI-Dokumentation für Physiotherapie"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+
+        <uap:DefaultTile
+          Wide310x150Logo="Assets\Wide310x150Logo.png"
+          Square71x71Logo="Assets\SmallTile.png"
+          Square310x310Logo="Assets\LargeTile.png"
+          ShortName="Kura Pro" />
+
+        <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#0a0e1a" />
+
+        <uap:LockScreen Notification="badge" BadgeLogo="Assets\BadgeLogo.png" />
+
+      </uap:VisualElements>
+
+      <!-- Desktop Bridge: launch as a full-trust Win32 process -->
+      <Extensions>
+        <desktop:Extension Category="windows.fullTrustProcess" Executable="Kura.exe" />
+      </Extensions>
+
+    </Application>
+  </Applications>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       CAPABILITIES
+       ═══════════════════════════════════════════════════════════════════ -->
+  <Capabilities>
+    <!-- runFullTrust is required for all Desktop Bridge (Win32) apps -->
+    <rescap:Capability Name="runFullTrust" />
+
+    <!-- Microphone access for voice recording -->
+    <DeviceCapability Name="microphone" />
+  </Capabilities>
+
+</Package>

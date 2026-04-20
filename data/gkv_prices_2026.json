@@ -46,21 +46,23 @@
       "price_eur": 10.29,
       "duration_min": 45
     },
-    "20510": {
-      "name": "KG-ZNS Erstbefundung",
-      "price_eur": 36.87,
-      "duration_min": 30
-    },
-    "20511": {
-      "name": "KG-ZNS Einzelbehandlung (Bobath/PNF)",
-      "price_eur": 42.69,
+    "20708": {
+      "name": "KG-ZNS Kinder 45 min (Bobath/Vojta pädiatrisch)",
+      "price_eur": 58.83,
       "duration_min": 45,
-      "note": "Neurological physiotherapy"
+      "note": "§125 SGB V Anlage 2, Optica Tarifcode 22, 01.01.2026"
     },
-    "20512": {
-      "name": "KG-ZNS Hausbesuch",
-      "price_eur": 42.69,
-      "duration_min": 45
+    "20709": {
+      "name": "KG-ZNS Kinder 60 min",
+      "price_eur": 58.83,
+      "duration_min": 60,
+      "note": "§125 SGB V Anlage 2, Optica Tarifcode 22, 01.01.2026"
+    },
+    "20710": {
+      "name": "KG-ZNS Erwachsene 45 min (Bobath/PNF/Vojta)",
+      "price_eur": 47.06,
+      "duration_min": 45,
+      "note": "§125 SGB V Anlage 2, Optica Tarifcode 22, 01.01.2026. Replaces retired 20511."
     },
     "20560": {
       "name": "KG atemtherapeutisch",
@@ -94,8 +96,9 @@
   "manuelle_therapie": {
     "21200": {
       "name": "MT Erstbefundung",
-      "price_eur": 42.71,
-      "duration_min": 30
+      "price_eur": 35.59,
+      "duration_min": 30,
+      "note": "§125 SGB V Anlage 2, Optica Tarifcode 22, 01.01.2026"
     },
     "21201": {
       "name": "MT Folgebehandlung",
@@ -128,12 +131,6 @@
       "name": "MLD Teilbehandlung 30 Min",
       "price_eur": 35.97,
       "duration_min": 30
-    },
-    "21100": {
-      "name": "KPE Phase I - MLD-Anteil",
-      "price_eur": 53.94,
-      "duration_min": 60,
-      "note": "Complex decongestive therapy"
     },
     "21110": {
       "name": "KPE Phase I 60 Min",

@@ -252,7 +252,7 @@ class KuraEngine:
     _PROFILES = {
         "ZNS_PAD": {
             "label":    "Neuro-Paediatrie (Bobath-Kind / CP)",
-            "billing":  "20511",
+            "billing":  "20708",   # KG-ZNS Kinder 45 min §125 SGB V Anlage 2 (01.01.2026)
             "priority": 100,
             "age_max":  17,
             "triggers": [
@@ -274,7 +274,7 @@ class KuraEngine:
         },
         "ZNS_FAZ": {
             "label":    "Fazialisparese",
-            "billing":  "20511",
+            "billing":  "20710",   # KG-ZNS Erwachsene 45 min §125 SGB V Anlage 2 (01.01.2026)
             "priority": 90,
             "triggers": [
                 "fazialisparese", "fazialis", "bell", "nervus facialis",
@@ -289,7 +289,7 @@ class KuraEngine:
         },
         "ZNS_ADULT": {
             "label":    "Neurologie adult",
-            "billing":  "20511",
+            "billing":  "20710",   # KG-ZNS Erwachsene 45 min §125 SGB V Anlage 2 (01.01.2026)
             "priority": 80,
             "age_min":  18,
             "triggers": [
@@ -402,10 +402,11 @@ class KuraEngine:
         },
         "EX_KNIE": {
             "label":    "Extremitaeten Knie (EX3)",
-            "billing":  "21201",
+            "billing":  "20501",   # KG Einzelbehandlung (HMK EX3 §125 SGB V); MT 21201 nur bei expliziter Verordnung
             "priority": 56,   # above MT(50): knee anatomy always beats generic MT profile
             "triggers": [
-                "knie", "kniegelenk", "knieschmerz", "kniebeschwerden",
+                # "knie" bare excluded — too generic, matches "Knie zur Brust" (LWS exercise)
+                "kniegelenk", "knieschmerz", "kniebeschwerden",
                 "gonarthrose", "kniearthrose",
                 "vkb", "vkb-ruptur", "vkb-plastik", "vorderes kreuzband",
                 "hkb", "hinteres kreuzband", "kreuzband",
@@ -417,8 +418,14 @@ class KuraEngine:
             ],
             "icd_prefix": ["M17", "M23", "S83"],
             "checklist": [
-                "Lachman-Test: positiv / negativ",
-                "ROM: Extension / Flexion (Grad)",
+                "Umfang Knie beidseits in cm (Oedemmass)",
+                "Lachman-Test: positiv / negativ (VKB-Integritaet)",
+                "McMurray-Test: positiv / negativ re. / li. (Innen- / Aussenmeniskus)",
+                "Valgus-Stresstest: positiv / negativ (MCL-Integritaet)",
+                "Varus-Stresstest: positiv / negativ (LCL-Integritaet)",
+                "Clarke-Test: positiv / negativ (patellofemorales Schmerzsyndrom)",
+                "ROM Knie NZM: Extension / Flexion (Grad, Neutral-Null-Methode)",
+                "Kraft Quadrizeps (MRC 0-5): re. / li.",
                 "VAS-Score (0-10)",
             ],
         },
@@ -472,18 +479,23 @@ class KuraEngine:
                 "Behandeltes Segment: C__/C__ oder C__/Th__ (MT-Pflichtangabe fuer 21201)",
                 "ROM HWS: Flexion / Extension / Latflex re+li / Rotation re+li (Grad)",
                 "Spurling-Test: positiv / negativ (mit Seitenangabe)",
+                "Neurologisches Screening: Reflexe BSR(C5/C6) / TSR(C7) | Myotome: C5 Schulterabduktion / C6 Handgelenkstrecker / C7 Ellbogenstrecker / C8 Fingerflexoren | Sensibilitaet C5-Th1",
+                "VAS (0-10)",
+                "Schmerzmuster: lokal / ausstrahlend (Dermatom angeben)",
             ],
         },
         "EX_LWS": {
             "label":    "LWS / Lumbalgie",
             "billing":  "21201",
-            "priority": 53,   # above MT(50): LWS beats generic MT-WS profile
+            "priority": 59,   # raised above EX_KNIE(56): LWS is most common PT condition
             "triggers": [
                 "lws", "lendenwirbelsäule", "lendenwirbel", "lumbosakral",
                 "lumbalgie", "lumboischialgie", "ischiasschmerz", "ischialgie",
                 "bandscheibenvorfall", "bandscheibenprotrusion", "diskushernie",
                 "lumbago", "kreuzschmerz",
-                "rückenschmerz", "rückenbeschwerd", "rückenprobleme",
+                "rückenschmerz", "rückenschmerzen", "rückenbeschwerd", "rückenprobleme",
+                "unterer rücken", "unteren rücken", "untere rücken",
+                "knie zur brust",   # classic LWS mobilisation exercise
                 "spinalkanalstenose lumbal", "spondylolisthese",
                 "l1", "l2", "l3", "l4", "l5", "l4/l5", "l5/s1",
                 # "wirbelsäule" excluded — too broad, matches HWS sessions too
@@ -494,11 +506,17 @@ class KuraEngine:
                 "Behandeltes Segment: L__/L__ oder L__/S__ (MT-Pflichtangabe fuer 21201)",
                 "FBA (Finger-Boden-Abstand): X cm",
                 "Lasegue-Test: Grad + Seite (z.B. re. positiv bei 45 Grad)",
+                "Slump-Test: positiv / negativ (re. / li.) — neurodynamischer Provokationstest",
+                "Schober-Zeichen: X cm zu Y cm",
+                "ROM LWS: Flexion / Extension / Latflex (Neutral-Null-Methode)",
+                "Neurologisches Screening: Reflexe ASR(S1)/PSR(L4) | Myotome: L3 Kniestrecker / L4 Fussheber / L5 Grosszehenstrecker / S1 Plantarflexion | Sensibilitaet L3-S1",
+                "Blasen-/Mastdarmfunktion: unauffaellig / gestaert (Cauda-equina-Screening)",
+                "VAS (0-10)",
             ],
         },
         "EX_HUefte": {
             "label":    "Extremitaeten Huefte (EX4)",
-            "billing":  "21201",
+            "billing":  "20501",   # KG Einzelbehandlung (HMK EX4 §125 SGB V); MT 21201 nur bei expliziter Verordnung
             "priority": 55,   # above MT(50): hip anatomy beats generic MT profile
             "triggers": [
                 "hüfte", "huefte", "hüftgelenk", "hüftbeschwerden",
@@ -516,13 +534,18 @@ class KuraEngine:
             "icd_prefix": ["M16", "Z96.6", "M70.6"],
             "checklist": [
                 "ROM Huefte: Flexion / Extension / ABD / ADD / IRO / ARO (Grad)",
-                "Trendelenburg-Zeichen: positiv / negativ",
-                "Kraft Huefte (MRC 0-5): Abduktion / Extension",
+                "Trendelenburg-Zeichen: positiv / negativ (Schwaeche Gluteus medius)",
+                "Thomas-Handgriff: positiv / negativ (Hueftflexor-Kontraktur)",
+                "FABER-Test (Patrick): positiv / negativ + Seite (Huefte / SIG-Provokation)",
+                "FADIR-Test: positiv / negativ + Seite (Impingement / Labrumpathologie)",
+                "Kraft Huefte (MRC 0-5): Abduktion / Extension / IRO",
+                "Gangbild: Hinken / Duchenne / Trendelenburg-Hinken (ja / nein)",
+                "VAS (0-10)",
             ],
         },
         "EX_HAND": {
             "label":    "Extremitaeten Hand / Handgelenk / Finger",
-            "billing":  "21201",
+            "billing":  "20501",   # KG Einzelbehandlung (HMK EX6 §125 SGB V); optional MT 21201 wenn Rezept es vorschreibt
             "priority": 52,   # CRITICAL: Above MT(50) to prevent spine misdetection
             "triggers": [
                 "handgelenk", "handgelenkschmerz",
@@ -531,7 +554,7 @@ class KuraEngine:
                 "radiusfraktur", "radiusfraktur distale", "speichenbruch",
                 "metakarpal", "mittelhand",
                 "fingergelenk", "fingergrundgelenk", "fingermittelgelenk", "fingerendgelenk",
-                "finger", "daumen", "daumengelenk", "daumensattelgelenk",
+                "fingerschmerz", "daumen", "daumengelenk", "daumensattelgelenk",
                 "handkraft", "faustschluss",
                 "karpaltunnel", "karpaltunnelsyndrom",
                 "handchirurgie", "handödem",
@@ -547,7 +570,7 @@ class KuraEngine:
         },
         "EX_FUSS": {
             "label":    "Extremitaeten Fuss / Sprunggelenk (EX5)",
-            "billing":  "21201",
+            "billing":  "20501",   # KG Einzelbehandlung (HMK EX5 §125 SGB V); kein optional_mt laut HMK 2026
             "priority": 51,   # unique; above MT(50) — ankle sessions using manual therapy → EX_FUSS
             "triggers": [
                 # Foot / ankle anatomy - SPECIFIC to avoid matching neurological tests
@@ -792,7 +815,7 @@ class KuraEngine:
         "GEB": {
             "label":    "Geburtshilfe / Rückbildungsgymnastik",
             "billing":  "21904",   # 21901 Vorbereitung / 21904 Rückbildung (Gist ICD10_O80)
-            "priority": 52,
+            "priority": 53,   # above EX_HAND(52) — obstetric terms never appear in hand sessions
             "triggers": [
                 "schwanger", "geburt", "rueckbildung", "postnatal", "postpartal",
                 "dammriss", "perinealriss", "kaiserschnitt", "sectio", "stillen",
@@ -878,7 +901,11 @@ class KuraEngine:
                 "schober-zeichen", "vorlaufphänomen", "vorlauf-test",
                 "lumbalgie", "lumboischialgie", "kreuzschmerz",
                 "bandscheibenvorfall lumbal", "bandscheibenprotrusion lws",
-                "brügger", "brügger-sitz",   # LWS posture rehab technique
+                "brügger", "brügger-sitz",
+                "rückenschmerzen",
+                "unterer rücken", "unteren rücken",
+                "strahlt ins bein", "zieht ins bein", "ausstrahlung ins bein",
+                "muskuläre verspannung lws", "paraspinale verspannung",
             ],
             "ZNS_ADULT": [
                 "bobath-konzept", "bobath konzept", "nach bobath",
@@ -1043,11 +1070,25 @@ class KuraEngine:
             if profile_id in _lower_limb_profiles else ""
         )
 
+        # Yellow flag screening for chronic LWS (Kenyon 2018: psychosocial factors in chronic pain)
+        _chronic_indicators = ["chronisch", "seit wochen", "seit monaten", "seit jahren",
+                               "wiederholt", "rezidivierend", "mehrfach", "immer wieder"]
+        _has_chronic_mac = profile_id == "EX_LWS" and any(k in transcript.lower() for k in _chronic_indicators)
+        yellow_flag_note = (
+            "\n⚠️ GELBE FLAGGEN (Chronifizierungsrisiko LWS — dokumentieren falls erwähnt):\n"
+            "  • Katastrophisierung: übermäßige Angst, Katastrophengedanken\n"
+            "  • Vermeidungsverhalten: Aktivitäten werden aus Schmerzangst gemieden\n"
+            "  • Passive Erwartungshaltung: Pat. erwartet nur passive Behandlung\n"
+            "  • Arbeits- / Sozialfaktoren: Arbeitsunfähigkeit, Rentengedanken, sozialer Rückzug\n"
+            "  → Im S-Feld dokumentieren wenn vorhanden (z.B. 'Schmerzangst + Vermeidungsverhalten')"
+            if _has_chronic_mac else ""
+        )
+
         # Profile-specific O-field correct example (prevents LWS template bleed into EX profiles)
         _extremity_profiles = {"EX_SCHULTER", "EX_HUefte", "EX_HUFTE", "EX_KNIE", "EX_FUSS", "EX_HAND"}
         _obj_examples = {
             "EX_SCHULTER": "ROM Schulter (re) NZM: Abd/Add: 90-0-30 | Flex/Ext: 140-0-40 | IRO/ARO: 40-0-50 | Hawkins-Test: positiv | Jobe-Test: negativ | Painful Arc: positiv (60°-120°) | Endgefühl: elastisch-stoppend | Behandeltes Segment: Art. glenohumeralis",
-            "EX_LWS":      "Schonhaltung re. | FBA: 40 cm | Lasègue 80° negativ | Kraftgrade 5/5 | ROM LWS NZM: Flex/Ext: 80-0-20 | Behandeltes Segment: L4/L5",
+            "EX_LWS":      "Schonhaltung re. | FBA: 40 cm | Lasègue re. 70° negativ | Slump-Test: negativ bds. | Schober-Zeichen: 10/13 cm | ROM LWS NZM: Flex/Ext: 80-0-20 | Neuro: PSR(L4) 2/2, ASR(S1) 2/2, Kraft L5 5/5 | Behandeltes Segment: L4/L5",
             "EX_HWS":      "Kopfhaltung in Vorneigung | Spurling re.: negativ | ROM HWS NZM: Flex/Ext: 40-0-40 | LatFlex: 30-0-30 | Rotation: 50-0-50 | Behandeltes Segment: C5/C6",
             "EX_KNIE":     "Schwellung med. Gelenkspalt | Lachman: negativ | ROM Knie NZM: Flex/Ext: 120-0-0 | Kraft Quadrizeps: 4/5 | VAS 4/10",
             "EX_HUefte":   "Trendelenburg re.: positiv | ROM Hüfte NZM: Flex/Ext: 100-0-10 | Abd/Add: 30-0-20 | VAS 5/10 | Gangbild: Schonhinken re.",
@@ -1083,6 +1124,15 @@ class KuraEngine:
                 "  • Gangbild: Hilfsmittel, Auffälligkeiten, Sturzrisiko (hoch/mittel/niedrig)\n"
                 "  • Vitalparameter: RR, Puls, Schwindel wenn dokumentiert\n"
                 "  • ❌ KEIN FBA, KEIN Lasègue, KEIN Spurling — das sind KEINE ZNS-Tests!"
+            )
+        elif profile_id == "EX_LWS":
+            neuro_tests = (
+                "  • Lasègue-Test: Grad + Seite (z.B. 'Lasègue re. 45° positiv')\n"
+                "  • Slump-Test: positiv / negativ bds. (Ko-Test mit Lasègue laut Kenyon 2018)\n"
+                "  • Myotome: L3=Kniestrecker | L4=Fußheber | L5=Großzehenstrecker | S1=Plantarflexion\n"
+                "  • Reflexe: PSR (L3/L4) + ASR (S1) — Seitenvergleich re./li.\n"
+                "  • Sensibilität: Dermatome L3-S1 (Berührung/Schmerz)\n"
+                "  • Cauda-equina-Screening: Blasen-/Mastdarmfunktion, perianale Sensibilität"
             )
         elif profile_id in _extremity_profiles:
             neuro_tests = "  • Schulter: Spurling-Test, Hoffmann-Tinel, Phalen (für Hände)"
@@ -1175,7 +1225,7 @@ A-FELD (Assessment):
 P-FELD (Plan):
 - Format: "Heilmittel | Technik | Ziel: ... | Frequenz"
 - Beispiel: "KG mit manuellen Techniken | {smart_goal_ex} | 2x/Woche, 6 EH"
-{kruecken_line}
+{kruecken_line}{yellow_flag_note}
 
 AUSGABEFORMAT (NUR EIN JSON-Objekt, KEINE Wiederholungen):
 {{"icd10": "{icd_hint}", "soap": {{"S": "Patientengeschichte als String", "O": "Test1 | Test2 | Test3", "A": "Diagnose | Red Flags", "P": "Behandlung | Ziel"}}}}
@@ -1522,6 +1572,17 @@ Transkript:
                 deg_val = deg.group(1) if deg else "positiv"
                 obj_text += f" | Lasègue-Test: {deg_val}° positiv."
 
+        # Slump-Test — neurodynamic provocation test for LWS (co-equal with Lasègue per Kenyon 2018)
+        _is_lws_session_mac = profile_id == "EX_LWS" or any(
+            k in transcript.lower() for k in ["lws", "lumbal", "isg", "kreuzschmerz", "bandscheib"])
+        if re.search(r"slump[- ]?test|slump", transcript, re.I) and _is_lws_session_mac:
+            if "slump" not in obj_text.lower():
+                slump_result = re.search(r"slump[^|.]*?(positiv|negativ)", transcript, re.I)
+                slump_side   = re.search(r"slump[^|.]*?(rechts|links|re\.|li\.|bds\.?|beidseits)", transcript, re.I)
+                res_val  = slump_result.group(1) if slump_result else "n.d."
+                side_val = slump_side.group(1) if slump_side else "bds."
+                obj_text += f" | Slump-Test: {res_val} {side_val}"
+
         # Recover Ashworth Scale (with region extraction)
         ashworth = re.search(r"Ashworth[^0-9]*(?:Stufe\s*|Grad\s*|:\s*)?(\d)", transcript, re.I)
         if ashworth and "Ashworth" not in obj_text:
@@ -1841,7 +1902,8 @@ Transkript:
 
         # ── Knie (EX3): recover ROM in Neutral-Null-Method, Gangbild, Kraft ──────
         is_knie = (profile_id == "EX_KNIE") or any(k in t_low for k in [
-            "knie", "kniegelenk", "knieschmerz", "kniebeschwerden",
+            # "knie" bare excluded — matches "Knie zur Brust" (LWS exercise)
+            "kniegelenk", "knieschmerz", "kniebeschwerden",
             "gonarthrose", "kniearthrose", "gonalgie",
             "meniskus", "kreuzband", "patella",
             "knieprothese", "knie-tep", "ktep", "totalendoprothese knie",
@@ -2228,7 +2290,7 @@ Transkript:
         # "finger" alone must NOT trigger hand block in LWS or LY sessions.
         # LWS: "Fingerbodenabstand" → "finger" appears; LY: patient mentions fingers
         # as lymphedema symptom ("bis in die Finger") — both are false positives.
-        _is_ly = profile_id in ("LY", "LY_ARM", "LY_BEIN")
+        _is_ly = profile_id == "LY"
         _finger_trigger = "finger" in t_low and not is_lws and not _is_ly
         is_hand = (profile_id == "EX_HAND") or (_hand_keywords and not _is_ly) or _finger_trigger
         if is_hand:
@@ -3662,10 +3724,10 @@ Transkript:
         # Rule: If 'Krankengymnastik' is explicitly dictated as the work type,
         # we don't 'Upcode' to MT even if mobilisation is mentioned.
         if "krankengymnastik" in plan_text or " kg" in plan_text:
-            if is_neuro: return res_icd, codes.get("KG_ZNS", "20511")
+            if is_neuro: return res_icd, codes.get("KG_ZNS", "20710")
             return res_icd, codes.get("KG", "20501")
 
-        if is_neuro: return res_icd, codes.get("KG_ZNS", "20511")
+        if is_neuro: return res_icd, codes.get("KG_ZNS", "20710")
         # MT must NOT override lymph — a lymph case mentioning "mobilisation" is still MLD
         if is_ortho_mt and not is_lymph: return res_icd, codes.get("MT", "21201")
         if is_lymph:
@@ -3958,7 +4020,7 @@ Transkript:
                 if not any(n in after for n in ['neg', 'ausg', 'kein', 'ohne', 'unauffällig']):
                     warns.append(f"🔴 NOTFALL: {f.upper()}!")
         # 2026 Density
-        if billing_code in ["21201", "20511"] and len(obj) < 60:
+        if billing_code in ["21201", "20710", "20708", "20709"] and len(obj) < 60:
             warns.append(f"📋 DOKU: Befunddichte zu gering für {billing_code}.")
         if "°" in obj and not re.search(r"\d+-\d+-\d+", obj):
             warns.append("⚠️ HINWEIS: Bitte Neutral-Null-Methode nutzen.")

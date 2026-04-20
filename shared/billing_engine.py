@@ -130,7 +130,9 @@ _HMK: dict[str, dict] = {
 
     "EX1a": {
         "desc": "Periphere Lähmungen/Paresen (Extremitäten)",
-        "heilmittel": "KG-ZNS", "position": "20511",
+        "heilmittel": "KG-ZNS", "position": "20710",
+        # 20710 = KG nach Bobath/PNF (Optica Tarifcode 22, 01.01.2026, €47.06)
+        # 20511 was retired in the 2021+ restructuring of PT fee codes
         "name": "Krankengymnastik ZNS (Bobath/PNF/Vojta)",
         "duration": 45, "regelfall": 10, "langfristig": True,
         "icd": ["G54", "G55", "G56", "G57", "G58", "G60", "G61", "G62"],
@@ -243,7 +245,7 @@ _HMK: dict[str, dict] = {
 
     "ZNS1": {
         "desc": "Hemiplegie/Hemiparese – Schlaganfall, Hirnverletzung",
-        "heilmittel": "KG-ZNS", "position": "20511",
+        "heilmittel": "KG-ZNS", "position": "20710",   # Optica Tarifcode 22, 01.01.2026 (€47.06)
         "name": "Krankengymnastik ZNS nach Bobath",
         "duration": 45, "regelfall": 10, "langfristig": True,
         "icd": ["G81", "I69", "G82", "G83", "S14", "S24", "S34"],
@@ -251,7 +253,7 @@ _HMK: dict[str, dict] = {
     },
     "ZNS2": {
         "desc": "Multiple Sklerose / Ataxie / spinale Erkrankungen",
-        "heilmittel": "KG-ZNS", "position": "20511",
+        "heilmittel": "KG-ZNS", "position": "20710",   # Optica Tarifcode 22, 01.01.2026 (€47.06)
         "name": "Krankengymnastik ZNS",
         "duration": 45, "regelfall": 10, "langfristig": True,
         "icd": ["G35", "G11", "G12", "G95"],
@@ -259,7 +261,7 @@ _HMK: dict[str, dict] = {
     },
     "ZNS3": {
         "desc": "Morbus Parkinson / extrapyramidale Erkrankungen",
-        "heilmittel": "KG-ZNS", "position": "20511",
+        "heilmittel": "KG-ZNS", "position": "20710",   # Optica Tarifcode 22, 01.01.2026 (€47.06)
         "name": "Krankengymnastik ZNS",
         "duration": 45, "regelfall": 10, "langfristig": True,
         "icd": ["G20", "G21"],
@@ -267,15 +269,15 @@ _HMK: dict[str, dict] = {
     },
     "ZNS4": {
         "desc": "Zerebralparese / frühkindliche Hirnschädigung",
-        "heilmittel": "KG-ZNS", "position": "20511",
-        "name": "Krankengymnastik ZNS (Vojta/Bobath)",
+        "heilmittel": "KG-ZNS-Kind", "position": "20708",   # Optica Tarifcode 22, 01.01.2026 (€58.83 — pädiatrisch)
+        "name": "Krankengymnastik ZNS Kind (Vojta/Bobath)",
         "duration": 45, "regelfall": 10, "langfristig": True,
         "icd": ["G80"],
         "docs": ["Tonus (Ashworth-Skala)", "Motorische Meilensteine", "ADL-Status", "Barthel-Index"],
     },
     "ZNS5": {
         "desc": "Periphere Fazialisparese / Hirnnervenparesen",
-        "heilmittel": "KG-ZNS", "position": "20511",
+        "heilmittel": "KG-ZNS", "position": "20710",   # Optica Tarifcode 22, 01.01.2026 (€47.06)
         "name": "Krankengymnastik ZNS",
         "duration": 45, "regelfall": 6, "langfristig": False,
         "icd": ["G51", "G52", "G53"],
@@ -553,16 +555,26 @@ def _load_gkv_prices() -> dict[str, float]:
 
     # Fallback to hardcoded 2026 prices
     return {
-        "20300": 34.34, "20500": 30.83, "20501": 29.63, "20507": 55.81,
-        "20502": 29.63, "20503": 13.76, "20504": 10.29, "20510": 36.87,
-        "20511": 42.69, "20512": 42.69, "20560": 29.63, "21200": 42.71,
-        "21201": 35.59, "20201": 53.94, "20202": 71.94, "20205": 35.97,
-        "21100": 53.94, "21110": 58.42, "21111": 46.26, "21901": 11.40,
-        "21904": 11.40, "20102": 33.75, "20106": 21.63, "20107": 25.98,
-        "20108": 21.63, "20601": 13.26, "20401": 8.43, "21302": 8.43,
-        "21303": 18.70, "21310": 14.48, "21312": 27.61, "21501": 16.16,
-        "21517": 7.43, "21530": 13.47, "21531": 14.66, "21534": 11.95,
+        # Source: Optica Tarifcode 22, RVO Primärkassen, bundesweit, 01.01.2026
+        "20102": 33.75, "20106": 21.63, "20107": 25.98, "20108": 21.63,
+        "20201": 53.94, "20202": 71.94, "20204": 22.92, "20205": 35.97,
+        "20301": 13.68, "20305": 32.88, "20306": 20.43,
+        "20401": 8.43,  "20402": 24.00, "20405": 16.28,
+        "20501": 29.63, "20507": 55.81, "20521": 29.63,
+        "20560": 29.63, "20601": 13.26, "20621": 13.26,
+        "20702": 88.94, "20708": 58.83, "20709": 58.83,
+        "20710": 47.06, "20711": 47.06, "20712": 47.06, "20720": 47.06,
+        "20728": 58.83, "20805": 16.57,
         "20902": 33.87, "21004": 24.16, "21005": 15.97,
+        "21104": 8.63,  "21110": 58.42, "21111": 46.26,
+        "21200": 35.59, "21201": 35.59, "21221": 35.59,
+        "21302": 8.43,  "21303": 18.70, "21310": 14.48, "21312": 27.61,
+        "21501": 16.16, "21517": 7.43,  "21530": 13.47, "21531": 14.66,
+        "21532": 55.39, "21533": 42.84, "21534": 11.95,
+        "21714": 27.72, "21732": 26.30, "21733": 26.30,
+        "21801": 12.34, "21901": 11.40, "21904": 11.40,
+        "21906": 67.69, "22001": 70.45,
+        "29701": 1.40,  "29922": 22.78, "29950": 22.78, "29951": 13.09,
     }
 
 # Load prices at module import
@@ -572,38 +584,37 @@ _GKV_PRICES: dict[str, float] = _load_gkv_prices()
 # ⚠️ Orientierungswerte — kein Rechtsanspruch, Erstattung vertragsabhängig
 
 _PKV_RANGES: dict[str, tuple] = {
-    "20501": (30.0,  80.0),
+    # §125 SGB V Anlage 2 — GKV-Festpreise 01.01.2026; PKV-Spannen GebüTh 2026
+    "20501": (30.0,  80.0),   # KG Einzelbehandlung 20 min
     "20507": (55.0, 130.0),   # KGG/MTT 45 min
-    "20502": (30.0,  80.0),
-    "20503": (15.0,  35.0),
-    "20510": (40.0,  90.0),
-    "20511": (48.0, 100.0),
-    "20560": (30.0,  75.0),
-    "21200": (48.0, 100.0),
-    "21201": (38.0,  90.0),
-    "20201": (55.0, 120.0),
-    "20202": (72.0, 150.0),
-    "20205": (36.0,  80.0),
-    "21100": (55.0, 120.0),
-    "21110": (65.0, 140.0),
-    "21111": (52.0, 115.0),
+    "20560": (30.0,  75.0),   # KG atemtherapeutisch 20 min
+    "20710": (50.0, 110.0),   # KG-ZNS Erwachsene 45 min (Bobath/PNF/Vojta, ab 2021)
+    "20708": (60.0, 120.0),   # KG-ZNS Kinder 45 min (Vojta/Bobath pädiatrisch)
+    "20709": (60.0, 120.0),   # KG-ZNS Kinder 60 min
+    "21200": (48.0, 100.0),   # MT Erstbefundung 30 min
+    "21201": (38.0,  90.0),   # MT Folgebehandlung 20 min
+    "20201": (55.0, 120.0),   # MLD 45 min
+    "20202": (72.0, 150.0),   # MLD 60 min
+    "20205": (36.0,  80.0),   # MLD 30 min
+    "21110": (65.0, 140.0),   # KPE Phase I 60 min
+    "21111": (52.0, 115.0),   # KPE Phase II 30 min
     "21901": (20.0,  55.0),   # Geburtsvorbereitung
     "21904": (20.0,  55.0),   # Rückbildungsgymnastik
-    "20106": (22.0,  55.0),   # KMT
-    "20107": (26.0,  65.0),   # BGM
-    "20102": (34.0,  80.0),   # UW-Massage
-    "20601": (14.0,  35.0),   # KG-Gruppe
-    "21302": (10.0,  28.0),   # Elektrotherapie
+    "20106": (22.0,  55.0),   # KMT 20 min
+    "20107": (26.0,  65.0),   # BGM 20 min
+    "20102": (34.0,  80.0),   # UW-Massage 20 min
+    "20601": (14.0,  35.0),   # KG-Gruppe 45 min
+    "21302": (10.0,  28.0),   # Elektrotherapie 15 min
     "21303": (20.0,  55.0),   # Elektro bei Lähmungen
-    "21501": (18.0,  45.0),   # Fango
+    "21501": (18.0,  45.0),   # Fango/Wärmetherapie 20 min
     "21534": (13.0,  38.0),   # Kältetherapie
-    "20902": (35.0,  90.0),   # KG Bewegungsbad
+    "20902": (35.0,  90.0),   # KG Bewegungsbad Einzel 30 min
 }
 
 # ── BG surcharges (DGUV typical, varies by Träger) ────────────────────────────
 
 _BG_SURCHARGE_PCT: dict[str, float] = {
-    "20501": 18.0, "20511": 20.0, "21201": 22.0,
+    "20501": 18.0, "20710": 20.0, "20708": 20.0, "21201": 22.0,
     "20201": 18.0, "21110": 20.0, "20560": 18.0,
 }
 
@@ -928,7 +939,7 @@ class _GKVEngine:
                                    "Diagnose fehlt"))
 
         # ── 5. Befunddichte §106b — only meaningful for high-scrutiny positions ──
-        if position in ("21201", "20511", "20510") and len(obj) < 60:
+        if position in ("21201", "20710", "20708", "20709") and len(obj) < 60:
             audit.append(AuditItem("OBJ_DENSITY", "O-Feld Befunddichte",
                                    "FAIL", f"Nur {len(obj)} Zeichen — mindestens 60 für MT/ZNS erforderlich"))
             risk = "WARN"
@@ -1616,15 +1627,15 @@ _PROFILE_TO_DG: dict[str, str] = {
     "EX_KNIE":    "EX3",   # 20501 Knie
     "EX_HUefte":  "EX4",   # 20501 Hüfte
     "EX_SCHULTER":"EX2",   # 21201 Schulter (MT)
-    "EX_HAND":    "EX6",   # 21201 Hand/Handgelenk
-    "EX_HWS":     "WS1a",  # 21201 HWS
-    "EX_LWS":     "WS1b",  # 21201 LWS/ISG
+    "EX_HAND":    "EX6",   # 20501 Hand/Handgelenk (KG, optional MT §125 SGB V EX6)
+    "EX_HWS":     "WS1a",  # 21201 HWS (MT §125 SGB V WS1a)
+    "EX_LWS":     "WS1b",  # 21201 LWS/ISG (MT §125 SGB V WS1b)
     "MT":         "WS1b",  # 21201 Manuelle Therapie WS
     "LY":         "LY1",   # 20201 Lymphologie
-    "ZNS_ADULT":  "ZNS1",  # 20511 Neurologie adult
-    "ZNS_FAZ":    "ZNS1",  # 20511 Fazialisparese
+    "ZNS_ADULT":  "ZNS1",  # 20710 Neurologie adult (KG-ZNS Erwachsene §125 SGB V, ab 2021)
+    "ZNS_FAZ":    "ZNS5",  # 20710 Fazialisparese (HMK ZNS5 §125 SGB V)
     "AT":         "AT1",   # 20560 Atemtherapie
-    "RHEUM":      "EX1a",  # 20501 Rheuma (entzündlich)
+    "RHEUM":      "RH1",   # 20501 Rheumatologie (HMK RH1 §125 SGB V)
     "GEB":        "GEB2",  # 21904 Geburtshilfe / Rückbildung
     # ── Modality profiles — identified by transcript content, not ICD ─
     "KGG":    "KGG",   # 20507 KG am Gerät / MTT

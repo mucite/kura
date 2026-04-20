@@ -32,10 +32,23 @@ _GIST_URL = (
 _FALLBACK = {
     "version": "2026.0.0",
     "billing_codes": {
-        "KG": "20501", "KG_ZNS": "20710", "KG_Gruppe": "20601",
-        "MT": "21201",
-        "MLD_30": "20205", "MLD_45": "20201", "MLD_60": "20202",
-        "KPE_I": "21110", "KPE_II": "21111",
+        # §125 SGB V Anlage 2, GKV-Spitzenverband Rahmenempfehlungen 01.01.2026
+        "KG":        "20501",   # KG Einzelbehandlung 20 min (€29.63)
+        "KG_ZNS":    "20710",   # KG-ZNS Erwachsene (Bobath/PNF/Vojta) 45 min (€47.06, Optica 22 2026)
+        "KG_Gruppe": "20601",   # KG Gruppenbehandlung 45 min 2-5 Pat. (€13.26)
+        "KGG":       "20507",   # KG am Gerät / MTT 45 min (€55.81)
+        "MT":        "21201",   # Manuelle Therapie 20 min (€35.59)
+        "MLD_30":    "20205",   # MLD 30 min (€35.97)
+        "MLD_45":    "20201",   # MLD 45 min (€53.94)
+        "MLD_60":    "20202",   # MLD 60 min (€71.94)
+        "KPE_I":     "21110",   # KPE Phase I 60 min (€58.42)
+        "KPE_II":    "21111",   # KPE Phase II 30 min (€46.26)
+        "AT":        "20560",   # KG atemtherapeutisch 20 min (€29.63)
+        "Massage":   "20106",   # Klassische Massage (KMT) 20 min (€21.63)
+        "UWM":       "20102",   # Unterwasserdruckstrahl 20 min (€33.75)
+        "BB":        "20902",   # KG Bewegungsbad Einzel 30 min (€33.87)
+        "GEB_Vor":   "21901",   # Geburtsvorbereitung (€11.40)
+        "GEB_Rueck": "21904",   # Rückbildungsgymnastik (€11.40)
     },
     "context": {"audit_standard": "§ 106b SGB V", "special_focus": ["Allgemein"]},
     "billing_rules": {},
@@ -208,16 +221,27 @@ class ConfigManager:
                     "Diese ueberschreiben die GebueeTh-Orientierungswerte in der Kura-Ausgabe. "
                     "GKV-Festpreise (§125 SGB V) werden hierdurch NICHT veraendert."
                 ),
-                "20501": 0.0,   # KG Einzelbehandlung 20 min
-                "20511": 0.0,   # KG-ZNS 45 min
-                "20560": 0.0,   # KG atemtherapeutisch 20 min
-                "21200": 0.0,   # MT Erstbefundung 30 min
-                "21201": 0.0,   # MT Folgebehandlung 20 min
-                "20205": 0.0,   # MLD 30 min
-                "20201": 0.0,   # MLD 45 min
-                "20202": 0.0,   # MLD 60 min
-                "21110": 0.0,   # KPE Phase I 60 min
-                "21111": 0.0,   # KPE Phase II 30 min
+                # §125 SGB V — GKV-Festpreise als Orientierung (01.01.2026)
+                # PKV-Praxispreise liegen typisch 50-120% über GKV-Satz (GebüTh 2026)
+                "20501": 0.0,   # KG Einzelbehandlung 20 min (GKV: €29.63)
+                "20507": 0.0,   # KG am Gerät / MTT 45 min (GKV: €55.81)
+                "20710": 0.0,   # KG-ZNS Erwachsene (Bobath/PNF/Vojta) 45 min (GKV: €47.06)
+                "20708": 0.0,   # KG-ZNS Kinder 45 min (GKV: Tarifcode 22 2026)
+                "20560": 0.0,   # KG atemtherapeutisch 20 min (GKV: €29.63)
+                "21200": 0.0,   # MT Erstbefundung 30 min (GKV: €42.71)
+                "21201": 0.0,   # MT Folgebehandlung 20 min (GKV: €35.59)
+                "20205": 0.0,   # MLD 30 min (GKV: €35.97)
+                "20201": 0.0,   # MLD 45 min (GKV: €53.94)
+                "20202": 0.0,   # MLD 60 min (GKV: €71.94)
+                "21110": 0.0,   # KPE Phase I 60 min (GKV: €58.42)
+                "21111": 0.0,   # KPE Phase II 30 min (GKV: €46.26)
+                "20601": 0.0,   # KG Gruppenbehandlung 45 min (GKV: €13.26)
+                "20106": 0.0,   # Klassische Massage (KMT) 20 min (GKV: €21.63)
+                "20107": 0.0,   # Bindegewebsmassage (BGM) 20 min (GKV: €25.98)
+                "20102": 0.0,   # Unterwasserdruckstrahl 20 min (GKV: €33.75)
+                "20902": 0.0,   # KG Bewegungsbad Einzel 30 min (GKV: €33.87)
+                "21501": 0.0,   # Fango / Wärmetherapie 20 min (GKV: €16.16)
+                "21302": 0.0,   # Elektrotherapie 15 min (GKV: €8.43)
             }
         try:
             with open(_LOCAL_OVERRIDE, "w", encoding="utf-8") as f:

@@ -158,18 +158,23 @@ class KuraApp:
         self.seconds_elapsed = 0
         self._record_thread = None
         self._audio_chunks = []
+        self._models_ready = False
 
-        # Boot engine in background
+        # Boot engine in background (downloads models first if needed, then loads engine)
         threading.Thread(target=self._boot, daemon=True).start()
 
     # ── Boot ──────────────────────────────────────────────────────────────────
 
     def _boot(self):
         try:
-            self._post_event("status", "⏳ Modelle laden... bitte warten")
+            # Download models silently in background before loading engine
+            self._download_models_background()
+
+            self._post_event("status", "⏳ KI-Engine wird gestartet...")
             from physio_scribe_crossplatform import KuraEngine
             self.engine = KuraEngine()
-            self._post_event("status", f"✅ Kura Bereit (Lokal & DSGVO) — v{APP_VERSION}")
+            self._models_ready = True
+            self._post_event("status", f"✅ Kura Pro Bereit (Lokal & DSGVO) — v{APP_VERSION}")
             self._post_event("boot_done", None)
             threading.Thread(target=self._check_update_background, daemon=True).start()
         except MemoryError:
@@ -181,6 +186,49 @@ class KuraApp:
         except Exception as e:
             self._post_event("status", f"❌ Startfehler: {e}")
             self._post_event("error", str(e))
+
+    def _download_models_background(self):
+        """Download missing AI models silently. Runs inside the boot thread."""
+        try:
+            from core.model_downloader import (
+                check_model_exists, download_llm_model, download_whisper_model,
+            )
+        except Exception:
+            return  # downloader not available, engine will raise its own error
+
+        llm_ok = check_model_exists("llm")
+        whisper_ok = check_model_exists("whisper")
+        if llm_ok and whisper_ok:
+            return
+
+        # Verify internet before starting
+        import socket
+        try:
+            socket.create_connection(("huggingface.co", 443), timeout=10)
+        except Exception:
+            self._post_event(
+                "error",
+                "Keine Internetverbindung.\n\n"
+                "Kura Pro benötigt beim ersten Start eine Internetverbindung,\n"
+                "um die KI-Modelle herunterzuladen (~6 GB, einmalig).\n\n"
+                "Bitte Verbindung herstellen und Kura Pro neu starten.",
+            )
+            return
+
+        self._post_event("dl_start", None)
+
+        if not llm_ok:
+            self._post_event("status", "⬇ LLM-Modell wird heruntergeladen (~4.9 GB)...")
+            self._post_event("dl_progress", 0.05)
+            download_llm_model()
+            self._post_event("dl_progress", 0.6)
+
+        if not whisper_ok:
+            self._post_event("status", "⬇ Whisper-Modell wird heruntergeladen (~1.5 GB)...")
+            download_whisper_model()
+            self._post_event("dl_progress", 0.95)
+
+        self._post_event("dl_done", None)
 
     def _post_event(self, event_type, value):
         """Thread-safe event posting to the main window."""
@@ -199,6 +247,21 @@ class KuraApp:
             new_text = '\n'.join(lines) + '\n' + value
             self.output_text.delete("1.0", "end")
             self.output_text.insert("1.0", new_text)
+        elif event_type == "dl_start":
+            if hasattr(self, "dl_bar"):
+                self.dl_bar.configure(mode="indeterminate")
+                self.dl_bar.pack(fill="x", padx=10, pady=(0, 2))
+                self.dl_bar.start()
+        elif event_type == "dl_progress":
+            if hasattr(self, "dl_bar"):
+                self.dl_bar.stop()
+                self.dl_bar.configure(mode="determinate")
+                self.dl_bar.set(float(value))
+        elif event_type == "dl_done":
+            if hasattr(self, "dl_bar"):
+                self.dl_bar.stop()
+                self.dl_bar.set(1.0)
+                self.root.after(1500, self.dl_bar.pack_forget)
         elif event_type == "boot_done":
             self.output_text.delete("1.0", "end")
             self.output_text.insert("1.0", f"✅ KI-Modelle geladen. Kura v{APP_VERSION} ist einsatzbereit.\n")
@@ -374,20 +437,14 @@ class KuraApp:
             button_frame.grid_columnconfigure(0, weight=1)
             button_frame.grid_columnconfigure(1, weight=1)
 
-            def open_upgrade():
-                webbrowser.open("https://kura-medical.de/#preis")
-                dialog.destroy()
-            
-            upgrade_btn = ctk.CTkButton(
+            # Purchase info — plain text only (no clickable external link per Store policy)
+            buy_label = ctk.CTkLabel(
                 button_frame,
-                text="🚀 Jetzt upgraden",
-                command=open_upgrade,
-                fg_color="#28a745",
-                hover_color="#218838",
-                font=ctk.CTkFont(size=15, weight="bold"),
-                height=45
+                text="Lizenz kaufen: kura-medical.de",
+                font=ctk.CTkFont(size=13),
+                text_color="#aaaaaa"
             )
-            upgrade_btn.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+            buy_label.grid(row=0, column=0, padx=(0, 5), sticky="ew")
             
             continue_btn = ctk.CTkButton(
                 button_frame,
@@ -418,7 +475,7 @@ class KuraApp:
                 "• 79 Abrechnungsziffern\n"
                 "• ICD-spezifische Regeln\n"
                 "• Automatische Updates\n\n"
-                "https://kura-medical.de/#preis"
+                "kura-medical.de"
             )
 
     # ── Recording ─────────────────────────────────────────────────────────────
@@ -439,7 +496,16 @@ class KuraApp:
             )
 
         if not self.engine:
-            messagebox.showerror("Kura", "KI-Modelle werden noch geladen. Bitte warten.")
+            if not self._models_ready:
+                messagebox.showinfo(
+                    "Kura Pro — KI-Modelle werden geladen",
+                    "Die KI-Modelle werden gerade im Hintergrund heruntergeladen.\n\n"
+                    "Dieser Vorgang dauert beim ersten Start 10–30 Minuten.\n"
+                    "Den Fortschritt sehen Sie in der Statusleiste unten.\n\n"
+                    "Bitte warten Sie, bis die Statusleiste '✅ Kura Pro Bereit' anzeigt."
+                )
+            else:
+                messagebox.showerror("Kura Pro", "KI-Engine wird noch gestartet. Bitte einen Moment warten.")
             return
 
         patient = self.patient_entry.get().strip()
@@ -1312,16 +1378,18 @@ class KuraApp:
             else:
                 messagebox.showerror("Aktivierung fehlgeschlagen", msg)
 
-        def on_buy():
-            webbrowser.open("https://www.checkout-ds24.com/product/681469")
+        # Purchase info — plain text only (no clickable external link per Store policy)
+        info_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        info_frame.pack(pady=(0, 4))
+        ctk.CTkLabel(info_frame,
+                     text="Lizenz kaufen: kura-medical.de",
+                     font=("Arial", 11), text_color="#aaaaaa").pack()
 
         button_frame = ctk.CTkFrame(dialog)
         button_frame.pack(pady=10)
 
         ctk.CTkButton(button_frame, text="Aktivieren", command=on_activate,
                      fg_color="#1976d2", width=140).pack(side="left", padx=5)
-        ctk.CTkButton(button_frame, text="Jetzt kaufen", command=on_buy,
-                     fg_color="#388e3c", width=140).pack(side="left", padx=5)
         ctk.CTkButton(button_frame, text="Abbrechen", command=dialog.destroy,
                      fg_color="#757575", width=120).pack(side="left", padx=5)
 
@@ -1521,6 +1589,11 @@ class KuraApp:
                                          font=("Courier New", 13))
         self.output_text.pack(fill="both", expand=True, padx=5, pady=5)
 
+        # Download progress bar (hidden until a background model download starts)
+        self.dl_bar = ctk.CTkProgressBar(self.root, height=6,
+                                          progress_color="#28a745",
+                                          fg_color="#2b2b2b")
+
         # Status bar
         status_frame = ctk.CTkFrame(self.root)
         status_frame.pack(fill="x", padx=10, pady=10)
@@ -1542,35 +1615,7 @@ if __name__ == "__main__":
     # ══════════════════════════════════════════════════════════════════════
     multiprocessing.freeze_support()
     
-    # ══════════════════════════════════════════════════════════════════════
-    # CRITICAL: Check for models BEFORE starting the main app
-    # If models are missing, show download dialog (GUI)
-    # ══════════════════════════════════════════════════════════════════════
-    try:
-        from core.model_download_dialog import show_download_dialog_if_needed
-
-        print("Checking if AI models need to be downloaded...")
-        if not show_download_dialog_if_needed():
-            print("Model download failed or was cancelled - exiting")
-            messagebox.showerror(
-                "Kura Error",
-                "AI models could not be downloaded.\n\n"
-                "Please ensure you have:\n"
-                "1. Active internet connection\n"
-                "2. At least 8 GB free disk space\n"
-                "3. Permission to download files\n\n"
-                "Kura will now exit."
-            )
-            sys.exit(1)
-
-        print("✅ Models ready - starting Kura...")
-    except Exception as e:
-        print(f"Error checking models: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        # Continue anyway - the engine will handle missing models
-
-    # Start the main app
+    # Start immediately — models download silently in background inside KuraApp._boot()
     app = KuraApp()
     app.run()
 

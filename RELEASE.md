@@ -90,7 +90,7 @@ git push origin main --tags
 
 ### macOS Build
 
-**Requirements**: 
+**Requirements**:
 - PyInstaller: `pip install pyinstaller`
 - create-dmg: `brew install create-dmg`
 
@@ -106,7 +106,7 @@ cd macos
 
 **Time**: 10-15 minutes
 
-**⚠️ GitHub has a 2GB limit**: Host the DMG externally (Google Drive, AWS S3, etc.) and link to it in GitHub release notes.
+**⚠️ GitHub has a 2 GB limit**: Host the DMG externally (Google Drive, AWS S3, etc.) and link to it in GitHub release notes.
 
 ---
 
@@ -131,49 +131,51 @@ build_release.bat v2026
 
 ## 📤 Upload to GitHub
 
-### 1. Host macOS DMG Externally
+### 1. Host the macOS DMG externally
 
-Since the macOS DMG (~3.2GB) exceeds GitHub's 2GB limit, host it externally:
+The macOS DMG (~3.2 GB) exceeds GitHub's 2 GB limit, so host it externally:
 
-**Free Options**:
-- **Google Drive** - Create shareable link
-- **Dropbox** - Public download link
-- **MEGA** - 20GB free storage
+**Free options**:
+- **Google Drive** — create shareable link
+- **Dropbox** — public download link
+- **MEGA** — 20 GB free storage
 
-**Professional Options**:
-- **AWS S3** - ~$0.08/GB/month
-- **DigitalOcean Spaces** - $5/month (250GB included)
-- **Cloudflare R2** - Free egress
+**Professional options**:
+- **AWS S3** — ~$0.08/GB/month
+- **DigitalOcean Spaces** — $5/month (250 GB included)
+- **Cloudflare R2** — free egress
 
 **Example with Google Drive**:
 1. Upload `Kura_macOS_v2026.dmg` to Google Drive
 2. Right-click → Share → Copy link
-3. Change link to direct download format
-4. Use this link in GitHub release notes
+3. Convert the link to direct-download format
+4. Use this link in the GitHub release notes
 
 ### 2. Navigate to GitHub Releases
 
 https://github.com/mucite/kura/releases/new
 
-### 3. Create Release
+### 3. Create the release
 
 - **Tag**: `v2026`
 - **Title**: `Kura Medical v2026`
-- **Description**: Copy template below (update with your external DMG link)
+- **Description**: copy the template below (update with your external DMG link)
 
-### 4. Upload Windows Files to GitHub
+### 4. Upload Windows files to GitHub
 
-Drag and drop Windows files into "Attach binaries":
-- ✅ Kura_Windows_v2026.zip (~2GB - fits on GitHub)
-- ✅ Kura_Windows_v2026.zip.sha256
+Drag and drop the Windows files into "Attach binaries":
+- ✅ `Kura_Windows_v2026.zip` (~2 GB — fits on GitHub)
+- ✅ `Kura_Windows_v2026.zip.sha256`
 
 ### 5. Publish
 
-Click "Publish release"
+Click "Publish release".
 
 ---
 
-## 📄 GitHub Release Description Template
+## 📄 GitHub Release Description Template (German — customer-facing)
+
+> This block is intentionally kept in German because it is shown to German customers on the GitHub release page. Do not translate it unless you're publishing an English version of the product.
 
 ```markdown
 ## 🏥 Kura Medical v2026
@@ -282,8 +284,9 @@ Vergleichen Sie die Ausgabe mit den `.sha256` Dateien.
 
 ## 💎 Kura Pro
 
-- **39€/Monat** – unbegrenzte Befunde
-- Jederzeit kündbar
+- **299 € einmalig** – Dauerlizenz, unbegrenzte Befunde, kein Abo
+- Alle Updates bis **31.12.2027** inklusive (GKV-Preise, HMK, ICD-10-GM)
+- Danach optional **79 €/Jahr** für weitere Regel-Updates
 - [Lizenz kaufen →](https://kura.lemonsqueezy.com/checkout/buy/2400563b-a13a-4e42-b734-d79122e7ec92)
 
 ---
@@ -296,8 +299,8 @@ Vergleichen Sie die Ausgabe mit den `.sha256` Dateien.
 
 ---
 
-**Release Date**: March 29, 2026  
-**Build**: Manual  
+**Release Date**: March 29, 2026
+**Build**: Manual
 **Compliance**: DSGVO/GDPR, § 84 SGB V
 ```
 
@@ -315,7 +318,7 @@ Before uploading:
 
 ---
 
-## 🔗 Download Links (After Publishing)
+## 🔗 Download Links (after publishing)
 
 **macOS**:
 ```
@@ -333,9 +336,9 @@ https://github.com/mucite/kura/releases/download/v2026/Kura_Windows_v2026.zip
 
 To release a new version (e.g., v2027):
 
-1. Update version in scripts if needed
+1. Update the version in scripts if needed
 2. Build on both platforms
-3. Create new GitHub release
+3. Create a new GitHub release
 4. Upload new files
 5. Publish
 
@@ -359,13 +362,13 @@ pip install -r requirements-windows.txt
 ### DMG creation fails
 - Ensure `create-dmg` is installed
 - Check that Kura.app was built successfully
-- Verify icon file exists: `assets/stethoscope.icns`
+- Verify the icon file exists: `assets/stethoscope.icns`
 
 ### macOS DMG too large for GitHub
-- **Solution**: Host externally (Google Drive, AWS S3, etc.)
+- **Solution**: host externally (Google Drive, AWS S3, etc.)
 - Link to it in GitHub release notes
-- Upload checksum file to GitHub for verification
-- Windows ZIP usually fits within 2GB limit
+- Upload the checksum file to GitHub for verification
+- Windows ZIP usually fits within the 2 GB limit
 
 ---
 
@@ -373,16 +376,15 @@ pip install -r requirements-windows.txt
 
 **What stays private**:
 - ✅ All source code (.py files)
-- ✅ .env file (secrets, API keys)
+- ✅ `.env` file (secrets, API keys)
 - ✅ Development files
 - ✅ Build configurations
 
-**What gets public**:
+**What gets published**:
 - ✅ Compiled executables only (DMG/ZIP)
 - ✅ Checksums (.sha256)
 - ✅ Release notes
 
 ---
 
-**No CI/CD • No Source Code Upload • Just Executables**
-
+**No CI/CD • No source code upload • Just executables**

@@ -1039,18 +1039,18 @@ class KuraApp(rumps.App):
         if reason == "offline_grace_expired":
             return (
                 "Kura Pro — Keine Verbindung",
-                "Ihr Abonnement konnte 3 Tage lang nicht geprüft werden.\n\n"
+                "Ihre Lizenz konnte 3 Tage lang nicht verifiziert werden.\n\n"
                 "Bitte stellen Sie eine Internetverbindung her, damit Kura Ihre "
                 "Lizenz mit Digistore24 abgleichen kann.\n\n"
                 "Sobald Sie wieder online sind, startet Kura automatisch."
             )
-        # subscription_expired (DS24 rejected) or any other reason
+        # subscription_expired (DS24 rejected — refund, chargeback, or revoked)
         return (
-            "Abonnement abgelaufen",
-            "Ihr Kura Pro Abonnement ist abgelaufen oder wurde storniert.\n\n"
-            "Bitte erneuern Sie Ihr Abonnement auf Digistore24 und aktivieren "
-            "Sie Ihren neuen Lizenzschlüssel.\n\n"
-            "Eine Internetverbindung ist für die Aktivierung erforderlich."
+            "Lizenz ungültig",
+            "Ihr Lizenzschlüssel wurde von Digistore24 nicht bestätigt.\n\n"
+            "Mögliche Gründe: Rückerstattung, Rückbuchung oder Widerruf "
+            "der Lizenz.\n\n"
+            "Bei Fragen wenden Sie sich bitte an support@kura-medical.de."
         )
 
     # --- Start Session ---

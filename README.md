@@ -51,7 +51,7 @@ cp .env.template .env              # fill in HF_TOKEN and DS24_API_KEY
 | ICD-10-GM coding | Automatic extraction + Diagnosegruppe mapping |
 | 100% local | No data leaves the device — GDPR / DSGVO compliant |
 | Multi-platform | macOS (Metal) and Windows (CUDA / CPU) |
-| License management | Trial (5 reports) · Pro (€49/month) via Digistore24 |
+| License management | Trial (5 reports) · Pro (€299 one-time — lifetime license; updates through 31.12.2027 included, then optional €79/year) via Digistore24 |
 | PDF export | Compliant SOAP note PDFs ready for file |
 | Annual pricing | GKV prices loaded from `data/gkv_prices_YYYY.json` |
 
@@ -179,7 +179,7 @@ Pricing is read from `data/gkv_prices_YYYY.json`. The current year is loaded aut
 | Billing audit | Full | Full |
 | Custom ICD-10 rules | — | Yes |
 | Practice config | — | Yes |
-| Price | Free | €49/month |
+| Price | Free | €299 one-time · lifetime license · updates through 31.12.2027 included · then optional €79/year |
 
 ---
 
@@ -392,8 +392,8 @@ medic/
 
 ## License
 
-Commercial Software — Proprietary License  
-© 2026 Kura Medical GmbH. All rights reserved.  
+Commercial Software — Proprietary License
+© 2026 Kura Medical GmbH. All rights reserved.
 Sales & licensing: sales@kura-medical.de
 
 ---

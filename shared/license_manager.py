@@ -9,6 +9,8 @@ Flow:
   5. Workstation binding: hardware_id = SHA-256(MAC + serial)[:16]
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging

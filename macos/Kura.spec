@@ -98,4 +98,23 @@ app = BUNDLE(
     name='Kura.app',
     icon='../assets/stethoscope.icns',
     bundle_identifier='de.kura-medical.kura',
+    info_plist={
+        'CFBundleName': 'Kura Medical',
+        'CFBundleDisplayName': 'Kura',
+        'CFBundleVersion': '2026.1.0',
+        'CFBundleShortVersionString': '2026.1',
+        'NSHighResolutionCapable': True,
+        'LSUIElement': True,
+        'LSMinimumSystemVersion': '11.0',
+        'NSHumanReadableCopyright': '© 2026 Kura Medical. All rights reserved.',
+        'NSMicrophoneUsageDescription': (
+            'Kura benötigt Zugriff auf das Mikrofon, um Ihre Therapiesitzungen '
+            'aufzuzeichnen und SOAP-Befunde zu erstellen. Alle Aufnahmen werden '
+            'lokal verarbeitet und automatisch gelöscht (DSGVO-konform).'
+        ),
+        'NSSpeechRecognitionUsageDescription': (
+            'Kura verwendet Spracherkennung, um Ihre Therapiesitzungen in '
+            'SOAP-Befunde umzuwandeln. Die Verarbeitung erfolgt 100% lokal auf Ihrem Mac.'
+        ),
+    },
 )

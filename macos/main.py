@@ -27,6 +27,114 @@ def _app_deactivate():
     """No-op: activation policy is never changed, so nothing to restore."""
     pass
 
+
+_TEXTFIELD_CLASSES = {}
+
+
+def _textfield_classes():
+    """NSTextField subclasses that:
+      - handle Cmd+C/V/X/A/Z inside an NSAlert accessory view (the alert's
+        window doesn't load the standard Edit menu)
+      - optionally force-uppercase as the user types (license key field)
+    Returns (EditableTextField, UppercaseTextField)."""
+    if _TEXTFIELD_CLASSES:
+        return _TEXTFIELD_CLASSES["editable"], _TEXTFIELD_CLASSES["upper"]
+
+    import objc
+
+    class EditableTextField(_AK.NSTextField):
+        def performKeyEquivalent_(self, event):
+            if event.modifierFlags() & _AK.NSEventModifierFlagCommand:
+                ch = event.charactersIgnoringModifiers().lower()
+                action = {
+                    "x": "cut:", "c": "copy:", "v": "paste:",
+                    "a": "selectAll:", "z": "undo:",
+                }.get(ch)
+                if action and _AK.NSApp.sendAction_to_from_(action, None, self):
+                    return True
+            return objc.super(EditableTextField, self).performKeyEquivalent_(event)
+
+    class UppercaseTextField(EditableTextField):
+        def textDidChange_(self, notification):
+            editor = notification.object()
+            if editor is not None:
+                current = str(editor.string())
+                upper = current.upper()
+                if upper != current:
+                    sel = editor.selectedRange()
+                    editor.setString_(upper)
+                    editor.setSelectedRange_(sel)
+            objc.super(UppercaseTextField, self).textDidChange_(notification)
+
+    _TEXTFIELD_CLASSES["editable"] = EditableTextField
+    _TEXTFIELD_CLASSES["upper"] = UppercaseTextField
+    return EditableTextField, UppercaseTextField
+
+
+def _prompt_license_credentials():
+    """
+    Native two-field activation dialog.
+    Returns ("activate", license_key, bestellnummer)
+          | ("buy", "", "")
+          | ("cancel", "", "")
+    """
+    from Foundation import NSMakeRect
+
+    width, field_h, label_h, gap = 380, 24, 16, 6
+    total_h = (label_h + field_h) * 2 + gap
+
+    container = _AK.NSView.alloc().initWithFrame_(NSMakeRect(0, 0, width, total_h))
+    EditableTF, UppercaseTF = _textfield_classes()
+
+    def _label(text, y):
+        lbl = _AK.NSTextField.alloc().initWithFrame_(NSMakeRect(0, y, width, label_h))
+        lbl.setStringValue_(text)
+        lbl.setBezeled_(False)
+        lbl.setDrawsBackground_(False)
+        lbl.setEditable_(False)
+        lbl.setSelectable_(False)
+        lbl.setFont_(_AK.NSFont.systemFontOfSize_(11))
+        return lbl
+
+    def _field(cls, placeholder, y):
+        f = cls.alloc().initWithFrame_(NSMakeRect(0, y, width, field_h))
+        f.setPlaceholderString_(placeholder)
+        f.setFont_(_AK.NSFont.systemFontOfSize_(13))
+        return f
+
+    bestell_y = 0
+    bestell_lbl_y = bestell_y + field_h
+    key_y = bestell_lbl_y + label_h + gap
+    key_lbl_y = key_y + field_h
+
+    bestell_field = _field(EditableTF, "z. B. 4CMF7JQ4", bestell_y)
+    bestell_label = _label("Bestell-ID (optional)", bestell_lbl_y)
+    key_field = _field(UppercaseTF, "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX", key_y)
+    key_label = _label("Lizenzschlüssel", key_lbl_y)
+
+    for v in (bestell_field, bestell_label, key_field, key_label):
+        container.addSubview_(v)
+
+    alert = _AK.NSAlert.alloc().init()
+    alert.setMessageText_("Kura Pro — Aktivierung")
+    alert.setInformativeText_(
+        "Lizenzschlüssel aus der Kaufbestätigung kopieren.\n"
+        "Bestell-ID erhöht die Sicherheit der Validierung."
+    )
+    alert.addButtonWithTitle_("✓  Aktivieren")
+    alert.addButtonWithTitle_("Abbrechen")
+    alert.addButtonWithTitle_("Jetzt kaufen")
+    alert.setAccessoryView_(container)
+    alert.window().setInitialFirstResponder_(key_field)
+
+    response = alert.runModal()
+
+    if response == _AK.NSAlertFirstButtonReturn:
+        return ("activate", str(key_field.stringValue()), str(bestell_field.stringValue()))
+    if response == _AK.NSAlertThirdButtonReturn:
+        return ("buy", "", "")
+    return ("cancel", "", "")
+
 # --- Crash Logging Setup ---
 def setup_crash_logging():
     """Setup crash logging to help diagnose issues"""
@@ -131,10 +239,7 @@ if not os.path.exists(user_env_file):
                 if f is not None:
                     f.write("# Kura Configuration\n")
                     f.write("# Get HF_TOKEN at: https://huggingface.co/settings/tokens\n")
-                    f.write("HF_TOKEN=your_token_here\n\n")
-                    f.write("# Digistore24 License API\n")
-                    f.write("DS24_API_KEY=\n")
-                    f.write("DS24_PRODUCT_ID=\n")
+                    f.write("HF_TOKEN=your_token_here\n")
             print(f"📝 Created template .env: {user_env_file}")
             print(f"⚠️  Configure HF_TOKEN for faster downloads")
         except Exception as env_err:
@@ -356,6 +461,21 @@ class KuraApp(rumps.App):
         self._item_gist_override.set_callback(
             self.open_gist_override if is_pro else self._config_locked
         )
+
+        # Hide the [DEV] Reset Trial item once Pro is active — resetting trial
+        # state is meaningless when there's a paid license in place.
+        dev_item = getattr(self, "_item_dev_reset", None)
+        if dev_item is not None:
+            try:
+                dev_item._menuitem.setHidden_(is_pro)
+            except Exception:
+                pass
+
+        # Same for the deactivate item — only meaningful when Pro is active.
+        try:
+            self._item_deact._menuitem.setHidden_(not is_pro)
+        except Exception:
+            pass
 
 
     def _set_recording_state(self, recording: bool):
@@ -893,10 +1013,10 @@ class KuraApp(rumps.App):
         _app_activate()
         rumps.alert(
             title="Kura Pro erforderlich",
-            message="Praxis-Einstellungen sind nur mit einem aktiven Kura Pro Abo verfuegbar.\n\n"
-                    "Aktivieren Sie Ihr Abo, um Praxisname, Betriebsstaettennummer\n"
-                    "und individuelle Abrechnungsregeln zu konfigurieren.",
-            ok="Abo aktivieren",
+            message="Praxis-Einstellungen sind nur mit einer aktiven Kura Pro Lizenz verfuegbar.\n\n"
+                    "Aktivieren Sie Ihre Dauerlizenz (299 € einmalig), um Praxisname,\n"
+                    "Betriebsstaettennummer und individuelle Abrechnungsregeln zu konfigurieren.",
+            ok="Lizenz aktivieren",
         )
         _app_deactivate()
         self.activate_license(None)
@@ -1029,6 +1149,13 @@ class KuraApp(rumps.App):
     def _license_block_message(self) -> tuple[str, str]:
         """Return (title, message) based on block_reason."""
         reason = self.license_mgr.block_reason
+        if reason == "deactivated":
+            return (
+                "Lizenz deaktiviert",
+                "Kura Pro wurde auf diesem Gerät deaktiviert.\n\n"
+                "Aktivieren Sie Ihren Lizenzschlüssel erneut, um weiter zu arbeiten.\n"
+                "Eine Internetverbindung ist für die Aktivierung erforderlich."
+            )
         if reason == "trial_expired":
             return (
                 "Testphase abgelaufen",
@@ -1432,8 +1559,9 @@ class KuraApp(rumps.App):
     # --- License Upgrade ---
     def show_upgrade_dialog(self):
         import webbrowser
-        msg = "Ihre Testphase ist beendet.\nAktivieren Sie Kura Pro fuer unbegrenzte Berichte."
-        if rumps.alert("Kura Pro", msg, ok="Abo starten", cancel="Spaeter") == 1:
+        msg = ("Ihre Testphase ist beendet.\n"
+               "Kura Pro: 299 € einmalig — Dauerlizenz, kein Abo, unbegrenzte Berichte.")
+        if rumps.alert("Kura Pro", msg, ok="Jetzt kaufen", cancel="Spaeter") == 1:
             webbrowser.open("https://kura-medical.de/#pricing")
             self.activate_license(None)
 
@@ -1441,29 +1569,16 @@ class KuraApp(rumps.App):
     def activate_license(self, _):
         _app_activate()
         try:
-            win = rumps.Window(
-                message=(
-                    "Lizenzschlüssel eingeben:\n\n"
-                    "Format:  XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX\n"
-                    "Den Schlüssel direkt aus der Kaufbestätigung kopieren."
-                ),
-                title="Kura Pro — Aktivierung",
-                default_text="",
-                ok="✓  Aktivieren",
-                cancel="Abbrechen",
-                dimensions=(500, 24),
-            )
-            win.add_button("Jetzt kaufen")
-            res = win.run()
+            action, key, bestell = _prompt_license_credentials()
 
-            if res.clicked == 1:  # Aktivieren
-                ok, msg = self.license_mgr.activate(res.text.strip())
+            if action == "activate":
+                ok, msg = self.license_mgr.activate(key.strip(), bestellnummer=bestell.strip() or None)
                 if ok:
                     rumps.alert("Aktivierung erfolgreich", msg)
                     self.update_license_display()
                 else:
                     rumps.alert("Aktivierung fehlgeschlagen", msg)
-            elif res.clicked == 2:  # Jetzt kaufen
+            elif action == "buy":
                 import webbrowser
                 webbrowser.open("https://www.checkout-ds24.com/product/681469")
         finally:

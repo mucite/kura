@@ -80,7 +80,7 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
+    codesign_identity='Developer ID Application: Musie Kebede Gizaw (NY589846RW)',
     entitlements_file='entitlements.plist',
     icon=['../assets/stethoscope.icns'],
 )

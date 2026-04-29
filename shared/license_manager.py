@@ -27,14 +27,14 @@ fix_windows_encoding()
 
 logger = logging.getLogger("kura.license")
 
-# ── Digistore24 REST API ──────────────────────────────────────────────────────
-# Docs: https://www.digistore24.com/app/tools.api
-# All calls: GET https://api.digistore24.com/api/call/{SELLER_API_KEY}/json/{action}
-_DS24_BASE = "https://api.digistore24.com/api/call"  # append /{action}, auth via X-DS-API-KEY header
-
-# Loaded from environment — set in .env or system env vars
-_DS24_API_KEY   = os.environ.get("DS24_API_KEY", "")
-_DS24_PRODUCT   = os.environ.get("DS24_PRODUCT_ID", "")
+# ── Kura License API ──────────────────────────────────────────────────────────
+# The desktop app calls our own backend; the backend holds DS24_API_KEY and
+# proxies to Digistore24. Customers never see the Digistore24 API key.
+# Override with KURA_LICENSE_API for staging/local testing.
+_LICENSE_API = os.environ.get(
+    "KURA_LICENSE_API",
+    "https://kura-medical.de/api/license/check",
+)
 
 _REVALIDATE_HOURS = 12    # re-ping DS24 every 12h
 _GRACE_DAYS       = 3     # offline grace period
@@ -70,6 +70,7 @@ class LicenseManager:
 
         self.license_file     = os.path.join(data_dir, "license.json")
         self.trial_file       = os.path.join(data_dir, "trial.dat")
+        self.deactivated_flag = os.path.join(data_dir, "deactivated.flag")
         self.hardware_id_file = os.path.expanduser("~/.kura_hardware")
         self.gist_cache_file  = os.path.join(data_dir, "gist_config_cache.json")
 
@@ -92,7 +93,8 @@ class LicenseManager:
     def block_reason(self) -> str:
         """
         Human-readable reason why verify_locally() returned False.
-        One of: 'trial_expired' | 'subscription_expired' | 'offline_grace_expired' | ''
+        One of: 'deactivated' | 'trial_expired' | 'subscription_expired' |
+                'offline_grace_expired' | 'license_revoked' | 'payment_failed' | ''
         """
         return self._block_reason
 
@@ -218,68 +220,57 @@ class LicenseManager:
         except Exception as e:
             print(f"License save error: {e}")
 
-    # ── Digistore24 API call ──────────────────────────────────────────────────
+    # ── License API call (proxied through our backend) ────────────────────────
 
-    def _ds24_get(self, action: str, params: dict = None, timeout: int = 10):
+    def _check_license_remote(
+        self,
+        license_key: str,
+        bestellnummer: str | None = None,
+        timeout: int = 10,
+    ) -> tuple[bool, str]:
         """
-        GET https://api.digistore24.com/api/call/{action}
-        API key passed via X-DS-API-KEY header.
-        Docs: https://dev.digistore24.com/hc/en-us/articles/32479630493585-API-basics
-        Raises RuntimeError if DS24_API_KEY is not configured (treated as offline).
+        Call our backend, which proxies to Digistore24 server-side.
+
+        Mirrors the working Windows flow: backend forwards both license_key
+        and purchase_id (Bestellnummer) plus the X-DS-API-KEY header to
+        api.digistore24.com/api/call/validateLicenseKey.
+
+        Returns: (is_valid, reason_or_status)
+          valid:   True,  "active"
+          invalid: False, "license_invalid" | "subscription_cancelled" |
+                          "payment_refunded" | "payment_chargeback" |
+                          "invalid_format"
+        Raises RuntimeError on network/server failure (caller treats as offline).
         """
-        api_key = os.environ.get("DS24_API_KEY", "") or _DS24_API_KEY
-        if not api_key:
-            raise RuntimeError("DS24_API_KEY not configured — treating as offline")
-        url = f"{_DS24_BASE}/{action}"
-        headers = {"X-DS-API-KEY": api_key}
-        return requests.get(url, params=params or {}, headers=headers, timeout=timeout)
+        payload = {
+            "license_key": license_key,
+            "hardware_id": self.hardware_id,
+        }
+        if bestellnummer:
+            payload["bestellnummer"] = bestellnummer
 
-    def _check_payment_status(self, license_key: str) -> tuple[bool, str]:
-        """
-        Check if subscription is actually paid via Digistore24 API.
-        Returns: (is_paid, status_message)
+        try:
+            resp = requests.post(_LICENSE_API, json=payload, timeout=timeout)
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"License API unreachable: {e}")
 
-        Checks payment and subscription status to auto-revoke if:
-        - Subscription cancelled
-        - Payment refunded
-        - Chargeback filed
-        - Payment failed
+        if resp.status_code >= 500:
+            raise RuntimeError(f"License API server error: HTTP {resp.status_code}")
 
-        This eliminates need to ask customer for Hardware ID for revocation.
-        """
-        resp = self._ds24_get(
-            "validateLicenseKey",
-            {"license_key": license_key},
-            timeout=8
-        )
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception:
+            raise RuntimeError(f"License API invalid response: HTTP {resp.status_code}")
 
-        if resp.status_code == 200 and data.get("result") == "success":
-            # DS24 returns success - license exists
-            # Check additional payment/subscription metadata
-            payment_status = data.get("payment_status", "paid")
-            subscription_status = data.get("is_active", True)  # DS24 field name may vary
-
-            # If DS24 says success and subscription exists, it's paid
-            # (DS24 validateLicenseKey only returns success for active licenses)
-            return True, "active"
-        else:
-            # DS24 rejected - subscription cancelled, payment failed, or license invalid
-            error_msg = data.get("message", "unknown")
-
-            if "cancelled" in error_msg.lower():
-                return False, "subscription_cancelled"
-            elif "refund" in error_msg.lower():
-                return False, "payment_refunded"
-            elif "chargeback" in error_msg.lower():
-                return False, "payment_chargeback"
-            else:
-                return False, "license_invalid"
+        is_valid = bool(data.get("valid"))
+        reason = data.get("status") if is_valid else data.get("reason", "license_invalid")
+        return is_valid, reason or ("active" if is_valid else "license_invalid")
 
     # ── Activate ──────────────────────────────────────────────────────────────
 
-    def activate(self, license_key: str) -> tuple[bool, str]:
-        """Verify a Digistore24 serial/license key and store it locally."""
+    def activate(self, license_key: str, bestellnummer: str | None = None) -> tuple[bool, str]:
+        """Verify a Digistore24 serial/license key and store it locally.
+        Optionally pass `bestellnummer` (DS24 order number / purchase_id) for stricter validation."""
         key = license_key.strip().upper()
         # Normalize any dash variant (en-dash, em-dash, etc.) to ASCII hyphen
         key = re.sub(r'[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]', '-', key)
@@ -292,35 +283,35 @@ class LicenseManager:
                 "Bitte kopieren Sie den Schlüssel direkt aus Ihrer Kaufbestätigung."
             )
 
+        order_no = (bestellnummer or "").strip() or None
+
         try:
-            resp = self._ds24_get(
-                "validateLicenseKey",
-                {"purchase_id": key, "license_key": key},
-            )
-        except requests.exceptions.ConnectionError:
+            is_valid, reason = self._check_license_remote(key, bestellnummer=order_no)
+        except RuntimeError as e:
             return False, "Keine Internetverbindung. Bitte Netzwerk prüfen und erneut versuchen."
-        except Exception as e:
-            return False, f"Netzwerkfehler: {e}"
 
-        try:
-            data = resp.json()
-        except Exception:
-            return False, f"Ungültige Serverantwort (HTTP {resp.status_code})."
-
-        if resp.status_code == 200 and data.get("result") == "success":
-            self._save({
+        if is_valid:
+            entry = {
                 "key":          key,
                 "hardware_id":  self.hardware_id,
                 "mac":          self.mac_address,
                 "status":       "active",
                 "validated_at": datetime.now(timezone.utc).isoformat(),
                 "activated_at": datetime.now(timezone.utc).isoformat(),
-            })
+            }
+            if order_no:
+                entry["bestellnummer"] = order_no
+            self._save(entry)
+            try:
+                os.remove(self.deactivated_flag)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
             return True, "Kura Pro wurde erfolgreich aktiviert."
 
-        error = data.get("message") or data.get("error") or str(data)
-        print(f"DS24 activate failed {resp.status_code}: {resp.text}")
-        return False, f"Lizenzschlüssel ungültig oder nicht gefunden:\n{error}"
+        print(f"License activate rejected: {reason}")
+        return False, f"Lizenzschlüssel ungültig oder nicht gefunden:\n{reason}"
 
     # ── Validate ──────────────────────────────────────────────────────────────
 
@@ -334,11 +325,6 @@ class LicenseManager:
         if cache.get("hardware_id") != self.hardware_id:
             print("License: hardware mismatch — key belongs to a different workstation.")
             self._block_reason = "subscription_expired"
-            return False
-
-        # Check remote revocation list (Gist-based)
-        if self._check_gist_revocation():
-            self._block_reason = "license_revoked"
             return False
 
         last = cache.get("validated_at")
@@ -362,24 +348,25 @@ class LicenseManager:
                 last = None  # malformed date — force revalidation
 
         key = cache.get("key", "")
+        saved_order = cache.get("bestellnummer")
         try:
-            # Check payment status with Digistore24
-            # This auto-detects: cancelled subscriptions, chargebacks, refunds
-            is_paid, payment_status = self._check_payment_status(key)
-            
-            if not is_paid:
-                # Payment failed/cancelled/refunded - auto-revoke
-                print(f"License: payment status = {payment_status}")
+            # Re-check license + payment status via our backend (proxies DS24).
+            # Auto-detects: cancelled subscriptions, chargebacks, refunds.
+            is_valid, reason = self._check_license_remote(key, bestellnummer=saved_order)
+
+            if not is_valid:
+                # Payment failed/cancelled/refunded — auto-revoke
+                print(f"License: revoked, reason = {reason}")
                 cache["status"] = "revoked"
-                cache["revoked_reason"] = payment_status
+                cache["revoked_reason"] = reason
                 self._save(cache)
                 self._block_reason = "payment_failed"
                 return False
-            
-            # Payment OK - update validation timestamp
+
+            # Active — update validation timestamp
             cache["status"] = "active"
             cache["validated_at"] = datetime.now(timezone.utc).isoformat()
-            cache["last_payment_check"] = payment_status
+            cache["last_payment_check"] = reason
             self._save(cache)
             return True
 
@@ -417,6 +404,15 @@ class LicenseManager:
         except Exception:
             pass
         self._cache = None
+
+        # Drop a marker so verify_locally() can distinguish deactivation from
+        # natural trial expiry, and the trial pool can't be re-tapped.
+        try:
+            with open(self.deactivated_flag, "w") as f:
+                f.write(datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
+
         return True, (
             "Lizenz wurde von diesem Gerät entfernt.\n"
             "Sie können den Schlüssel jetzt auf einem anderen Gerät aktivieren."
@@ -487,6 +483,11 @@ class LicenseManager:
                 self._block_reason = ""
                 return True
             # block_reason already set inside validate()
+            return False
+        # No license file: prefer the explicit "deactivated" reason over generic
+        # trial expiry so the UI can show "you deactivated this seat" wording.
+        if os.path.exists(self.deactivated_flag):
+            self._block_reason = "deactivated"
             return False
         count = self.get_trial_count()
         if count < self.max_trials:

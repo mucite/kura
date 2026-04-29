@@ -12,6 +12,9 @@ VERSION="${1:-v2026}"
 DMG_NAME="Kura_Installer_${VERSION}.dmg"
 STAGING="dist/dmg_staging"
 
+SIGN_IDENTITY="Developer ID Application: Musie Kebede Gizaw (NY589846RW)"
+NOTARY_PROFILE="kura-notary"
+
 cd "$(dirname "$0")"
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
@@ -46,6 +49,15 @@ xattr -rd com.apple.quarantine "$STAGING/Install Kura.command" 2>/dev/null || tr
 # "downloaded from internet, are you sure?" prompt with a single [Open] click.
 echo "   ✅ Kura.app"
 echo "   ✅ Install Kura.command"
+
+echo ""
+echo "🔏 Code-signing Kura.app with hardened runtime..."
+codesign --deep --force --options runtime --timestamp \
+    --entitlements entitlements.plist \
+    --sign "$SIGN_IDENTITY" \
+    "$STAGING/Kura.app"
+codesign --verify --deep --strict --verbose=2 "$STAGING/Kura.app"
+echo "   ✅ Signed and verified"
 
 # ── Build DMG ─────────────────────────────────────────────────────────────────
 echo ""
@@ -84,4 +96,21 @@ while true; do
     attempt=$((attempt + 1))
 done
 
-echo "✅ Done: dist/${DMG_NAME}"
+echo "✅ DMG built: dist/${DMG_NAME}"
+
+# ── Notarize ──────────────────────────────────────────────────────────────────
+echo ""
+echo "📤 Submitting DMG to Apple notary service (typically 2–10 min)..."
+xcrun notarytool submit "dist/${DMG_NAME}" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --wait
+
+echo "📎 Stapling notarization ticket to DMG..."
+xcrun stapler staple "dist/${DMG_NAME}"
+
+echo ""
+echo "🔍 Gatekeeper verification:"
+spctl -a -vvv -t open --context context:primary-signature "dist/${DMG_NAME}" || true
+
+echo ""
+echo "✅ Notarized and stapled: dist/${DMG_NAME}"

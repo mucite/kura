@@ -128,8 +128,6 @@ if not os.path.exists(user_env_file):
                     f.write("# Kura Configuration\n")
                     f.write("# HF_TOKEN not bundled - downloads will be slower\n")
                     f.write("HF_TOKEN=your_token_here\n")
-                    f.write("DS24_API_KEY=\n")
-                    f.write("DS24_PRODUCT_ID=\n")
             print("⚠️  Created default .env - configure HF_TOKEN for faster downloads")
         except Exception as env_err:
             print(f"Error creating .env file: {env_err}")
@@ -1303,6 +1301,13 @@ class KuraApp:
     def _license_block_message(self) -> tuple[str, str]:
         """Return (title, message) based on block_reason."""
         reason = self.license_mgr.block_reason
+        if reason == "deactivated":
+            return (
+                "Lizenz deaktiviert",
+                "Kura Pro wurde auf diesem Gerät deaktiviert.\n\n"
+                "Aktivieren Sie Ihren Lizenzschlüssel erneut, um weiter zu arbeiten.\n\n"
+                "Eine Internetverbindung ist für die Aktivierung erforderlich."
+            )
         if reason == "trial_expired":
             return (
                 "Testphase abgelaufen",
@@ -1335,42 +1340,47 @@ class KuraApp:
         """License activation dialog."""
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("Kura Pro aktivieren")
-        dialog.geometry("560x260")
+        dialog.geometry("560x340")
         dialog.transient(self.root)
         dialog.grab_set()
 
-        ctk.CTkLabel(dialog, text="Lizenzschlüssel aus der Kaufbestätigung eingeben:",
-                    font=("Arial", 12)).pack(pady=(20, 4))
+        ctk.CTkLabel(dialog, text="Lizenzschlüssel",
+                    font=("Arial", 12)).pack(pady=(18, 2))
         ctk.CTkLabel(dialog, text="Format: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
-                    font=("Arial", 10), text_color="#888888").pack(pady=(0, 6))
+                    font=("Arial", 10), text_color="#888888").pack(pady=(0, 4))
 
         key_var = ctk.StringVar()
         key_entry = ctk.CTkEntry(dialog, width=500, font=("Courier New", 12),
                                  textvariable=key_var, placeholder_text="z.B. RMEL3-3UDDC-YHJHF-C7TH9-QRYJK-FHZSV-KU26F-NS3CC")
-        key_entry.pack(pady=6)
+        key_entry.pack(pady=4)
 
         def _on_key_change(*_):
             raw = key_var.get().upper().replace(" ", "")
-            # Strip all hyphens, keep only alphanumeric
             chars = [c for c in raw if c.isalnum()][:40]
-            # Re-insert hyphens every 5 chars
             groups = [(''.join(chars[i:i+5])) for i in range(0, len(chars), 5)]
             formatted = '-'.join(groups)
-            # Only update if changed to avoid recursive loop
             if formatted != key_var.get():
                 key_var.set(formatted)
                 key_entry.icursor(len(formatted))
 
         key_var.trace_add("write", _on_key_change)
 
+        ctk.CTkLabel(dialog, text="Bestell-ID (optional)",
+                    font=("Arial", 12)).pack(pady=(12, 2))
+        bestell_var = ctk.StringVar()
+        bestell_entry = ctk.CTkEntry(dialog, width=500, font=("Courier New", 12),
+                                     textvariable=bestell_var, placeholder_text="z.B. 4CMF7JQ4")
+        bestell_entry.pack(pady=4)
+
         result = {"success": False}
 
         def on_activate():
             key = key_var.get().strip()
+            bestell = bestell_var.get().strip() or None
             if not key:
                 messagebox.showerror("Fehler", "Bitte geben Sie einen Lizenzschlüssel ein.")
                 return
-            ok, msg = self.license_mgr.activate(key)
+            ok, msg = self.license_mgr.activate(key, bestellnummer=bestell)
             if ok:
                 messagebox.showinfo("Aktivierung erfolgreich", f"✅ {msg}")
                 result["success"] = True
@@ -1415,9 +1425,9 @@ class KuraApp:
         if not self._is_pro():
             if messagebox.askyesno(
                 "Kura Pro erforderlich",
-                "Praxis-Einstellungen sind nur mit einem aktiven Kura Pro Abo verfügbar.\n\n"
-                "Aktivieren Sie Ihr Abo, um Praxisname, Betriebsstättennummer\n"
-                "und individuelle Abrechnungsregeln zu konfigurieren.\n\n"
+                "Praxis-Einstellungen sind nur mit einer aktiven Kura Pro Lizenz verfügbar.\n\n"
+                "Aktivieren Sie Ihre Dauerlizenz (299 € einmalig), um Praxisname,\n"
+                "Betriebsstättennummer und individuelle Abrechnungsregeln zu konfigurieren.\n\n"
                 "Jetzt aktivieren?"
             ):
                 self._activate_license()

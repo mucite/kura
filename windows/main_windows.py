@@ -422,7 +422,7 @@ class KuraApp:
 
             benefit_label = ctk.CTkLabel(
                 cta_content,
-                text="Unbegrenzte Berichte · Alle Features · Premium Support",
+                text="Updates bis 31.12.2027 inkl. · danach 79 €/Jahr optional",
                 font=ctk.CTkFont(size=12),
                 text_color="#b8e6cc"
             )
@@ -470,10 +470,12 @@ class KuraApp:
             messagebox.showinfo(
                 "Kura Testphase",
                 f"Noch {remaining_trials} Testberichte verbleibend.\n\n"
-                "Upgrade zu Kura Pro:\n"
-                "• 79 Abrechnungsziffern\n"
-                "• ICD-spezifische Regeln\n"
-                "• Automatische Updates\n\n"
+                "Kura Pro — 299 € einmalig · Dauerlizenz · kein Abo:\n"
+                "• Unbegrenzte Befunde\n"
+                "• SOAP + ICD-10 Abrechnung\n"
+                "• § 125 SGB V konform\n"
+                "• Updates bis 31.12.2027 inkl.\n"
+                "• Danach optional 79 €/Jahr\n\n"
                 "kura-medical.de"
             )
 

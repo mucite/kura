@@ -1575,7 +1575,8 @@ class KuraApp(rumps.App):
     def show_upgrade_dialog(self):
         import webbrowser
         msg = ("Ihre Testphase ist beendet.\n"
-               "Kura Pro: 299 € einmalig — Dauerlizenz, kein Abo, unbegrenzte Berichte.")
+               "Kura Pro: 299 € einmalig — Dauerlizenz, kein Abo.\n"
+               "Updates bis 31.12.2027 inkl. · danach optional 79 €/Jahr.")
         if rumps.alert("Kura Pro", msg, ok="Jetzt kaufen", cancel="Später") == 1:
             webbrowser.open("https://kura-medical.de/#pricing")
             self.activate_license(None)

@@ -28,8 +28,8 @@ class TrialStatus:
             },
             {
                 "icon": "🔄",
-                "title": "Automatische Updates",
-                "description": "Immer aktuelle GOÄ/EBM Preise"
+                "title": "Updates bis 31.12.2027 inkl.",
+                "description": "Ab 2028 optional 79 €/Jahr für Regel-Updates"
             },
             {
                 "icon": "∞",

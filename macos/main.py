@@ -1029,7 +1029,7 @@ class KuraApp(rumps.App):
         rumps.alert(
             title="Kura Pro erforderlich",
             message="Praxis-Einstellungen sind nur mit einer aktiven Kura Pro Lizenz verfügbar.\n\n"
-                    "Aktivieren Sie Ihre Dauerlizenz (299 € einmalig), um Praxisname,\n"
+                    "Aktivieren Sie Ihre Dauerlizenz (79 € einmalig), um Praxisname,\n"
                     "Betriebsstaettennummer und individuelle Abrechnungsregeln zu konfigurieren.",
             ok="Lizenz aktivieren",
         )
@@ -1575,7 +1575,7 @@ class KuraApp(rumps.App):
     def show_upgrade_dialog(self):
         import webbrowser
         msg = ("Ihre Testphase ist beendet.\n"
-               "Kura Pro: 299 € einmalig — Dauerlizenz, kein Abo, unbegrenzte Berichte.")
+               "Kura Pro: 79 € einmalig — Dauerlizenz, kein Abo, unbegrenzte Berichte.")
         if rumps.alert("Kura Pro", msg, ok="Jetzt kaufen", cancel="Später") == 1:
             webbrowser.open("https://kura-medical.de/#pricing")
             self.activate_license(None)

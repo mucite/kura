@@ -843,12 +843,7 @@ class KuraApp:
             f"{footer}"
         )
 
-        # Count trial before the review window opens — the note is fully readable from here.
         status = self.license_mgr.verify_locally()
-        if status == "TRIAL":
-            count = self.license_mgr.get_trial_count()
-            self.license_mgr.increment_trial()
-            self._post_event("update_license", None)
 
         # Create review window
         review_win = ctk.CTkToplevel(self.root)
@@ -905,9 +900,10 @@ class KuraApp:
             self._show_upgrade_dialog()
             return
 
-        # Trial was already counted in _show_review_window before the note was shown.
         trial_remaining = None
         if status == "TRIAL":
+            self.license_mgr.increment_trial()
+            self._post_event("update_license", None)
             trial_remaining = self.license_mgr.max_trials - self.license_mgr.get_trial_count()
 
         # Learning engine

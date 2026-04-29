@@ -414,7 +414,7 @@ class KuraApp:
 
             price_label = ctk.CTkLabel(
                 cta_content,
-                text="79 € einmalig · Dauerlizenz · kein Abo",
+                text="299 € einmalig · Dauerlizenz · kein Abo",
                 font=ctk.CTkFont(size=16, weight="bold"),
                 text_color="white"
             )
@@ -1430,7 +1430,7 @@ class KuraApp:
             if messagebox.askyesno(
                 "Kura Pro erforderlich",
                 "Praxis-Einstellungen sind nur mit einer aktiven Kura Pro Lizenz verfügbar.\n\n"
-                "Aktivieren Sie Ihre Dauerlizenz (79 € einmalig), um Praxisname,\n"
+                "Aktivieren Sie Ihre Dauerlizenz (299 € einmalig), um Praxisname,\n"
                 "Betriebsstättennummer und individuelle Abrechnungsregeln zu konfigurieren.\n\n"
                 "Jetzt aktivieren?"
             ):

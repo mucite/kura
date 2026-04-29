@@ -304,7 +304,8 @@ if "HF_TOKEN" not in os.environ:
 
 # --- App version — single source of truth: version.json at project root ---
 from shared.version import APP_VERSION, VERSION_URL as _VERSION_URL
-_DOWNLOAD_URL = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev/Kura_macOS_v2026.4.1.dmg"
+_R2_BASE = "https://pub-f83ad51a8a6d46859a3b16a78c2b95b3.r2.dev"
+_DOWNLOAD_URL = f"{_R2_BASE}/Kura_macOS_v{APP_VERSION}.dmg"
 
 
 # --- Main App ---
@@ -726,19 +727,21 @@ class KuraApp(rumps.App):
                     return
                 remote_ver = r.json().get("version", "")
                 if self._version_gt(remote_ver, APP_VERSION):
+                    global _DOWNLOAD_URL
+                    _DOWNLOAD_URL = f"{_R2_BASE}/Kura_macOS_v{remote_ver}.dmg"
                     self._on_main(lambda v=remote_ver: (
                         setattr(self._item_update, 'title',
-                                f"Update verfuegbar: v{v} (jetzt herunterladen)"),
+                                f"Update verfügbar: v{v} (jetzt herunterladen)"),
                         self._item_update.set_callback(self._open_update_page),
                         rumps.notification(
-                            "Kura Update verfuegbar",
+                            "Kura Update verfügbar",
                             f"Version {v} ist bereit",
-                            "Klicken Sie auf 'Update verfuegbar' im Tray.",
+                            "Klicken Sie auf 'Update verfügbar' im Tray.",
                         ),
                     ))
                 elif not silent:
                     self._on_main(lambda: (
-                        setattr(self._item_update, 'title', "Aktualisierungen pruefen"),
+                        setattr(self._item_update, 'title', "Aktualisierungen prüfen"),
                         self._item_update.set_callback(self.check_for_update),
                         rumps.notification("Kura", "Kein Update",
                                            f"Sie verwenden die aktuelle Version ({APP_VERSION})."),
@@ -757,10 +760,10 @@ class KuraApp(rumps.App):
         rumps.alert(
             title="Kura beenden vor Update",
             message=(
-                f"Neue Version verfuegbar.\n\n"
-                "Wichtig: Beenden Sie Kura zuerst ueber 'Beenden' im Tray,\n"
+                f"Neue Version verfügbar.\n\n"
+                "Wichtig: Beenden Sie Kura zuerst über 'Beenden' im Tray,\n"
                 "bevor Sie die neue Version installieren.\n\n"
-                "GitHub-Releases wird jetzt geoeffnet."
+                "Der Download wird jetzt gestartet."
             ),
             ok="Herunterladen"
         )
@@ -1013,7 +1016,7 @@ class KuraApp(rumps.App):
         _app_activate()
         rumps.alert(
             title="Kura Pro erforderlich",
-            message="Praxis-Einstellungen sind nur mit einer aktiven Kura Pro Lizenz verfuegbar.\n\n"
+            message="Praxis-Einstellungen sind nur mit einer aktiven Kura Pro Lizenz verfügbar.\n\n"
                     "Aktivieren Sie Ihre Dauerlizenz (299 € einmalig), um Praxisname,\n"
                     "Betriebsstaettennummer und individuelle Abrechnungsregeln zu konfigurieren.",
             ok="Lizenz aktivieren",
@@ -1087,9 +1090,9 @@ class KuraApp(rumps.App):
             _app_activate()
             if rumps.alert(
                 title="Erweiterte Konfiguration",
-                message="Moechten Sie die vollstaendige Konfigurationsdatei oeffnen?\n\n"
-                        "(JSON-Editor — fuer ICD-10-Regeln, Abrechnungscodes, Audit-Schwellwerte)",
-                ok="Oeffnen",
+                message="Möchten Sie die vollständige Konfigurationsdatei öffnen?\n\n"
+                        "(JSON-Editor — für ICD-10-Regeln, Abrechnungscodes, Audit-Schwellwerte)",
+                ok="Öffnen",
                 cancel="Fertig",
             ) == 1:
                 subprocess.run(["open", cfg_path])
@@ -1125,9 +1128,9 @@ class KuraApp(rumps.App):
                 message=(
                     "Eine Konfigurationsdatei wurde aus den aktuellen Kura-Werten erstellt:\n\n"
                     f"{override_path}\n\n"
-                    "Aendern Sie nur die Werte, die Sie anpassen moechten.\n"
-                    "Die Datei wird beim naechsten Start von Kura automatisch geladen.\n\n"
-                    "Die Datei verbleibt ausschliesslich auf Ihrem Geraet."
+                    "Ändern Sie nur die Werte, die Sie anpassen möchten.\n"
+                    "Die Datei wird beim nächsten Start von Kura automatisch geladen.\n\n"
+                    "Die Datei verbleibt ausschließlich auf Ihrem Gerät."
                 ),
             )
         subprocess.run(["open", override_path])
@@ -1561,7 +1564,7 @@ class KuraApp(rumps.App):
         import webbrowser
         msg = ("Ihre Testphase ist beendet.\n"
                "Kura Pro: 299 € einmalig — Dauerlizenz, kein Abo, unbegrenzte Berichte.")
-        if rumps.alert("Kura Pro", msg, ok="Jetzt kaufen", cancel="Spaeter") == 1:
+        if rumps.alert("Kura Pro", msg, ok="Jetzt kaufen", cancel="Später") == 1:
             webbrowser.open("https://kura-medical.de/#pricing")
             self.activate_license(None)
 
@@ -1819,7 +1822,7 @@ class KuraApp(rumps.App):
                 else:
                     badge_detail = (
                         f"{critical_count} Pflichtfeld{'er' if critical_count != 1 else ''} fehlt"
-                        if critical_count else "Hinweise vorhanden — Abrechnung moeglich"
+                        if critical_count else "Hinweise vorhanden — Abrechnung möglich"
                     )
 
                 pdf.set_fill_color(*badge_col)

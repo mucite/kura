@@ -987,17 +987,23 @@ class KuraApp(rumps.App):
             if status == AVAuthorizationStatusAuthorized:
                 return True
             if status == AVAuthorizationStatusNotDetermined:
-                # Request access — macOS shows the system dialog
-                granted = [False]
-                done = __import__('threading').Event()
+                # Request access — macOS shows the system dialog.
+                # Must spin AppKit's run loop instead of blocking with Event.wait(),
+                # because the tccd permission dialog needs the main run loop to render.
+                granted = [None]
                 def handler(ok):
                     granted[0] = ok
-                    done.set()
                 AVCaptureDevice.requestAccessForMediaType_completionHandler_(
                     AVMediaTypeAudio, handler
                 )
-                done.wait(timeout=30)
-                return granted[0]
+                import AppKit as _AppKit
+                deadline = __import__('time').time() + 30
+                while granted[0] is None and __import__('time').time() < deadline:
+                    _AppKit.NSRunLoop.currentRunLoop().runMode_beforeDate_(
+                        _AppKit.NSDefaultRunLoopMode,
+                        _AppKit.NSDate.dateWithTimeIntervalSinceNow_(0.05),
+                    )
+                return bool(granted[0])
             return False
         except Exception as e:
             print(f"⚠️ AVFoundation permission check failed: {e}, assuming granted")

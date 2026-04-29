@@ -157,6 +157,7 @@ class KuraApp:
         self._record_thread = None
         self._audio_chunks = []
         self._models_ready = False
+        self._trial_used_this_session = False
 
         # Boot engine in background (downloads models first if needed, then loads engine)
         threading.Thread(target=self._boot, daemon=True).start()
@@ -843,7 +844,12 @@ class KuraApp:
             f"{footer}"
         )
 
+        # Count trial when AI report is generated (shown in review window).
         status = self.license_mgr.verify_locally()
+        if status == "TRIAL":
+            self.license_mgr.increment_trial()
+            self._trial_used_this_session = True
+            self._post_event("update_license", None)
 
         # Create review window
         review_win = ctk.CTkToplevel(self.root)
@@ -893,17 +899,19 @@ class KuraApp:
 
     def _finalize(self, edited_text: str, res: dict):
         status = self.license_mgr.verify_locally()
+        _used_trial = self._trial_used_this_session
+        self._trial_used_this_session = False
 
-        if status is False:
+        # Block if expired/deactivated, but allow through when trial was just
+        # consumed this session (AI already ran, report already shown).
+        if status is False and not _used_trial:
             title, msg = self._license_block_message()
             messagebox.showerror(title, msg)
             self._show_upgrade_dialog()
             return
 
         trial_remaining = None
-        if status == "TRIAL":
-            self.license_mgr.increment_trial()
-            self._post_event("update_license", None)
+        if status == "TRIAL" or _used_trial:
             trial_remaining = self.license_mgr.max_trials - self.license_mgr.get_trial_count()
 
         # Learning engine

@@ -400,6 +400,7 @@ class KuraApp(rumps.App):
         self.temp_audio = os.path.join(_kura_data_dir, "session.wav")
         self.last_report = None
         self.last_billing_result = None
+        self._trial_used_this_session = False
 
         # ── Microphone ownership ──────────────────────────────────────────────
         # ffmpeg is started in its own process group (os.setsid) so we can
@@ -605,12 +606,13 @@ class KuraApp(rumps.App):
                 f"{footer}"
             )
 
-            # Count trial before the review window opens — the note is fully readable from here.
+            # Count trial when KI generates the report (shown in review window).
             status = self.license_mgr.verify_locally()
             if status == "TRIAL":
                 current_usage = self.license_mgr.get_trial_count()
                 remaining = self.license_mgr.max_trials - (current_usage + 1)
                 self.license_mgr.increment_trial()
+                self._trial_used_this_session = True
                 rumps.notification(
                     title="Kura Testphase",
                     subtitle=f"Bericht {current_usage + 1} von {self.license_mgr.max_trials}",
@@ -639,8 +641,12 @@ class KuraApp(rumps.App):
         """THE PAYWALL GATEKEEPER & LEARNING ENGINE: Handles License, Logic, and PDF."""
         # 1. CHECK LICENSE STATUS
         status = self.license_mgr.verify_locally()
+        _used_trial = self._trial_used_this_session
+        self._trial_used_this_session = False
 
-        if status is False:
+        # Block if expired/deactivated, but allow through when trial was just
+        # consumed this session (AI already ran, report already shown).
+        if status is False and not _used_trial:
             title, msg = self._license_block_message()
             rumps.alert(title=title, message=msg, ok="Lizenz aktivieren")
             self.activate_license(None)

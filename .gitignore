@@ -79,3 +79,5 @@ website/
 # Temporary files and logs
 *.log
 *.tmp
+.wrangler
+macos/.wrangler

@@ -1,5 +1,5 @@
 param(
-    [string]$Version      = "2026.4.1",
+    [string]$Version      = "2026.4.2",
     [string]$Publisher    = "CN=14D11CC0-7C61-448C-BA4A-261CEA23CAC7",
     [string]$CertPfx      = "",
     [string]$CertPassword = "",

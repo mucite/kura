@@ -41,14 +41,9 @@ echo ""
 
 echo "📋 Staging files..."
 cp -R dist/Kura.app "$STAGING/"
-cp install.command "$STAGING/Install Kura.command"
-chmod +x "$STAGING/Install Kura.command"
-xattr -rd com.apple.quarantine "$STAGING/Install Kura.command" 2>/dev/null || true
-# Do NOT codesign the .command file — ad-hoc signing triggers the "Apple could not
-# verify … malware" dialog. Unsigned + quarantine shows only the softer
-# "downloaded from internet, are you sure?" prompt with a single [Open] click.
+ln -s /Applications "$STAGING/Programme"
 echo "   ✅ Kura.app"
-echo "   ✅ Install Kura.command"
+echo "   ✅ Programme → /Applications (drag-and-drop target)"
 
 echo ""
 echo "🔏 Code-signing Kura.app with hardened runtime..."
@@ -75,9 +70,8 @@ while true; do
       --window-size 660 420 \
       --icon-size 100 \
       --icon "Kura.app" 160 200 \
-      --icon "Install Kura.command" 490 200 \
+      --icon "Programme" 490 200 \
       --hide-extension "Kura.app" \
-      --hide-extension "Install Kura.command" \
       "dist/${DMG_NAME}" \
       "$STAGING"
     CREATE_DMG_EXIT=$?

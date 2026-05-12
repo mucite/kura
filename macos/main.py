@@ -1885,7 +1885,7 @@ class KuraApp(rumps.App):
             pdf.set_font("Helvetica", "I", 7)
             pdf.set_text_color(*LIGHT)
             pdf.cell(W, 5,
-                     s(f"Kura v2026.4.1 | Lokale KI-Verarbeitung | DSGVO-konform | {date_str}"),
+                     s(f"Kura v{APP_VERSION} | Lokale KI-Verarbeitung | DSGVO-konform | {date_str}"),
                      align="C")
 
             pdf.output(pdf_path)

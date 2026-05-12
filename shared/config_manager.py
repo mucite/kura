@@ -29,31 +29,8 @@ _GIST_URL = (
 )
 
 
-_FALLBACK = {
-    "version": "2026.0.0",
-    "billing_codes": {
-        # §125 SGB V Anlage 2, GKV-Spitzenverband Rahmenempfehlungen 01.01.2026
-        "KG":        "20501",   # KG Einzelbehandlung 20 min (€29.63)
-        "KG_ZNS":    "20710",   # KG-ZNS Erwachsene (Bobath/PNF/Vojta) 45 min (€47.06, Optica 22 2026)
-        "KG_Gruppe": "20601",   # KG Gruppenbehandlung 45 min 2-5 Pat. (€13.26)
-        "KGG":       "20507",   # KG am Gerät / MTT 45 min (€55.81)
-        "MT":        "21201",   # Manuelle Therapie 20 min (€35.59)
-        "MLD_30":    "20205",   # MLD 30 min (€35.97)
-        "MLD_45":    "20201",   # MLD 45 min (€53.94)
-        "MLD_60":    "20202",   # MLD 60 min (€71.94)
-        "KPE_I":     "21110",   # KPE Phase I 60 min (€58.42)
-        "KPE_II":    "21111",   # KPE Phase II 30 min (€46.26)
-        "AT":        "20560",   # KG atemtherapeutisch 20 min (€29.63)
-        "Massage":   "20106",   # Klassische Massage (KMT) 20 min (€21.63)
-        "UWM":       "20102",   # Unterwasserdruckstrahl 20 min (€33.75)
-        "BB":        "20902",   # KG Bewegungsbad Einzel 30 min (€33.87)
-        "GEB_Vor":   "21901",   # Geburtsvorbereitung (€11.40)
-        "GEB_Rueck": "21904",   # Rückbildungsgymnastik (€11.40)
-    },
-    "context": {"audit_standard": "§ 106b SGB V", "special_focus": ["Allgemein"]},
-    "billing_rules": {},
-    "audit_rules": {},
-}
+class ConfigUnavailableError(RuntimeError):
+    """Raised on first launch when neither the Gist nor a local cache is reachable."""
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -83,18 +60,13 @@ class ConfigManager:
             print(f"Warning: Could not create data directory: {dir_err}")
 
         self.practice_config = PracticeConfig(practice_name=practice_name)
-        self.data = copy.deepcopy(_FALLBACK)
+        self.data = None
         self.license_status = license_status
 
-        # Layer 1: Gist (remote, cached locally) — ONLY for licensed users
-        if license_status is True:
-            self._sync_gist()
-        else:
-            # Trial/expired users: use fallback only, but check for revocation list
-            self._load_gist_revocation_only()
-            
-            # Trial comparison will be shown in GUI by main_windows.py, not here
-
+        # Layer 1: Gist (remote, cached locally). All users go through this path —
+        # the Gist hosts the §125 SGB V code catalogue, fees, and revocation list.
+        # If both the live fetch and the local cache fail, we cannot continue.
+        self._load_gist_or_cache()
 
         # Layer 2: local customer override (wins over Gist, never pushed back)
         self._apply_local_override()
@@ -104,63 +76,41 @@ class ConfigManager:
 
     # ── Layer 1: Gist ─────────────────────────────────────────────────────────
 
-    def _load_gist_revocation_only(self):
+    def _load_gist_or_cache(self):
+        """Pull the live Gist (and refresh the cache). If unreachable, fall back
+        to the on-disk cache from a previous successful run. If both fail, raise
+        ConfigUnavailableError so the app can surface a clear error and exit.
         """
-        For trial/expired users: Load Gist ONLY to check revocation list.
-        Don't apply config updates (they get fallback only).
-        This prevents trial users from getting premium features while still
-        allowing remote license revocation.
-        """
-        try:
-            import requests
-            r = requests.get(_GIST_URL, timeout=5)
-            if r.status_code == 200:
-                remote = r.json()
-                # Save to cache so LicenseManager can read revocation list
-                try:
-                    with open(_GIST_CACHE, "w", encoding="utf-8") as f:
-                        json.dump(remote, f, indent=2, ensure_ascii=False)
-                except Exception:
-                    pass
-                print("Gist revocation check: OK (trial mode, no config applied)")
-                return
-        except Exception:
-            pass
-        
-        # Offline: trial users just use fallback, no problem
-        print("Trial mode: using basic fallback config")
-
-    def _sync_gist(self):
-        """Pull latest Gist; fall back to local cache; fall back to hardcoded.
-        Only called for licensed users."""
         try:
             import requests
             r = requests.get(_GIST_URL, timeout=5)
             if r.status_code == 200:
                 remote = r.json()
                 self.data = remote
-                # Save as local cache so override can reference real keys
                 try:
                     with open(_GIST_CACHE, "w", encoding="utf-8") as f:
                         json.dump(remote, f, indent=2, ensure_ascii=False)
                 except Exception as write_err:
                     print(f"Cache-Schreibfehler: {write_err}")
-                print(f"✅ Premium Config: v{self.data.get('version')} (Licensed)")
+                print(f"✅ Config geladen: v{self.data.get('version')} (Gist live)")
                 return
         except Exception as e:
             print(f"Gist-Sync fehlgeschlagen: {e}")
 
-        # Offline: use last cached Gist (licensed users can work offline with grace period)
         if os.path.exists(_GIST_CACHE):
             try:
                 with open(_GIST_CACHE, "r", encoding="utf-8") as f:
                     self.data = json.load(f)
-                print("Premium Config: offline cache (Licensed)")
+                print(f"✅ Config geladen: v{self.data.get('version')} (Offline-Cache)")
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Cache-Lesefehler: {e}")
 
-        print("Kein Gist-Cache — nutze hardcoded Fallback (Licensed, offline)")
+        raise ConfigUnavailableError(
+            "Kura-Konfiguration konnte weder online (Gist) noch aus dem lokalen "
+            "Cache geladen werden. Eine Internetverbindung ist beim ersten Start "
+            "erforderlich."
+        )
 
     # ── Layer 2: local override ───────────────────────────────────────────────
 

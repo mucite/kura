@@ -190,6 +190,7 @@ CRASH_LOG = setup_crash_logging()
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.license_manager import LicenseManager
+from shared.config_manager import ConfigUnavailableError
 # KuraEngine is imported lazily inside boot() so scipy/mlx_whisper don't block startup
 
 # --- Load environment variables from .env file ---
@@ -925,6 +926,22 @@ class KuraApp(rumps.App):
                 "Kura Speicherfehler",
                 "Nicht genug RAM",
                 "Bitte schließen Sie andere Apps und starten Sie Kura neu."
+            ))
+
+        except ConfigUnavailableError as e:
+            print(f"CONFIG UNAVAILABLE: {e}")
+            self._set_status("❌ Keine Internetverbindung")
+            self._on_main(lambda: rumps.alert(
+                title="Internetverbindung erforderlich",
+                message=(
+                    "Kura konnte die aktuelle Konfiguration nicht laden.\n\n"
+                    "Beim ersten Start ist eine Internetverbindung erforderlich, "
+                    "um die §125 SGB V Positionsnummern und Vergütungssätze 2026 "
+                    "zu beziehen. Nach dem ersten erfolgreichen Start funktioniert "
+                    "Kura auch offline.\n\n"
+                    "Bitte stellen Sie eine Verbindung her und starten Sie Kura neu."
+                ),
+                ok="OK",
             ))
 
         except RuntimeError as e:
